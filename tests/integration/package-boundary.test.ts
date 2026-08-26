@@ -359,7 +359,9 @@ describe("npm public package boundary", () => {
       "schemas/extension-manifest.schema.json",
       "skills/",
     ]);
-    expect(dryRun.files).toHaveLength(245);
+    // Directory-owned means the dotfiles inside a listed directory ship with it:
+    // `skills/.ignore` rides along under `skills/` and is counted here.
+    expect(dryRun.files).toHaveLength(246);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -440,6 +442,13 @@ describe("npm public package boundary", () => {
     // file without the declaration teaches nobody anything, and a declaration
     // without the file is an empty promise in the system prompt.
     expect(pkg.pi.skills).toEqual(["./skills"]);
+
+    // The host loads root `.md` files under a skills directory as skills too, and
+    // honours `.gitignore`/`.ignore`/`.fdignore` while scanning. `skills/README.md`
+    // is documentation with no frontmatter, so without this file shipping, every
+    // install warns about an invalid skill at startup.
+    expect(packedPaths.has("skills/.ignore"), "the skills-scan ignore file is unpacked").toBe(true);
+    expect(readFileSync(path.join(root, "skills", ".ignore"), "utf8").trim()).toBe("README.md");
 
     const skillEntries = readdirSync(path.join(root, "skills"), { withFileTypes: true })
       .filter((entry) => entry.isDirectory())

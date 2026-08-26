@@ -309,7 +309,7 @@ describe("focused workflow catalog", () => {
     for (const width of [146, 80, 48, 8, 1]) {
       const lines = viewer.render(width);
       expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
-      expect(lines).toHaveLength(5);
+      expect(lines).toHaveLength(4);
       expect(lines[0]).toContain(width >= 48 ? "[SELECT]" : "[");
     }
     const narrowCatalog = viewer.render(48).join("\n");
@@ -328,8 +328,9 @@ describe("focused workflow catalog", () => {
     const identity = viewer.render(48);
     expect(identity).toHaveLength(5);
     expect(identity[0]).toContain("[IDENTITY]");
-    expect(identity.join("\n")).toContain("↑/↓ PgUp/PgDn Home/End");
+    expect(identity.join("\n")).toContain("↑/↓ scroll · PgUp/PgDn page");
     expect(identity.join("\n")).toContain("i/Esc source · Help: /workflows info");
+    expect(viewer.render(146).join("\n")).toContain("↑/↓ scroll · PgUp/PgDn page · Home/End jump");
   });
 
   it.each([
@@ -340,23 +341,36 @@ describe("focused workflow catalog", () => {
     [27, 24],
     [32, 29],
     [48, 45],
-  ])("reserves only Pi footer/status rows in a %i-row terminal, leaving %i viewer rows", (rows, expected) => {
+  ])("claims at most the %i-row terminal's %i viewer rows and pads none of them", (rows, expected) => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, rows);
 
     for (const width of [146, 80, 48]) {
-      expect(viewer.render(width)).toHaveLength(expected);
+      const lines = viewer.render(width);
+      expect(lines.length).toBeGreaterThan(0);
+      expect(lines.length).toBeLessThanOrEqual(expected);
+      // One workflow never fills a tall terminal: the frame must stop at its own
+      // content instead of pushing the transcript into scrollback with blanks.
+      expect(lines).not.toContain(" ".repeat(width));
+      expect(lines.at(-1)).not.toBe("");
     }
   });
 
   it("also reserves the active workflow widget beneath the focused catalog", () => {
-    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    const root = projectWithWorkflows(manyWorkflows(14));
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 24);
-    setViewerExternalRows("test-workflow-catalog", 2);
 
-    expect(viewer.render(80)).toHaveLength(24 - 3 - 2);
+    const withoutWidget = viewer.render(80);
+    setViewerExternalRows("test-workflow-catalog", 2);
+    const withWidget = viewer.render(80);
+
+    // The catalog overflows 24 rows, so both frames are clipped by geometry alone.
+    expect(withoutWidget.length).toBeGreaterThan(24 - 3 - 2);
+    expect(withoutWidget.length).toBeLessThanOrEqual(24 - 3);
+    expect(withWidget.length).toBeLessThanOrEqual(24 - 3 - 2);
+    expect(withWidget.length).toBeLessThan(withoutWidget.length);
   });
 
   it.each([3, 4, 5, 6])("shows the exact compact target Enter inspects at %i terminal rows", (rows) => {
@@ -946,6 +960,15 @@ function emptyProject(): string {
 function writeWorkflow(directory: string, name: string, content: string): void {
   mkdirSync(directory, { recursive: true });
   writeFileSync(path.join(directory, `${name}.workflow.mjs`), content, "utf8");
+}
+
+function manyWorkflows(count: number): Record<string, string> {
+  return Object.fromEntries(
+    Array.from({ length: count }, (_unused, index) => {
+      const name = `wf-${String(index).padStart(2, "0")}`;
+      return [name, source(name, `Workflow ${index}`)];
+    }),
+  );
 }
 
 function source(name: string, description: string): string {

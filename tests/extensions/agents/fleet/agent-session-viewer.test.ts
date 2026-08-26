@@ -194,8 +194,8 @@ describe("AgentSessionViewer", () => {
     const rendered = viewer.render(32);
     expect(rendered).toHaveLength(tui.terminal.rows - 1);
     expect(rendered.every((line) => visibleWidth(line) === 32)).toBe(true);
-    expect(rendered[0]).toMatch(/^┌─ \[agent .+\] started work/u);
-    expect(rendered.at(-1)).toMatch(/^╘═ STATUS: queued/u);
+    expect(rendered[0]).toMatch(/^╭─ \[agent .+\] started work/u);
+    expect(rendered.at(-1)).toMatch(/^╰─ STATUS: queued/u);
     expect(rendered.join("\n")).toContain("history-7");
     expect(rendered.join("\n")).not.toContain("history-0");
 
@@ -212,7 +212,7 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
-  it("renders the transcript frame in the muted border color", () => {
+  it("renders every labelled divider in one rounded frame and the readable muted tone", () => {
     const row = agentLiveStore.begin({ id: "muted-frame", agentName: "reviewer", label: "Review" });
     const fg = vi.fn((color: string, text: string) => `<${color}>${text}</${color}>`);
     const viewer = new AgentSessionViewer(
@@ -226,11 +226,13 @@ describe("AgentSessionViewer", () => {
     );
 
     const rendered = viewer.render(80).join("\n");
-    expect(rendered).toContain("<borderMuted>┌─ [agent");
-    expect(rendered).toContain("<borderMuted>├─ REQUEST");
-    expect(rendered).toContain("<borderMuted>├─ RUNTIME");
-    expect(rendered).toContain("<borderMuted>╘═ STATUS:");
-    expect(fg.mock.calls.every(([color]) => color === "borderMuted")).toBe(true);
+    expect(rendered).toContain("<muted>╭─ [agent");
+    expect(rendered).toContain("<muted>├─ REQUEST");
+    expect(rendered).toContain("<muted>├─ RUNTIME");
+    expect(rendered).toContain("<muted>╰─ STATUS:");
+    expect(fg.mock.calls.every(([color]) => color === "muted")).toBe(true);
+    // Double-weight rules read as a second, unrelated component.
+    expect(rendered).not.toMatch(/[╞╘═]/u);
     viewer.dispose();
   });
 
@@ -563,7 +565,7 @@ describe("AgentSessionViewer", () => {
     expect(initial).toHaveLength(tui.terminal.rows - 1);
     expect(initial.join("\n")).not.toContain("Message to Agent");
     expect(initial.join("\n")).not.toContain("MESSAGE TO AGENT");
-    expect(initial.at(-1)).toMatch(/^╘═ STATUS: queued/u);
+    expect(initial.at(-1)).toMatch(/^╰─ STATUS: queued/u);
     viewer.handleInput("h");
     viewer.handleInput("i");
     viewer.handleInput("enter");
@@ -593,7 +595,7 @@ describe("AgentSessionViewer", () => {
     expect(send).not.toHaveBeenCalled();
 
     tui.terminal.rows = 14;
-    expect(viewer.render(80).join("\n")).toContain("Enter send");
+    expect(viewer.render(80).join("\n")).toContain("enter send");
     viewer.handleInput("x");
     viewer.handleInput("enter");
     await vi.waitFor(() => expect(send).toHaveBeenCalledWith("x"));

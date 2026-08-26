@@ -25,7 +25,6 @@ import {
   formatWorkflowCommandToken,
   parseContinueCommand,
   parseWorkflowCommandToken,
-  workflowRunUsage,
 } from "./command-parser.js";
 import type { WorkflowHandoffPumpResult } from "../operator/operator-handoff-controller.js";
 import { clearWorkflowWidget, presentWorkflowHandoffPumpResult } from "../operator/operator-surface.js";
@@ -377,7 +376,10 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
       transientWidgets: ["workflows", WORKFLOW_LIVE_WIDGET_KEY],
     },
     {
-      description: `Usage: /workflows | dashboard | list [query] | info [name] | status [runId] | result [runId|last] | ${workflowRunUsage("<name|path>", "run")} | continue <runId> [--answer <text>] | stop [runId|last] | skills <sync|status|remove> [--host codex|claude|all] [--scope user|project]. Bare /workflows opens an interactive command menu only in a Pi TUI with select support; other hosts receive command help. Subcommands remain available directly.`,
+      // The palette shows this next to every other command, so it says what the
+      // command is for. The full grammar stays one keystroke away, in the help
+      // widget (operator-ui.ts) and in the unknown-subcommand recovery block.
+      description: "Open the workflow command menu, or run, inspect, continue, and stop workflow runs.",
       getArgumentCompletions: (prefix) => {
         const context = deps.completionContext();
         const actionableRunIds = prefix.replace(/^\s+/u, "").startsWith("continue ")

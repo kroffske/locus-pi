@@ -18,12 +18,6 @@ export interface AgentLivePanelOptions {
   spinnerIndex?: number;
   theme?: AgentLiveThemeLike;
   /**
-   * Per-status color override for one panel instance. The workflow roster paints
-   * the row that is working right now in `warning` so it separates from settled
-   * rows in a long list; the status icon still carries the state.
-   */
-  statusColors?: Partial<Record<AgentLiveStatus, string>>;
-  /**
    * Calm rendering (render-profile.ts): live elapsed text is coarsened to
    * 10-second/minute buckets and the per-second tool timer is dropped, so a row
    * whose state is not changing renders byte-identical frames. The caller is
@@ -49,10 +43,10 @@ export class AgentLivePanel {
 
   renderRow(row: AgentLiveRow, width: number): string {
     const meta = statusMeta(row.status, this.options.spinnerIndex ?? 0);
-    return this.#fg(
-      this.options.statusColors?.[row.status] ?? meta.color,
-      formatAgentLiveRowLine(row, meta, width, { calm: this.options.calm === true }),
-    );
+    // One tone per status everywhere (`statusMeta`): a working row reads the same
+    // in the fleet and in the workflow roster, so a tone means a state and not a
+    // surface. Per-panel overrides are deliberately absent.
+    return this.#fg(meta.color, formatAgentLiveRowLine(row, meta, width, { calm: this.options.calm === true }));
   }
 
   /** Indented, dimmed `└ <verb> · <gist>[ · <t-elapsed>]`, or nothing when idle. */
@@ -63,10 +57,18 @@ export class AgentLivePanel {
     return this.#fg("dim", clampLine(line, width));
   }
 
+  /**
+   * What the agent just said. It is the one sub-line an operator actually reads,
+   * so it takes `muted` rather than the `dim` of the mechanical tool line, and the
+   * markdown the model wrote for a document is stripped: the store keeps the text
+   * verbatim, and one collapsed line of `#`/`**`/backtick syntax reads as noise.
+   */
   #renderLatestMessageSubLine(row: AgentLiveRow, width: number): string | undefined {
-    const latest = row.latestMessage ?? (row.status === "done" ? firstLineOf(row.finalAnswer) : "");
+    const latest = stripInlineMarkdown(
+      row.latestMessage ?? (row.status === "done" ? firstLineOf(row.finalAnswer) : ""),
+    );
     if (latest === "") return undefined;
-    return this.#fg("dim", clampLine(`${TOOL_ACTIVITY_INDENT}${TOOL_ACTIVITY_HOOK} ${latest}`, width));
+    return this.#fg("muted", clampLine(`${TOOL_ACTIVITY_INDENT}${TOOL_ACTIVITY_HOOK} ${latest}`, width));
   }
 
   #fg(color: string, text: string): string {
@@ -388,6 +390,24 @@ export function formatAgentFinishedEventLine(row: AgentLiveRow): string {
 function firstLineOf(value: string | undefined): string {
   if (value === undefined) return "";
   return (value.split(/\r?\n/, 1)[0] ?? "").trim();
+}
+
+/**
+ * Render-time strip of the inline markdown an agent writes for a document.
+ * The transcript store keeps the message verbatim — this only changes what the
+ * one-line preview shows, where a collapsed `# Title ## Section **bold**` is
+ * punctuation with nothing left to mark up. Every character of prose survives;
+ * only the markers go. A trailing `**` left by the store's 300-char bound is
+ * dropped too, since its partner was cut off.
+ */
+function stripInlineMarkdown(value: string): string {
+  return value
+    .replace(/(^|\s)#{1,6}\s+/gu, "$1")
+    .replace(/\*\*([\s\S]+?)\*\*/gu, "$1")
+    .replace(/__([\s\S]+?)__/gu, "$1")
+    .replace(/\*\*/gu, "")
+    .replace(/`/gu, "")
+    .trim();
 }
 
 /**

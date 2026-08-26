@@ -1,5 +1,5 @@
 import { highlightCode } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
 import {
   readWorkflowArtifactIndex,
@@ -18,8 +18,7 @@ import {
 import { assertWorkflowRunId } from "../runtime/workflow-run-layout.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
-import { clamp, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
-import { terminalRows as sharedTerminalRows } from "../../_shared/operator/viewer-geometry.js";
+import { clamp, clipLines, fitLine, viewerRows as sharedViewerRows } from "../../_shared/operator/viewer-geometry.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 // Keep two rows of breathing room above the one-row Locus footer so focused
@@ -248,7 +247,7 @@ export class WorkflowRunViewer implements CustomUiComponent {
             (row) =>
               `${row.runId} · ${row.status} · phase=${row.phase ?? "-"} · agents=${row.agents}${row.journalDiagnostics === 0 ? "" : ` · journal=corrupt(${row.journalDiagnostics})`}`,
           );
-    return [header, ...padLines(body, bodyHeight, width), ...footer.map((line) => fitLine(line, width))];
+    return [header, ...clipLines(body, bodyHeight, width), ...footer.map((line) => fitLine(line, width))];
   }
 
   #renderStages(screen: Extract<ViewerScreen, { kind: "stages" }>, width: number): string[] {
@@ -276,7 +275,7 @@ export class WorkflowRunViewer implements CustomUiComponent {
             this.#theme,
             (stage) => `${stage.label} · ${stage.evidence.length} evidence item(s)`,
           );
-    return [header, ...padLines(body, bodyHeight, width), ...footer.map((line) => fitLine(line, width))];
+    return [header, ...clipLines(body, bodyHeight, width), ...footer.map((line) => fitLine(line, width))];
   }
 
   #renderEvidence(screen: Extract<ViewerScreen, { kind: "evidence" }>, width: number): string[] {
@@ -293,7 +292,7 @@ export class WorkflowRunViewer implements CustomUiComponent {
       screen.stage.evidence.length === 0
         ? ["No persisted evidence for this stage."]
         : selectableWindow(screen.stage.evidence, this.#evidenceIndex, bodyHeight, width, this.#theme, evidenceLabel);
-    return [header, ...padLines(body, bodyHeight, width), ...footer.map((line) => fitLine(line, width))];
+    return [header, ...clipLines(body, bodyHeight, width), ...footer.map((line) => fitLine(line, width))];
   }
 
   #renderContent(screen: Extract<ViewerScreen, { kind: "content" }>, width: number): string[] {
@@ -324,7 +323,7 @@ export class WorkflowRunViewer implements CustomUiComponent {
     const renderedFooter = footer.map((line, index) =>
       index === 0 && position !== "" ? `${line} · ${position}` : line,
     );
-    return [header, ...padLines(body, bodyHeight, width), ...renderedFooter.map((line) => fitLine(line, width))];
+    return [header, ...clipLines(body, bodyHeight, width), ...renderedFooter.map((line) => fitLine(line, width))];
   }
 
   #finish(): void {
@@ -378,7 +377,7 @@ export class WorkflowResultViewer implements CustomUiComponent {
     );
     return [
       header,
-      ...padLines(body, bodyHeight, safeWidth),
+      ...clipLines(body, bodyHeight, safeWidth),
       ...renderedFooter.map((line) => fitLine(line, safeWidth)),
     ];
   }
@@ -660,12 +659,12 @@ function listFooter(action: string, height: number): string[] {
   return lines.slice(0, Math.min(VIEWER_FOOTER_ROWS, height - 1));
 }
 
-function terminalRows(tui: CustomUiTui): number {
-  return sharedTerminalRows(tui, 3, DEFAULT_TERMINAL_ROWS);
-}
-
 function viewerRows(tui: CustomUiTui): number {
-  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS - viewerExternalRows());
+  return sharedViewerRows(tui, {
+    minimumRows: 3,
+    fallbackRows: DEFAULT_TERMINAL_ROWS,
+    hostFooterRows: PI_HOST_FOOTER_ROWS,
+  });
 }
 
 function contentBodyHeight(tui: CustomUiTui): number {
@@ -676,19 +675,8 @@ function normalizeWidth(width: number): number {
   return Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 1;
 }
 
-function fitLine(value: string, width: number): string {
-  const fitted = truncateToWidth(value, width, "…");
-  return visibleWidth(fitted) <= width ? fitted : truncateToWidth(fitted, width);
-}
-
 function wrapPlain(value: string, width: number): string[] {
   return value.split(/\r?\n/u).flatMap((line) => wrapTextWithAnsi(line, width));
-}
-
-function padLines(lines: readonly string[], height: number, width: number): string[] {
-  const out = lines.slice(0, height).map((line) => fitLine(line, width));
-  while (out.length < height) out.push(" ".repeat(width));
-  return out;
 }
 
 function windowStart(selected: number, total: number, limit: number): number {

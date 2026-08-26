@@ -312,7 +312,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const effort =
       this.#currentThinking === undefined
         ? ""
-        : ` · effort ${semanticText(this.#theme, "warning", this.#currentThinking, true)}`;
+        : ` · effort ${semanticText(this.#theme, "success", this.#currentThinking, true)}`;
     const body = [
       this.#defaultRouteLine(),
       ...this.#routingLines(width),
@@ -320,10 +320,13 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       ...(this.#receipt === undefined ? [] : [receiptLine(this.#receipt)]),
       ...(this.#applying ? ["[WORKING] Applying model route…"] : []),
     ];
+    // Success while a model is actually pinned, warning while it is not: the
+    // tone tracks whether the route is settled, not how important the label is.
+    const currentTone = this.#currentSelector === undefined ? "warning" : "success";
     return {
       type: "SELECT",
       subject: "Model roles",
-      primary: `${semanticText(this.#theme, "warning", "Current", true)} session model: ${semanticText(this.#theme, "accent", current, true)}${effort}`,
+      primary: `${semanticText(this.#theme, currentTone, "Current", true)} session model: ${semanticText(this.#theme, "accent", current, true)}${effort}`,
       badges: [{ text: this.#stage, tone: "accent" }],
       body,
       controls: [this.#controls()],
@@ -392,21 +395,27 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #defaultRouteLine(): string {
     const summary = this.#roleSummaries.find((item) => item.role === "default");
-    const label = semanticText(this.#theme, "warning", "DEFAULT", true);
-    if (summary?.assignment === undefined) return `${label} route: unset`;
+    // An unset DEFAULT route is the one thing on this line that still wants
+    // attention, so it keeps warning while an assigned one reads as settled.
+    if (summary?.assignment === undefined) {
+      return `${semanticText(this.#theme, "warning", "DEFAULT", true)} route: unset`;
+    }
+    const label = semanticText(this.#theme, "success", "DEFAULT", true);
     const inherited = summary.inherited ? " · inherited" : "";
-    const assignment = semanticText(this.#theme, "warning", formatAssignment(summary.assignment), true);
+    const assignment = semanticText(this.#theme, "success", formatAssignment(summary.assignment), true);
     return `${label} route: ${assignment} · ${routeSourceLabel(summary.source)}${inherited}`;
   }
 
   #routingLines(width: number): string[] {
     const assigned = this.#roleSummaries.filter((item) => item.role !== "default" && item.assignment !== undefined);
     if (assigned.length === 0) return ["Routing roles: none"];
+    // Every row here is filtered down to roles that already have an assignment,
+    // so the whole line is settled state — the same success the model rows use.
     return [
       "Routing roles:",
       ...assigned.map((item) =>
         truncateToWidth(
-          `  ${semanticText(this.#theme, "warning", item.tag, true)}=${semanticText(this.#theme, "warning", formatAssignment(item.assignment!), true)}`,
+          `  ${semanticText(this.#theme, "success", item.tag, true)}=${semanticText(this.#theme, "success", formatAssignment(item.assignment!), true)}`,
           Math.max(1, width - 4),
         ),
       ),
@@ -415,13 +424,16 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #filterLine(width: number): string {
     const active = this.#providers[this.#activeProviderIndex] ?? ALL_PROVIDER_FILTER;
+    // Accent, not success: every other surface spends green on "finished
+    // successfully", and the active tab of the workflow catalog already marks
+    // "what you are looking at" with accent.
     if (width < 60) {
-      const selected = semanticText(this.#theme, "success", `[${formatProvider(active)}]`, true);
+      const selected = semanticText(this.#theme, "accent", `[${formatProvider(active)}]`, true);
       return `Models: ${selected} (${this.#activeProviderIndex + 1}/${this.#providers.length}, Tab)`;
     }
     const filters = this.#providers.map((provider, index) =>
       index === this.#activeProviderIndex
-        ? semanticText(this.#theme, "success", `[${formatProvider(provider)}]`, true)
+        ? semanticText(this.#theme, "accent", `[${formatProvider(provider)}]`, true)
         : semanticText(this.#theme, "dim", formatProvider(provider)),
     );
     return truncateToWidth(`Models: ${filters.join("  ")}  (Tab to cycle)`, Math.max(1, width - 4));
@@ -429,13 +441,15 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #modelRow(row: ModelRow, selected: boolean, width: number): string {
     const markers = [row.current ? "CURRENT" : "", ...row.roleTags].filter(Boolean);
+    // Success, not warning: a role that is already pinned to this model is a
+    // settled fact, and warning means "error or needs attention" everywhere else.
     const markerText =
       markers.length === 0
         ? ""
-        : `${markers.map((marker) => semanticText(this.#theme, "warning", `[${marker}]`, true)).join(" ")} `;
+        : `${markers.map((marker) => semanticText(this.#theme, "success", `[${marker}]`, true)).join(" ")} `;
     const pointer = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
     const assigned = row.current || row.roleTags.length > 0;
-    const selector = semanticText(this.#theme, assigned ? "warning" : "accent", row.selector, selected || assigned);
+    const selector = semanticText(this.#theme, assigned ? "success" : "accent", row.selector, selected || assigned);
     const name = modelNameSuffix(row.model);
     return truncateToWidth(
       `${pointer} ${markerText}${selector}${name === "" ? "" : semanticText(this.#theme, "dim", name)}`,
@@ -609,6 +623,12 @@ function semanticText(
   return bold && typeof theme.bold === "function" ? theme.bold(colored) : colored;
 }
 
+/**
+ * Tone for an *action label* ("Set as DEFAULT"), never for an assignment. These
+ * are commands the operator has not run yet, so they must not borrow the success
+ * green that marks a settled route: DEFAULT also rewrites the live session model
+ * and SMOL is reachable only as a fallback, and warning is what flags both.
+ */
 function roleTone(tag: string): "warning" | "accent" {
   return tag === "CURRENT" || tag === "DEFAULT" || tag === "SMOL" ? "warning" : "accent";
 }

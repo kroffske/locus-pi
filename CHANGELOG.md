@@ -11,6 +11,7 @@ User-visible changes to the public package.
 
 ### Fixed
 
+- The TUI surfaces were aligned after a live design review. A healthy working agent now uses the shared accent tone everywhere instead of the warning tone the progress widget forced, so `/ps` and the widget no longer paint the same agent two colors; the `/ps` cursor is a colored `>` instead of an uncolored `▸`; full-screen viewers (workflow catalog, run viewer) clip to their content instead of padding to the terminal height, so closing them no longer leaves a blank screen; `/agent` renders colored at the live terminal width instead of plain at 80 columns; frames use one rounded glyph set, key hints one `·` separator, and framed headings gained a space before the filler rule; `/model-roles` marks assigned roles green and keeps yellow for unset ones; the completion card gets status tones at render time while its stored text stays plain; long workflow paths are shortened in widget headers so the right-hand hints survive; agent previews strip markdown markers; the `/workflows` palette description is a short phrase; and `skills/.ignore` stops the host from scanning the skills README as a skill at startup.
 - A workflow run starting in the same second as another run could crash with `EEXIST` on the run journal instead of starting — most visible on `--resume` right after a short run, when both drew the same random run-id suffix. Run-id allocation now treats the exclusive journal create as the claim and retries with fresh ids on collision; resume ids are never re-minted.
 
 ## [0.6.0] - 2026-08-23

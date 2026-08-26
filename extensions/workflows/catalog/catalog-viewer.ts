@@ -1,11 +1,10 @@
 import { highlightCode } from "@earendil-works/pi-coding-agent";
-import { sliceByColumn, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { sliceByColumn, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
 import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../../_shared/operator/operator-ui.js";
-import { clamp, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
-import { terminalRows as sharedTerminalRows } from "../../_shared/operator/viewer-geometry.js";
+import { clamp, clipLines, fitLine, viewerRows as sharedViewerRows } from "../../_shared/operator/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
   workflowSourceBadge,
@@ -26,6 +25,9 @@ const DEFAULT_TERMINAL_ROWS = 24;
 const PI_HOST_FOOTER_ROWS = 3;
 const COMPACT_FOOTER_ROWS = 2;
 const SOURCE_FRAME_ROWS = 2;
+// Same `keys action · keys action` shape every other footer in this browser uses,
+// so scroll hints read as a list instead of one run-on key sequence.
+const SCROLL_CONTROLS = "↑/↓ scroll · PgUp/PgDn page · Home/End jump";
 
 interface WorkflowCatalogTheme {
   fg?(color: string, text: string): string;
@@ -264,7 +266,7 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     return [
       header,
       ...location,
-      ...padLines(body, bodyHeight, width),
+      ...clipLines(body, bodyHeight, width),
       ...footer.slice(0, footerHeight).map((line) => fitLine(line, width)),
     ];
   }
@@ -298,10 +300,10 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const framedBody = layout.framed
       ? [
           sourceFrameLine("top", "Code", width, this.#theme),
-          ...padLines(body, layout.bodyHeight, width),
+          ...clipLines(body, layout.bodyHeight, width),
           sourceFrameLine("bottom", position, width, this.#theme),
         ]
-      : padLines(body, layout.bodyHeight, width);
+      : clipLines(body, layout.bodyHeight, width);
     const footer = sourceFooter(screen, actions, this.#actionIndex, layout.framed ? "" : position, this.#theme);
     return [...identity, ...framedBody, ...footer.slice(0, layout.footerHeight).map((line) => fitLine(line, width))];
   }
@@ -324,7 +326,7 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const last = Math.min(total, this.#identityScroll + Math.max(1, visible.length));
     return [
       fitLine(`[IDENTITY] ${screen.selected.name}`, width),
-      ...padLines(visible, bodyHeight, width),
+      ...clipLines(visible, bodyHeight, width),
       ...identityFooter(first, last, total)
         .slice(0, footerHeight)
         .map((line) => fitLine(line, width)),
@@ -363,8 +365,8 @@ export class WorkflowInfoViewer implements CustomUiComponent {
     const first = Math.min(total, this.#scroll + 1);
     const last = Math.min(total, this.#scroll + visible.length);
     return [
-      ...padLines(visible, bodyHeight, safeWidth),
-      fitLine(`${first}-${last}/${total} ↑/↓ PgUp/PgDn Home/End Esc/q`, safeWidth),
+      ...clipLines(visible, bodyHeight, safeWidth),
+      fitLine(`${first}-${last}/${total} · ${SCROLL_CONTROLS} · Esc/q close`, safeWidth),
     ];
   }
 
@@ -487,7 +489,7 @@ function compactCatalogProjection(
   if (height === 3) {
     return [header, row, tabs];
   }
-  return padLines(
+  return clipLines(
     [header, row, tabs, fitLine(selected === undefined ? "Tab/←/→ · Esc" : "Tab/←/→ · ↑/↓ Enter · Esc", width)],
     height,
     width,
@@ -515,7 +517,7 @@ function sourceFooter(
 }
 
 function identityFooter(first: number, last: number, total: number): string[] {
-  return [`${first}-${last}/${total} · ↑/↓ PgUp/PgDn Home/End`, "i/Esc source · Help: /workflows info"];
+  return [`${first}-${last}/${total} · ${SCROLL_CONTROLS}`, "i/Esc source · Help: /workflows info"];
 }
 
 function sourceIdentityLines(
@@ -585,7 +587,7 @@ function catalogBody(
   const entries = catalogRenderEntries(model, tab, selectedIndex, width, theme);
   if (entries.length === 0) {
     const empty = model.query === undefined ? "No workflows in this source." : "No matches in this source.";
-    return padLines([style(theme, "muted", empty)], height, width);
+    return clipLines([style(theme, "muted", empty)], height, width);
   }
   const selectedEntry = Math.max(
     0,
@@ -604,7 +606,7 @@ function catalogBody(
     lines.push(...entry.lines.slice(0, height - lines.length));
     if (lines.length >= height) break;
   }
-  return padLines(lines, height, width);
+  return clipLines(lines, height, width);
 }
 
 function groupOnlyHeaderLine(header: WorkflowCatalogModel["groups"][number], theme: WorkflowCatalogTheme): string {
@@ -787,12 +789,12 @@ function bold(theme: WorkflowCatalogTheme, text: string): string {
   return typeof theme.bold === "function" ? theme.bold(text) : text;
 }
 
-function terminalRows(tui: CustomUiTui): number {
-  return sharedTerminalRows(tui, 3, DEFAULT_TERMINAL_ROWS);
-}
-
 function viewerRows(tui: CustomUiTui): number {
-  return Math.max(1, terminalRows(tui) - PI_HOST_FOOTER_ROWS - viewerExternalRows());
+  return sharedViewerRows(tui, {
+    minimumRows: 3,
+    fallbackRows: DEFAULT_TERMINAL_ROWS,
+    hostFooterRows: PI_HOST_FOOTER_ROWS,
+  });
 }
 
 function identityBodyHeight(tui: CustomUiTui): number {
@@ -834,19 +836,8 @@ function normalizeWidth(width: number): number {
   return Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 1;
 }
 
-function fitLine(value: string, width: number): string {
-  const fitted = truncateToWidth(value, width, "…");
-  return visibleWidth(fitted) <= width ? fitted : truncateToWidth(fitted, width);
-}
-
 function wrapPlain(value: string, width: number): string[] {
   return value.split(/\r?\n/u).flatMap((line) => wrapTextWithAnsi(line, width));
-}
-
-function padLines(lines: readonly string[], height: number, width: number): string[] {
-  const out = lines.slice(0, height).map((line) => fitLine(line, width));
-  while (out.length < height) out.push(" ".repeat(width));
-  return out;
 }
 
 function cycleIndex(index: number, delta: number, total: number): number {

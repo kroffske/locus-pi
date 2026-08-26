@@ -271,7 +271,7 @@ describe("agent drill command and inline interaction", () => {
     const overlay = new ScrollableTextOverlay("Agent catalog", () => lines, { requestRender }, done);
 
     const first = overlay.render(80);
-    expect(first[0]).toMatch(/^┌─+┐$/);
+    expect(first[0]).toMatch(/^╭─+╮$/);
     expect(first[1]).toContain("Agent catalog");
     expect(first.at(-2)).toContain("1-18/40");
     expect(first.join("\n")).toContain("line 0");
@@ -297,14 +297,51 @@ describe("agent drill command and inline interaction", () => {
       () => {},
     );
 
-    for (const width of [1, 2, 3, 8, 40]) {
+    for (const width of [1, 2, 3, 4, 5, 8, 40]) {
       const frame = overlay.render(width);
       expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
-      expect(frame[0]).toContain("┌");
-      expect(frame.at(-1)).toContain("└");
+      expect(frame[0]).toContain("╭");
+      expect(frame.at(-1)).toContain("╰");
     }
     expect(overlay.render(40).join("\n")).toContain("Agent 🧪 catalog");
-    expect(overlay.render(40).join("\n")).toContain("q/esc close");
+    expect(overlay.render(40).join("\n")).toContain("q/esc close · ↑/k ↓/j scroll");
+    // Content sits inside a one-cell gutter, matching every other framed surface.
+    expect(overlay.render(40)[1]).toMatch(/^│ \S/u);
+  });
+
+  it("(ScrollableTextOverlay) hands the live content width to a width-aware supplier", () => {
+    const widths: number[] = [];
+    const overlay = new ScrollableTextOverlay(
+      "Agent catalog",
+      (width) => {
+        widths.push(width);
+        return [`rendered at ${width}`];
+      },
+      { requestRender: vi.fn() },
+      () => {},
+    );
+
+    expect(overlay.render(120).join("\n")).toContain("rendered at 116");
+    expect(widths).toContain(116);
+  });
+
+  it("(ScrollableTextOverlay) leaves the frame to a supplier that draws its own", () => {
+    const supplied = ["╭── block ──╮", "│ body     │", "╰──────────╯"];
+    const overlay = new ScrollableTextOverlay(
+      "Agent catalog",
+      (width) => {
+        expect(width).toBe(40);
+        return supplied;
+      },
+      { requestRender: vi.fn() },
+      () => {},
+      { ownsFrame: false },
+    );
+
+    const rendered = overlay.render(40);
+    expect(rendered.slice(0, 3).map((line) => line.trimEnd())).toEqual(supplied);
+    expect(rendered.at(-1)).toContain("q/esc close");
+    expect(rendered.every((line) => visibleWidth(line) === 40)).toBe(true);
   });
 });
 

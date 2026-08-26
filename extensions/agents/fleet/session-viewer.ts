@@ -13,7 +13,7 @@ import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.j
 import { RenderScheduler } from "../../_shared/host/render-scheduler.js";
 import { agentLiveDisplayName, agentLiveTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
-import { viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
+import { padLine, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
@@ -121,7 +121,7 @@ export class AgentViewerCapability {
     const input = new Input(tui as TUI, keybindings, "", undefined, onSubmit, onCancel, { autocompleteMaxVisible: 4 });
     const chrome = input.children;
     if (chrome?.length === 9) {
-      chrome[6]!.render = (width) => [fitLine(themeText(theme, "muted", "↵ send · ⇧↵ newline"), width)];
+      chrome[6]!.render = (width) => [padLine(themeText(theme, "muted", "↵ send · ⇧↵ newline"), width)];
       input.children = [chrome[0]!, chrome[4]!, chrome[6]!, chrome[8]!];
     }
     input.focused = true;
@@ -259,7 +259,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     const terminalRows =
       hostRows === undefined ? undefined : Math.max(1, hostRows - PI_HOST_FOOTER_ROWS - viewerExternalRows());
     let input = this.#syncInput(terminalRows);
-    let inputLines = input?.render(safeWidth).map((line) => fitLine(line, safeWidth)) ?? [];
+    let inputLines = input?.render(safeWidth).map((line) => padLine(line, safeWidth)) ?? [];
     if (terminalRows !== undefined && inputLines.length > Math.max(0, terminalRows - 4)) {
       this.#suppressInputForRows(terminalRows);
       input = undefined;
@@ -267,7 +267,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     }
     const footer = this.#dividerLine(this.#footerLabel(row, input !== undefined), safeWidth, "bottom");
     if (terminalRows === undefined) {
-      return [header, ...content.map((line) => fitLine(line, safeWidth)), ...inputLines, footer];
+      return [header, ...content.map((line) => padLine(line, safeWidth)), ...inputLines, footer];
     }
     if (terminalRows === 1) return [header];
     const bodyHeight = Math.max(0, terminalRows - inputLines.length - 2);
@@ -278,7 +278,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#historyOffset = Math.min(Math.max(0, content.length - bodyHeight), Math.max(0, this.#historyOffset));
     this.#lastHistoryLineCount = content.length;
     this.#lastBodyHeight = Math.max(1, bodyHeight);
-    const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => fitLine(line, safeWidth));
+    const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => padLine(line, safeWidth));
     return [header, ...visible, ...inputLines, footer];
   }
 
@@ -396,7 +396,9 @@ export class AgentSessionViewer implements CustomUiComponent {
   }
 
   #dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
-    return themeText(this.theme, "borderMuted", dividerLine(label, width, style));
+    // `borderMuted` sank the labelled dividers into the background; these lines
+    // carry the section names, so they take the readable muted tone instead.
+    return themeText(this.theme, "muted", dividerLine(label, width, style));
   }
 
   #isHistoricalRound(): boolean {
@@ -487,12 +489,12 @@ export class AgentSessionViewer implements CustomUiComponent {
   #footerLabel(row: AgentLiveRow | undefined, hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
     const controls = hasInput
-      ? "wheel/PgUp/PgDn history · Enter send"
+      ? "wheel/pgup/pgdn history · enter send"
       : this.#inputSuppressedAtRows === undefined
-        ? "PgUp/PgDn history"
+        ? "pgup/pgdn history"
         : "resize terminal for input";
     const status = this.#isHistoricalRound() ? "history" : (row?.status ?? "unavailable");
-    return `STATUS: ${status} · ${notice}Esc close · ${controls} · Ctrl+O tools:${this.#expandedTools ? "expanded" : "compact"}`;
+    return `STATUS: ${status} · ${notice}esc close · ${controls} · ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`;
   }
 }
 
@@ -602,11 +604,6 @@ function isNativeComponentModule(value: unknown): value is NativeComponentModule
   );
 }
 
-function fitLine(value: string, width: number): string {
-  const line = truncateToWidth(value, width, "…");
-  return `${line}${" ".repeat(Math.max(0, width - visibleWidth(line)))}`;
-}
-
 function isClose(data: string): boolean {
   return data === "escape" || data === "\u001b";
 }
@@ -630,19 +627,20 @@ function requestLines(request: string | undefined, width: number): string[] {
   return safe.split("\n").flatMap((line) => (line === "" ? [""] : wrapTextWithAnsi(line, width)));
 }
 
-type DividerStyle = "top" | "section" | "strong" | "bottom";
+type DividerStyle = "top" | "section" | "bottom";
 
 function dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
-  const strong = style === "strong" || style === "bottom";
-  const fill = strong ? "═" : "─";
-  const left = style === "top" ? "┌─ " : style === "strong" ? "╞═ " : style === "bottom" ? "╘═ " : "├─ ";
+  // One rounded, single-weight frame across every surface (operator blocks, drill
+  // overlay, this viewer). A second line weight read as a different component.
+  const fill = "─";
+  const left = style === "top" ? "╭─ " : style === "bottom" ? "╰─ " : "├─ ";
   if (width <= visibleWidth(left)) return fill.repeat(width);
   const labelWidth = width - visibleWidth(left) - 1;
   const fitted = truncateToWidth(label, labelWidth, "…");
   return `${left}${fitted} ${fill.repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}`;
 }
 
-function themeText(theme: unknown, tone: "borderMuted" | "muted", text: string): string {
+function themeText(theme: unknown, tone: "muted", text: string): string {
   if (!isRecord(theme) || typeof theme.fg !== "function") return text;
   return String(theme.fg.call(theme, tone, text));
 }

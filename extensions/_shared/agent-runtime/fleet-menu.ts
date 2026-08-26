@@ -14,6 +14,8 @@ import type { CustomUiComponent, CustomUiTui } from "../host/pi-api.js";
 
 export const FLEET_MENU_MAX_ROWS = 8;
 export const FLEET_FOCUS_FALLBACK_SHORTCUT = "shift+down";
+/** Every selector in this TUI marks its cursor with `>`; the fleet is not a dialect of its own. */
+export const FLEET_CURSOR_MARKER = ">";
 
 export type FleetMenuAction = { kind: "close" } | { kind: "drill"; rowId: string } | { kind: "stop"; rowId: string };
 
@@ -311,7 +313,10 @@ function renderProjectedFleetMenuRows(
     return [
       ...heading,
       ...projected.map((line, index) => {
-        const prefix = index === 0 && focused && row.groupKind === undefined && row.id === selectedRowId ? "▸ " : "  ";
+        // The cursor column is always two cells wide, so selecting a row shifts
+        // nothing; only the marker and its accent tell the eye where it is.
+        const selected = index === 0 && focused && row.groupKind === undefined && row.id === selectedRowId;
+        const prefix = selected ? style(options.theme, "accent", `${FLEET_CURSOR_MARKER} `) : "  ";
         return truncateToWidth(`${prefix}${line}`, safeWidth);
       }),
     ];
@@ -492,6 +497,11 @@ function isKeybindingsLike(value: unknown): value is KeybindingsLike {
 
 function isRecord(value: unknown): value is Record<PropertyKey, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/** Themeless hosts (headless tests, string-widget fallbacks) still get readable text. */
+function style(theme: AgentLiveThemeLike | undefined, color: string, text: string): string {
+  return typeof theme?.fg === "function" ? theme.fg(color, text) : text;
 }
 
 function safeKeyHint(

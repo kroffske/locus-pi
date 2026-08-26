@@ -187,4 +187,20 @@ describe("tool-activity sub-line rendering (REQ-004 W3 wiring)", () => {
     });
     for (const rendered of panel.renderRows([row], 18)) expect(rendered.length).toBeLessThanOrEqual(18);
   });
+
+  // The store keeps the agent's message verbatim; collapsed onto one preview line
+  // its markdown is punctuation marking nothing, so the RENDERER strips it.
+  it("strips heading, bold, and backtick markers from the latest-message preview", () => {
+    const row = toolRow({
+      latestMessage: "# Step Usability Review ## Checks performed 1. **Full run** of `npm test` and __init__ paths",
+    });
+    const lines = panel.renderRows([row], Number.POSITIVE_INFINITY);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toBe("   └ Step Usability Review Checks performed 1. Full run of npm test and init paths");
+  });
+
+  it("drops the dangling bold marker left by a message the store had to bound", () => {
+    const row = toolRow({ latestMessage: "Reviewed the plan. **Next…" });
+    expect(panel.renderRows([row], Number.POSITIVE_INFINITY)[1]).toBe("   └ Reviewed the plan. Next…");
+  });
 });

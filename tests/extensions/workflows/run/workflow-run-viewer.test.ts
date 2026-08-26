@@ -29,6 +29,10 @@ afterEach(() => {
 describe("workflow persisted evidence viewer", () => {
   it("reserves the active workflow widget beneath the focused run viewer", () => {
     const root = makeRoot();
+    // More runs than rows, so the frame is bounded by geometry rather than content.
+    for (let index = 0; index < 25; index += 1) {
+      writeJournal(root, `20260722-0101${String(index).padStart(2, "0")}-ab12`, []);
+    }
     const viewer = new WorkflowRunViewer(
       { requestRender: vi.fn(), terminal: { rows: 24, columns: 80 } },
       {},
@@ -36,9 +40,27 @@ describe("workflow persisted evidence viewer", () => {
       root,
       vi.fn(),
     );
-    setViewerExternalRows("test-workflow-run", 2);
 
+    expect(viewer.render(80)).toHaveLength(24 - 3);
+    setViewerExternalRows("test-workflow-run", 2);
     expect(viewer.render(80)).toHaveLength(24 - 3 - 2);
+  });
+
+  it("stops the run list at its own content instead of padding the terminal", () => {
+    const root = makeRoot();
+    writeJournal(root, "20260722-010101-ab12", []);
+    const viewer = new WorkflowRunViewer(
+      { requestRender: vi.fn(), terminal: { rows: 24, columns: 80 } },
+      {},
+      {},
+      root,
+      vi.fn(),
+    );
+
+    const lines = viewer.render(80);
+    // Header, the single run, and the two footer rows: nothing padded up to 21.
+    expect(lines).toHaveLength(4);
+    expect(lines).not.toContain(" ".repeat(80));
   });
 
   it("navigates runs to stages, distinct repeated calls, and readable Markdown/JSON evidence", () => {
