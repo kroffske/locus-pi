@@ -61,6 +61,53 @@ describe("workflow completion presentation", () => {
     expect(rendered).toContain("task/implement-plan-template");
   });
 
+  // The digest is plain by contract — it enters model context and the session
+  // JSONL. Tone belongs to the card that draws it, and to nothing else.
+  it("paints the finished card's group labels and status markers without touching the digest text", async () => {
+    const harness = createHarness();
+    registerWorkflowTranscriptRenderers(harness.pi);
+    const transcript = createWorkflowTranscript(harness.ctx, "task/plan", "command");
+    transcript.start("run-plan-tone", "/repo/.pi/locus-pi/runs/run-plan-tone");
+    const completion = transcript.finish({
+      runId: "run-plan-tone",
+      runDir: "/repo/.pi/locus-pi/runs/run-plan-tone",
+      ok: true,
+      result: "Planning complete.",
+      resultTextPath: "/repo/.pi/locus-pi/runs/run-plan-tone/outputs/workflow-result.md",
+      workspaceDir,
+      workspaceDirRelative: "tmp/plan with spaces",
+      primaryFile: { relativePath: "plan.md", absolutePath: primaryFilePath, sha256: "abc123", bytes: 42 },
+      journal: [],
+      resultPersistence: { ok: true, path: "/repo/.pi/locus-pi/runs/run-plan-tone/runtime/result.json" },
+    });
+
+    expect(completion.digest).toContain("\nFiles\n");
+    expect(completion.digest).not.toMatch(/<(?:accent|success|error|warning)>/u);
+    expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
+    const runMessage = harness.sentMessages.find(
+      (entry) =>
+        entry.message.customType === WORKFLOW_RUN_CUSTOM_TYPE && entry.message.details?.eventKind === "workflow_end",
+    )!;
+    const rendered = harness.messageRenderers.get(WORKFLOW_RUN_CUSTOM_TYPE)!(
+      runMessage.message,
+      { expanded: true, outputPad: 0 },
+      {
+        fg: (color, text) => `<${color}>${text}</${color}>`,
+        bg: (_color, text) => text,
+        bold: (text) => `*${text}*`,
+      },
+    )
+      ?.render(220)
+      .join("\n");
+
+    expect(rendered).toContain("<accent>*Workflow finished*</accent>");
+    expect(rendered).toContain("<accent>*Files*</accent>");
+    expect(rendered).toContain("<accent>*Commands*</accent>");
+    expect(rendered).toContain("<success>✓</success> workflow task/plan finished");
+    // Only the marker is tinted — the sentence after it stays the digest's own text.
+    expect(rendered).toContain("primary file: /repo/tmp/plan with spaces/plan.md");
+  });
+
   it("labels the implement-plan template result with the generated script's explicit run command", async () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "task/implement-plan-template", "command");

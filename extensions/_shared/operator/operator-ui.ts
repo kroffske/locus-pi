@@ -65,9 +65,14 @@ function renderOperatorBlockUnbounded(block: OperatorBlock, safeWidth: number, t
 
   const innerWidth = safeWidth - FRAME_SIDE_WIDTH;
   const borderTone = block.type === "INPUT" || block.type === "SELECT" ? "borderAccent" : "borderMuted";
-  const heading = truncateToWidth(renderHeading(block, safeWidth, theme), innerWidth);
-  const topFill = "─".repeat(Math.max(0, safeWidth - 4 - visibleWidth(heading)));
-  const lines = [`${style(theme, borderTone, "╭─ ")}${heading}${style(theme, borderTone, `${topFill}╮`)}`];
+  // The top rule is one fixed-width slot — heading first, dashes for the rest —
+  // sitting between "╭─ " and " ╮". Giving the heading a column less than the
+  // body reserves the space that keeps the title off the rule: without it a
+  // full-width heading rendered as `╭─ [SELECT] Model roles [models]────────╮`.
+  const headingWidth = Math.max(0, innerWidth - 1);
+  const heading = truncateToWidth(renderHeading(block, safeWidth, theme), headingWidth);
+  const topFill = "─".repeat(Math.max(0, headingWidth - visibleWidth(heading)));
+  const lines = [`${style(theme, borderTone, "╭─ ")}${heading}${style(theme, borderTone, ` ${topFill}╮`)}`];
 
   for (const content of contentLines(block)) {
     const styled = styleContentLine(content, theme);

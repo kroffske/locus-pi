@@ -74,7 +74,10 @@ export function registerWorkflowTranscriptRenderers(pi: ExtensionAPI): void {
   pi.registerMessageRenderer(WORKFLOW_RUN_CUSTOM_TYPE, (message, { outputPad }, theme) => {
     if (typeof message.content !== "string") return undefined;
     const title = workflowRunTitle(message.details?.eventKind);
-    return workflowTranscriptCard(title, message.content, outputPad, theme);
+    // Only the run card gets digest tone: its content is the digest, whose line
+    // vocabulary is known. The result card below carries the workflow's own prose,
+    // where a leading `✓` is the agent's sentence and not a status marker.
+    return workflowTranscriptCard(title, paintWorkflowDigest(message.content, theme), outputPad, theme);
   });
   pi.registerMessageRenderer(WORKFLOW_RESULT_CUSTOM_TYPE, (message, { outputPad }, theme) => {
     if (typeof message.content !== "string") return undefined;
@@ -95,6 +98,52 @@ function workflowRunTitle(eventKind: unknown): string {
   if (eventKind === "workflow_rejected") return "Workflow rejected";
   if (eventKind === "workflow_end") return "Workflow finished";
   return "Workflow run";
+}
+
+/** Group labels the digest writes on a line of their own (`appendTranscriptGroup`). */
+const WORKFLOW_DIGEST_GROUP_TONES = new Map<string, string>([
+  ["Files", "accent"],
+  ["Commands", "accent"],
+  ["Next action", "accent"],
+  ["Failure", "error"],
+]);
+
+/**
+ * The digest's status markers, each taking the tone its status already carries in
+ * the live panel (`workflowProgressDonePresentation`), so one glyph never means
+ * two different things across two surfaces.
+ */
+const WORKFLOW_DIGEST_MARKER_TONES = new Map<string, string>([
+  ["✓", "success"],
+  ["✗", "error"],
+  ["◐", "warning"],
+  ["⊘", "warning"],
+  ["■", "warning"],
+  ["↻", "accent"],
+  ["●", "accent"],
+]);
+
+/**
+ * Tone for the digest, added HERE and nowhere else. The digest string itself is
+ * plain by contract — it enters model context and the session JSONL, where colour
+ * is forbidden (workflow-transcript.ts) — so the card paints a copy at render
+ * time. Structure only: a group label gains weight, a status marker gains its
+ * status colour, and not one character of the text changes.
+ */
+function paintWorkflowDigest(digest: string, theme: ThemeLike): string {
+  return digest
+    .split("\n")
+    .map((line) => paintWorkflowDigestLine(line, theme))
+    .join("\n");
+}
+
+function paintWorkflowDigestLine(line: string, theme: ThemeLike): string {
+  const groupTone = WORKFLOW_DIGEST_GROUP_TONES.get(line);
+  if (groupTone !== undefined) return theme.fg(groupTone, theme.bold(line));
+  const marker = line.slice(0, 1);
+  const markerTone = WORKFLOW_DIGEST_MARKER_TONES.get(marker);
+  if (markerTone === undefined || !line.startsWith(`${marker} `)) return line;
+  return `${theme.fg(markerTone, marker)}${line.slice(1)}`;
 }
 
 function workflowTranscriptCard(

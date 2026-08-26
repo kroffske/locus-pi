@@ -51,6 +51,25 @@ describe("typed operator block renderer", () => {
     }
   });
 
+  it.each([146, 80, 48, 12])("separates the framed heading from its top rule at %i columns", (width) => {
+    const overflowing: OperatorBlock = {
+      ...block,
+      subject: "A subject far longer than any terminal column budget can hold",
+    };
+
+    for (const candidate of [block, overflowing, { type: "VIEW", subject: "", primary: "p" } as OperatorBlock]) {
+      const top = renderOperatorBlock(candidate, width, ansiTheme("36"))[0] ?? "";
+      const plain = top.replace(/\x1b\[[0-9;]*m/gu, "");
+
+      // The rule occupies whatever the heading leaves, so the corner always lands
+      // on the last column and the heading never touches the dashes.
+      expect(visibleWidth(top)).toBe(width);
+      expect(plain.startsWith("╭─ ")).toBe(true);
+      expect(plain.endsWith("╮")).toBe(true);
+      expect(plain.slice(3, -1).replace(/─+$/u, "")).toMatch(/ $/u);
+    }
+  });
+
   it("keeps the fixed heading, primary, body, metadata, hint, controls hierarchy", () => {
     expect(renderOperatorBlockPlain(block, 80)).toEqual([
       "[VIEW] Goal [ACTIVE]",

@@ -318,7 +318,10 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       const failedText = counts.error > 0 ? ` failed=${counts.error}` : "";
       const replayedCount = this.journal.filter((line) => line.kind === "agent_end" && line.replayed === true).length;
       const replayedText = replayedCount > 0 ? ` replayed=${replayedCount}` : "";
-      const text = `workflow ${this.scriptRef} (${this.runId}) - ${headerLabel} phase=${phase ?? "not-set"} active=${counts.working} done=${terminalCount}/${rows.length}${cancelledText}${failedText}${replayedText}`;
+      // Same identity budget as the workflow rail below. This line has no
+      // right-hand block to lose, but it is truncated from the right, so a long
+      // path pushes the counters — the reason the header exists — off the end.
+      const text = `workflow ${workflowRailRef(this.scriptRef)} (${this.runId}) - ${headerLabel} phase=${phase ?? "not-set"} active=${counts.working} done=${terminalCount}/${rows.length}${cancelledText}${failedText}${replayedText}`;
       return this.#bold(truncate(text, width));
     }
     const statusMark = workflowProgressStatusMark(headerStatus);
@@ -356,9 +359,13 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       this.options.continuationSourceRunId === undefined
         ? ""
         : ` · continues #${shortWorkflowRunId(this.options.continuationSourceRunId)}`;
-    const full = `◆ WORKFLOW · ${this.scriptRef}${continuationText} │ ${tokenText} │ ${stage} · ${state} │ ${progressText}`;
-    const medium = `◆ WF ${this.scriptRef}${continuationText} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${progressText}`;
-    const compact = `◆ ${this.scriptRef}${continuationText} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state}`;
+    // The rail's identity is shortened BEFORE composition: a workflow started by
+    // absolute path otherwise spends the whole line on a directory prefix, every
+    // projection overflows, and the right-hand commands vanish instead of degrading.
+    const ref = workflowRailRef(this.scriptRef);
+    const full = `◆ WORKFLOW · ${ref}${continuationText} │ ${tokenText} │ ${stage} · ${state} │ ${progressText}`;
+    const medium = `◆ WF ${ref}${continuationText} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state} │ ${progressText}`;
+    const compact = `◆ ${ref}${continuationText} │ ${tokenText} │ ${stageIndex}/${frontier.length || "—"} ${current?.title ?? "waiting"} · ${state}`;
     const projections: ReadonlyArray<readonly [string, string]> = [
       [full, fullCommands],
       [full, mediumCommands],
@@ -375,11 +382,11 @@ export class WorkflowProgressComponent implements CustomUiComponent {
 
   /**
    * The full agent roster for this run, in the order the run produced it:
-   * finished agents (`✓`, green), the agent working right now (its spinner, in
-   * `warning` so it reads apart from settled rows), then every declared stage the
-   * run has not reached yet (`○`, dim) with the detail `meta.phases` planned for
-   * it. A re-entered slot keeps ONE row and carries its `r<N>` round badge, so a
-   * loop updates a row instead of appending a duplicate.
+   * finished agents (`✓`, green), the agent working right now (its spinner, in the
+   * shared `accent` tone every working agent carries), then every declared stage
+   * the run has not reached yet (`○`, dim) with the detail `meta.phases` planned
+   * for it. A re-entered slot keeps ONE row and carries its `r<N>` round badge, so
+   * a loop updates a row instead of appending a duplicate.
    */
   private renderRoster(rows: AgentLiveRow[], width: number, budget: number): string[] {
     const leaves = selectFleetMenuLeafRows(orderAgentLiveRows(rows));
@@ -395,7 +402,6 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     const panel = new AgentLivePanel({
       spinnerIndex: this.#spinnerIndex,
       theme: this.theme,
-      statusColors: { working: "warning" },
       ...(this.#calm ? { calm: true } : {}),
     });
     // Only the current row keeps its sub-lines (latest message / live tool action);
@@ -565,6 +571,42 @@ function alignWorkflowRail(left: string, right: string, width: number): string |
   const gap = width - visibleWidth(left) - visibleWidth(right);
   if (gap < 2) return undefined;
   return `${left}${" ".repeat(gap)}${right}`;
+}
+
+/**
+ * Rail identity budget for a path-like `scriptRef`, in columns. A ref wider than
+ * this is a filesystem location, not a name, and the rail's job is identity.
+ */
+const WORKFLOW_RAIL_REF_MAX_COLS = 32;
+
+/**
+ * A workflow run started by absolute path carries that whole path as its
+ * `scriptRef`. Interpolated raw into either header, it spends the line on a
+ * directory prefix and the run's actual state falls off the end: on the rail every
+ * projection overflows, `alignWorkflowRail` returns undefined at `gap < 2`, and
+ * the ladder falls through to a bare `truncate(compact, width)` that drops the
+ * right-hand commands; on the fleet header the counters are simply truncated away.
+ * So the ref is cut to its identifying tail before either line is composed.
+ *
+ * A ref with no separator is a name and is never touched — including a long one.
+ * A package ref (`task/plan`) is already inside the budget and passes through, so
+ * only a real path is abbreviated: `…/<parent>/<file>`, then `…/<file>`.
+ */
+function workflowRailRef(scriptRef: string): string {
+  if (!/[/\\]/u.test(scriptRef)) return scriptRef;
+  if (visibleWidth(scriptRef) <= WORKFLOW_RAIL_REF_MAX_COLS) return scriptRef;
+  const segments = scriptRef.split(/[/\\]/u).filter((segment) => segment !== "");
+  const basename = segments.at(-1);
+  if (basename === undefined) return truncate(scriptRef, WORKFLOW_RAIL_REF_MAX_COLS);
+  const parent = segments.at(-2);
+  const candidates = [
+    ...(parent === undefined ? [] : [`…/${parent}/${basename}`]),
+    `…/${basename}`,
+    truncate(basename, WORKFLOW_RAIL_REF_MAX_COLS),
+  ];
+  return (
+    candidates.find((candidate) => visibleWidth(candidate) <= WORKFLOW_RAIL_REF_MAX_COLS) ?? candidates.at(-1) ?? ""
+  );
 }
 
 function trimCompactTokenCount(value: string): string {

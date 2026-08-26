@@ -418,7 +418,12 @@ describe("/workflows help and unknown commands", () => {
     const h = createHarness(makeRoot());
     workflows(h.pi);
 
-    expect(h.commands.get("workflows")?.description).toContain(workflowRunUsage("<name|path>", "run"));
+    // The palette description says what the command is for, in one line the same
+    // length as its neighbours; the full grammar belongs to the help surfaces and
+    // is asserted on them ("names an unknown subcommand and prints the usage line").
+    const description = h.commands.get("workflows")?.description ?? "";
+    expect(description).toBe("Open the workflow command menu, or run, inspect, continue, and stop workflow runs.");
+    expect(description).not.toContain(workflowRunUsage("<name|path>", "run"));
     expect(workflowRunUsage()).toBe(
       "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]",
     );

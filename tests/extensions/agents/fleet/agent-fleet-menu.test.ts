@@ -80,10 +80,25 @@ describe("agent fleet menu", () => {
     const passiveRows = passive.slice(0, -1).map((line) => line.slice(2));
     const focusedRows = focused.slice(0, -1).map((line) => line.slice(2));
     expect(focusedRows).toEqual(passiveRows);
-    expect(focused[1]).toMatch(/^▸ /);
+    expect(focused[1]).toMatch(/^> /);
     expect(passive.at(-1)).toContain("manage");
     expect(focused.at(-1)).toContain("stop");
     expect(focused.at(-1)).toContain("back");
+  });
+
+  it("paints the cursor marker in the accent tone and leaves other rows unshifted", () => {
+    const first = row("accent-a", "review auth");
+    const second = row("accent-b", "run tests");
+    const fg = vi.fn((color: string, text: string) => `<${color}>${text}</${color}>`);
+    const themed = renderFleetMenuRows([first, second], 120, {
+      focused: true,
+      selectedRowId: second.id,
+      theme: { fg },
+    });
+
+    const marked = themed.filter((line) => line.startsWith("<accent>> </accent>"));
+    expect(marked).toHaveLength(1);
+    expect(themed.filter((line) => !line.startsWith("<accent>")).every((line) => line.startsWith("  "))).toBe(true);
   });
 
   it("caps the passive fleet at eight rows and reports the hidden count", () => {
@@ -457,7 +472,7 @@ describe("agent fleet menu", () => {
       renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: fleetMenuState.selectedRowId! }).join("\n"),
     ).toContain("parallel (2)");
     expect(
-      renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: group.id }).some((line) => line.startsWith("▸ ")),
+      renderFleetMenuRows(rows, 120, { focused: true, selectedRowId: group.id }).some((line) => line.startsWith("> ")),
     ).toBe(false);
     expect(fleetMenuState.selectedRowId).toBe(first.id);
     component.handleInput("down");

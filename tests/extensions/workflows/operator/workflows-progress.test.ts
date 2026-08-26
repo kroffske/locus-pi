@@ -35,6 +35,10 @@ import {
 
 afterEach(() => clearViewerExternalRows("workflow-live"));
 
+/** A workflow started by explicit path: 127 columns of `scriptRef`, shared by both header tests. */
+const LONG_ABSOLUTE_REF =
+  "/home/operator/projects/locus-pi-design-review/.locus-pi/plans/20260826-120000-a1b2-task-planning-x/implement-plan.workflow.mjs";
+
 function line(input: Omit<WorkflowJournalLine, "ts"> & { ts: string | number }): WorkflowJournalLine {
   return input as WorkflowJournalLine;
 }
@@ -465,6 +469,51 @@ describe("workflow progress widget", () => {
     const freshText = fresh.render(120).join("\n");
     expect(freshText).toContain("◆ WORKFLOW · stages │ tok — │ stage — · ● RUNNING");
     expect(freshText).not.toContain("replayed=");
+  });
+
+  // A run started by absolute path used to spend the whole rail on the directory
+  // prefix: every projection overflowed, the aligner gave up, and the right-hand
+  // commands disappeared instead of degrading. Identity is cut first now.
+  it("keeps the rail commands when the workflow was started by a long absolute path", () => {
+    agentLiveStore.reset();
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 170 } };
+    expect(LONG_ABSOLUTE_REF.length).toBe(127);
+    const component = new WorkflowProgressComponent(tui, {}, LONG_ABSOLUTE_REF, "path-r1", { scope: "workflow" });
+
+    const rail = component.render(170)[0] ?? "";
+    expect(rail).toContain("…/implement-plan.workflow.mjs");
+    expect(rail).not.toContain("/home/operator/projects");
+    expect(rail).toContain("/ps inspect agents");
+    expect(rail).toContain("/workflows stop last");
+    expect(rail.length).toBeLessThanOrEqual(170);
+
+    // A package ref and a plain name are identity already, and stay untouched.
+    const packageRef = new WorkflowProgressComponent(tui, {}, "airflow-dag-builder/plan", "pkg-r1", {
+      scope: "workflow",
+    });
+    expect(packageRef.render(170)[0] ?? "").toContain("◆ WORKFLOW · airflow-dag-builder/plan");
+    component.dispose();
+    packageRef.dispose();
+  });
+
+  // The fleet-scope header has no right-hand block to lose, but it truncates from
+  // the right, so the same long path pushed `active=`/`done=` — the run state the
+  // header exists to report — off the end of the line.
+  it("keeps the fleet header counters when the workflow was started by a long absolute path", () => {
+    agentLiveStore.reset();
+    fleetMenuState.setFocused(false);
+    fleetMenuState.setVisibleRows([]);
+    const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } };
+    const component = new WorkflowProgressComponent(tui, {}, LONG_ABSOLUTE_REF, "fleet-path-r1");
+
+    const header = component.render(120)[0] ?? "";
+    expect(header).toContain("workflow …/implement-plan.workflow.mjs (fleet-path-r1)");
+    expect(header).not.toContain("/home/operator/projects");
+    expect(header).toContain("phase=not-set");
+    expect(header).toContain("active=0");
+    expect(header).toContain("done=0/0");
+    expect(header.length).toBeLessThanOrEqual(120);
+    component.dispose();
   });
 
   it("projects a cancelled agent_end as terminal while the workflow may still finish successfully", () => {

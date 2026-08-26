@@ -11,7 +11,7 @@ import {
   isSupersededInlineOperatorInteractionError,
   requestInlineOperatorInteraction,
 } from "../../_shared/operator/operator-interaction.js";
-import { renderOperatorBlockPlain, type OperatorBlock } from "../../_shared/operator/operator-ui.js";
+import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../../_shared/operator/operator-ui.js";
 import type { CustomUiComponent, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
 import { setTextWidget } from "../../_shared/host/pi-api.js";
 import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -34,16 +34,18 @@ export async function renderAgentBlockInteraction(
   block: OperatorBlock,
 ): Promise<boolean> {
   if (ctx.mode !== "tui" || ctx.hasUI !== true || ctx.ui.custom === undefined) return false;
-  const [title = `[${block.type}] ${block.subject}`, ...lines] = renderOperatorBlockPlain(
-    block,
-    AGENTS_WIDGET_FALLBACK_WIDTH,
-  );
+  const title = `[${block.type}] ${block.subject}`;
   clearAgentsTransient(ctx);
   try {
-    await requestInlineOperatorInteraction<void>(
-      ctx,
-      (tui, _theme, _keybindings, done) => new ScrollableTextOverlay(title, () => lines, tui, done),
-    );
+    await requestInlineOperatorInteraction<void>(ctx, (tui, theme, _keybindings, done) => {
+      // The catalog is the same semantic block every other surface renders, so it
+      // takes the same themed frame at the live terminal width instead of a
+      // colorless 80-column snapshot. The block draws its own frame; the overlay
+      // adds only the scroll window and its control line.
+      const blockTheme = operatorTheme(theme) ?? ctx.ui.theme;
+      const body = (width: number): string[] => renderOperatorBlock(block, width, blockTheme);
+      return new ScrollableTextOverlay(title, body, tui, done, { ownsFrame: false });
+    });
   } catch (error) {
     if (isStaleInlineOperatorInteractionError(error)) {
       // The scroll surface never made it to the screen, and the transient widget
@@ -56,6 +58,10 @@ export async function renderAgentBlockInteraction(
     throw error;
   }
   return true;
+}
+
+function operatorTheme(value: unknown): OperatorThemeLike | undefined {
+  return typeof value === "object" && value !== null ? (value as OperatorThemeLike) : undefined;
 }
 
 export function setAgentsWidget(
