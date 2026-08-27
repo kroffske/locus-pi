@@ -124,6 +124,10 @@ Declare stable stage option groups together near the top. Keep every prompt,
 call, branch, and exact handoff visible where it executes. Stage prompts own
 their roles; do not depend on package-provided agent names.
 Declare `meta.profile: "standard"` in every newly generated workflow.
+`meta.phases` is optional. When Design chooses to expose it, declare every
+unique literal `phase("...")` id exactly once and in first-source order. Case
+drift, duplicate declarations, and missing ids fail source checking; unused
+declarations and order drift are warnings.
 
 Omit `maxToolCalls` and `timeoutMs` from standard generated `agent()` options.
 The package already applies emergency defaults to every child attempt. Emit a
@@ -305,7 +309,10 @@ reviewed scripts. They are not standard authoring output.
 Routine failures stay runtime-owned. A failed `agent()`, `parallel()`, or
 `pipeline()` fails the run. Do not catch it into partial success unless the
 approved design explicitly requires partial results and explains why they remain
-useful.
+useful. Root returns and direct `parallel()`/`pipeline()` returns share one
+semantic failure contract: `ok === false`, `partial === true`, or
+`status: "failed" | "blocked" | "cancelled"`. Do not rely on one returned
+object meaning success in one orchestration context and failure in another.
 
 ## Delegation limit
 
@@ -345,6 +352,10 @@ namespace has no root source and never receives a fake one. It then checks:
 - no design-absent node or standard-profile bad smell appeared.
 - the exact built file passes the Pi-native `workflow_check_source` tool for
   every built `.pi/workflows/<name>/*.workflow.mjs` path.
+
+Read checker diagnostics as `path:line:column [CODE] message`. Any error fails
+Build. Warning-only output remains a successful check, but Build must report the
+warning and repair declaration drift when it concerns generated source.
 
 An unavailable tool, failed checker result, failed module import, or
 design/source mismatch means Build failed. Repair and rerun; never return a

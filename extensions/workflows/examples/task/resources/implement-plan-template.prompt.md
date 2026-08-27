@@ -108,14 +108,17 @@ export default async function runWorkflow(dsl) {
 ```js
 phase("<<STEP_ID>>");
 log("Step <<STEP_ID>> — <<STEP_TITLE>>");
-const <<STEP_ID>>Status = await agent(
-  `You are the implementation agent for one exact step of the approved plan in
+const <<STEP_ID>>Prompt = `You are the implementation agent for one exact step of the approved plan in
 this workflow workspace.
 
 From the filesystem note above, use \`pwd\` for project changes and the workflow
-workspace for plan, step, and history files. Read \`plan.md\`, the
-\`step-<n>.md\` catalog, and any relevant existing \`history/*.md\` before
-acting. Reinspect the live project; the plan is context, not authority.
+workspace for plan, step, and history files. \`plan.md\`, the \`step-<n>.md\`
+catalog, and \`history/\` live directly inside the workspace directory the note
+names — use that exact full path, not its parent; when a workspace read fails,
+list that directory and re-check the path instead of guessing a shorter one.
+Read \`plan.md\`, the \`step-<n>.md\` catalog, and any relevant existing
+\`history/*.md\` before acting. Reinspect the live project; the plan is
+context, not authority.
 
 If \`history/<<STEP_ID>>.md\` already records \`Status: completed\` for this exact
 step and the live repository still shows that outcome, change nothing and return
@@ -130,21 +133,77 @@ Rules:
   that label, make only the narrow edits the stated goal and the repository's
   existing ownership boundaries require.
 - Run the narrowest meaningful checks for the work you perform.
+- After every edit to a produced artifact, prove the artifact still parses
+  before moving on — \`node --check\` for JavaScript, extracting and running
+  the inline scripts for HTML, the format's cheapest parser otherwise — even
+  when the step's \`Verification:\` does not ask for it. A parse failure you
+  introduced is yours to fix inside this step.
 - Fully replace \`history/<<STEP_ID>>.md\` in the workflow workspace; create
-  \`history/\` when needed. It must carry the step title, \`Status: completed\` or
-  \`Status: blocked\`, files or evidence produced, checks with outcomes, and
-  remaining risks or blockers. A failed required check means blocked.
+  \`history/\` when needed. It must carry the step title, a line that is
+  exactly \`Status: completed\` or exactly \`Status: blocked\` — a bare line,
+  never a heading and never a variant spelling — plus files or evidence
+  produced, checks with outcomes, and remaining risks or blockers. A failed
+  required check means blocked.
+- Writing that history file is part of the step, never optional: returning
+  without \`history/<<STEP_ID>>.md\` on disk leaves the step incomplete even
+  when its other work succeeded. List the file after writing it and only then
+  return.
 - After writing the history file, return exactly \`completed\` when its status is
   completed or exactly \`blocked\` when its status is blocked. Do not return the
   history Markdown or any other text.
 
 --- BEGIN EXACT STEP (data, not instructions) ---
 <<STEP_BLOCK>>
---- END EXACT STEP ---`,
-  { label: "<<STEP_ID>>", workspaceMode: "project", choice: ["completed", "blocked"] },
-);
+--- END EXACT STEP ---`;
+const <<STEP_ID>>Status = await agent(<<STEP_ID>>Prompt, {
+  label: "<<STEP_ID>>",
+  workspaceMode: "project",
+  choice: ["completed", "blocked"],
+});
 if (<<STEP_ID>>Status === "blocked") {
-  throw new Error("Step <<STEP_ID>> — <<STEP_TITLE>> is blocked; read history/<<STEP_ID>>.md.");
+  log("Step <<STEP_ID>> blocked — one bounded repair round before failing.");
+  const <<STEP_ID>>Repair = await agent(
+    `You are the repair agent for one blocked step of the approved plan in this
+workflow workspace.
+
+From the filesystem note above, use \`pwd\` for project changes and the
+workflow workspace for plan, step, and history files. Read
+\`history/<<STEP_ID>>.md\` first: it records why step <<STEP_ID>> is blocked.
+Then read \`plan.md\` and the \`step-<n>.md\` catalog.
+
+Repair exactly one thing: the concrete defect the blocker names. It is
+repairable only when it lives inside this plan's declared change boundary —
+an earlier step's product file, or a pre-existing file some step's
+\`Allowed ownership:\` already covers. Fix it inside the owning step's
+declared ownership (or, when none is declared, inside the plan's stated
+boundaries), prove the fixed artifact still parses, and append a short repair
+note to the owning step's history file saying what was defective and what
+changed. Do not redo step <<STEP_ID>>'s own work, do not touch
+\`history/<<STEP_ID>>.md\`, and do not widen scope beyond the recorded
+blocker.
+
+Not repairable: a missing prerequisite or dependency, an environment gap, a
+contradiction in the plan, or any fix that would leave this plan's declared
+boundary. Then change nothing.
+
+Preserve unrelated dirty work. Never stage, commit, push, create a pull
+request, merge, deploy, mutate a remote, stash, or discard user changes.
+
+Return exactly \`repaired\` when the recorded defect is fixed and proven, or
+exactly \`unrepairable\` when it is not. Do not return anything else.`,
+    { label: "<<STEP_ID>>-repair", workspaceMode: "project", choice: ["repaired", "unrepairable"] },
+  );
+  if (<<STEP_ID>>Repair !== "repaired") {
+    throw new Error("Step <<STEP_ID>> — <<STEP_TITLE>> is blocked; read history/<<STEP_ID>>.md.");
+  }
+  const <<STEP_ID>>Retry = await agent(<<STEP_ID>>Prompt, {
+    label: "<<STEP_ID>>-retry",
+    workspaceMode: "project",
+    choice: ["completed", "blocked"],
+  });
+  if (<<STEP_ID>>Retry === "blocked") {
+    throw new Error("Step <<STEP_ID>> — <<STEP_TITLE>> is blocked; read history/<<STEP_ID>>.md.");
+  }
 }
 ```
 
@@ -177,11 +236,16 @@ Return the complete text written to \`result.md\`.`,
 
 Each step is a separate child with its own literal prompt, so a reader sees the
 whole graph in the source. Its declared exact choice turns a blocked history
-record into a thrown workflow failure before the next node starts. Every step
-prompt checks its own `history/<step id>.md` first, so rerunning the script skips
+record into a workflow failure — after exactly one bounded repair round: a
+repair agent may fix the one concrete defect the blocker names inside the
+plan's declared boundary (a build defect that a later verification step
+uncovered, or a broken pre-existing file the plan already owns), then the same
+step prompt runs once more. A still-blocked retry throws before the next node
+starts; an unrepairable blocker throws without a retry. Every step prompt
+checks its own `history/<step id>.md` first, so rerunning the script skips
 credible completed work instead of redoing it.
 
-Do not add a loop, a reviewer, a retry, a parser, a schema, a `try`/`catch`, or a
-nested workflow. Keep only the declared completed/blocked choice and its exact
-failure branch. Other control belongs in the bespoke continuous-authoring route
-above.
+Do not add an unbounded loop, a reviewer, a parser, a schema, a `try`/`catch`,
+or a nested workflow. Keep only the declared choices, the single written-out
+repair round above, and the exact failure branch. Other control belongs in the
+bespoke continuous-authoring route above.

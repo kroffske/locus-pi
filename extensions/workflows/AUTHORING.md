@@ -372,6 +372,15 @@ or adds registry entries. The repository-wide `npm run check` gate runs that
 Package check. Source-shape validation does not replace source-identity
 assessment or importing the module.
 
+Diagnostics are compiler-shaped. Human-readable output uses
+`path:line:column [CODE] message`; the tool result also returns the full
+`diagnostics` array with stable `code`, `severity`, one-based source spans, and
+optional related spans. An `error` fails the tool. A `warning` keeps the check
+successful while making declaration drift visible. Existing automation that
+calls `standardWorkflowSourceShapeErrors()` keeps the legacy sorted `string[]`
+error projection; warnings are intentionally absent from that compatibility
+view.
+
 Build remains failed until the exact source passes this checker, module import,
 identity checks, and design/source comparison. An unavailable tool or failed
 checker result cannot be reported as a successful Build.
@@ -385,6 +394,13 @@ These are all rules enforced for `meta.profile: "standard"`:
   `const` values made only from literal arrays, objects, scalars, and static
   strings; comments and a hashbang are harmless, but there are no other
   statements or exports.
+- `meta.phases` remains optional. When it is a non-empty literal array, it is
+  the complete unique vocabulary of literal `phase("...")` calls in planned
+  first-source order. An exact or case-equivalent duplicate declaration, a
+  case-only call mismatch, or an undeclared literal phase is an error. An unused
+  declaration or order drift is a warning. Repeated calls to the same phase and
+  branches not reached in one run are valid; the checker compares source
+  vocabulary, not runtime reachability.
 - Standard source has no static import, re-export, dynamic `import()`, or
   `require()` call, including `node:` modules. This is stricter than the general
   source-identity policy described below.
@@ -543,7 +559,14 @@ artifacts.
 `publishPrimaryArtifact()` declares the one successful terminal document.
 
 `parallel()` and `pipeline()` wait for scheduled siblings and then reject on a
-failed branch. Invocation cap, timeout, inherited tool access, answer
+failed branch. Root returns, direct parallel branches, and direct pipeline
+stages share one returned-outcome rule: `ok === false`, `partial === true`, or
+`status: "failed" | "blocked" | "cancelled"` is semantic failure. The same
+JSON object therefore has the same terminal meaning wherever it is returned.
+Failure statuses remain domain detail; the durable run disposition is
+`failed`. Other JSON-safe shapes keep legacy success semantics.
+
+Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
 budget allows 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer

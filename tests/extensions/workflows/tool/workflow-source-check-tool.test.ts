@@ -44,6 +44,8 @@ describe("workflow_check_source", () => {
       owner: "workflows",
       path: ".pi/workflows/sample.workflow.mjs",
       errorCount: 0,
+      warningCount: 0,
+      diagnostics: [],
     });
   });
 
@@ -63,9 +65,77 @@ describe("workflow_check_source", () => {
 
     expect(result.isError).toBe(true);
     expect(result.details?.errorCount).toBeGreaterThan(0);
+    expect(result.details?.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "WF_IMPORT", severity: "error", line: 1, column: 1 })]),
+    );
     expect(result.content[0]).toMatchObject({ type: "text" });
-    expect(String((result.content[0] as { text: string }).text)).toContain("standard workflow source shape failed");
+    const output = String((result.content[0] as { text: string }).text);
+    expect(output).toContain("standard workflow source shape failed");
+    expect(output).toContain(
+      ".pi/workflows/sample.workflow.mjs:1:1 [WF_IMPORT] standard profile imports no node: modules",
+    );
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it("keeps errorCount as the unique legacy-message count when structured occurrences repeat", async () => {
+    const root = temporaryRoot();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      [
+        'export const meta = { name: "sample", profile: "standard" };',
+        'import fs from "node:fs";',
+        'import path from "node:path";',
+        "export default function run() { return true; }",
+        "",
+      ].join("\n"),
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+
+    const result = await runTool(harness, "workflow_check_source", { path: ".pi/workflows/sample.workflow.mjs" });
+    const diagnostics = result.details?.diagnostics as readonly unknown[];
+
+    expect(result.isError).toBe(true);
+    expect(result.details?.errorCount).toBe(3);
+    expect(result.details?.warningCount).toBe(0);
+    expect(diagnostics).toHaveLength(6);
+  });
+
+  it("returns warning diagnostics without failing the tool", async () => {
+    const root = temporaryRoot();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      'export const meta = { name: "sample", profile: "standard", phases: [{ title: "unused" }] };\nexport default function run({ phase }) { return { ok: true }; }\n',
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+
+    const result = await runTool(harness, "workflow_check_source", { path: ".pi/workflows/sample.workflow.mjs" });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.details).toEqual({
+      owner: "workflows",
+      path: ".pi/workflows/sample.workflow.mjs",
+      errorCount: 0,
+      warningCount: 1,
+      diagnostics: [
+        {
+          code: "WF_PHASE_UNUSED_DECLARATION",
+          severity: "warning",
+          message: 'meta.phases title "unused" has no literal phase("unused") call',
+          line: 1,
+          column: 78,
+          endLine: 1,
+          endColumn: 86,
+        },
+      ],
+      outputTruncated: false,
+      outputRedacted: false,
+    });
+    expect(String((result.content[0] as { text: string }).text)).toBe(
+      ".pi/workflows/sample.workflow.mjs: standard workflow source shape passed with 1 warning(s):\n" +
+        '.pi/workflows/sample.workflow.mjs:1:78 [WF_PHASE_UNUSED_DECLARATION] meta.phases title "unused" has no literal phase("unused") call',
+    );
   });
 
   it("rejects lexical and symlink escapes from the current project", async () => {

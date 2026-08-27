@@ -59,7 +59,7 @@ authoring handle; it is not enforced.
 | `live-smoke`                   | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `task/draft`                   | **Raw request to saved intent draft**: one reconnaissance agent writes `draft-context.md` and returns `ready \| ask`; the drafting agent receives `workflow_ask` only on the `ask` branch, is instructed to group no more than three pivotal questions, then writes and publishes `draft.md` in Locus Prompt Draft form. Ready requests remain headless-compatible; required unavailable operator input fails closed. The run stops before planning.                                                                                                                                                                                                                                                  |
 | `task/plan`                    | **Task to plan files, decomposed for a weak model**: one scope agent freezes `request.md`/`scope.md`, one context agent writes `context.md`, three parallel analysts write `analysis/*.md`, one compose agent writes `plan.md` plus a dynamic `step-<n>.md` catalog whose complete `## S<n>` blocks are each one fresh agent's work unit, three parallel reviewers write `reviews/*.md`, one bounded correction replaces the plan once, and a final verifier plus runtime choice publish `plan.md` or fail closed with `planning-blocker.md`. The run never waits for an operator: unknowns become explicit assumptions and prerequisites. Nothing is implemented, and execution waits for the owner. |
-| `task/implement-plan-template` | **Approved plan to reviewable sequential workflow**: one scripting agent reads `plan.md` and every `step-<n>.md` in the shared planning workspace, then renders `implement-plan.workflow.mjs` from a fixed `promptFile()` template with one literal node per step plus one summary node. It never plans, replans, implements, or runs the generated file. The generated draft resolves only by explicit path.                                                                                                                                                                                                                                                                                         |
+| `task/implement-plan-template` | **Approved plan to reviewable sequential workflow**: one scripting agent reads `plan.md` and every `step-<n>.md` in the shared planning workspace, then renders `implement-plan.workflow.mjs` from a fixed `promptFile()` template with one literal node per step — each with a single bounded blocked-repair branch (one repair agent, one retry of the same step prompt) — plus one summary node. It never plans, replans, implements, or runs the generated file. The generated draft resolves only by explicit path.                                                                                                                                                                              |
 | `task/substep`                 | **One approved step to implementation history**: the input is one selector such as `S1` or `step-1.md`. One implementation agent resolves the matching `step-<n>.md`, treats that file on disk as the contract, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. JavaScript does not parse, select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                              |
 | `post-code-review`             | **External modular code review**: the root makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven `child` edges bind short sibling names to the root's exact selected folder namespace and source.                                                                                                                                                                                                                                                                                                 |
 | `post-code-review/scope`       | **Target and Git boundary**: one Luna/high agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -600,7 +600,7 @@ Transcript persistence follows the Pi surface that started the run. The slash-co
 
 The programmatic `workflow` tool never calls `sendMessage` while its tool output may be streaming. It buffers the same lifecycle and appends one digest to the single ordinary final `toolResult` text; Pi therefore persists it through the native tool-call transcript without an extra turn. Streamed progress updates remain presentation-only. Digests on both paths cap bounded lifecycle lines at 160 characters, keep at most 20 agent rows, and separate `Files` from `Commands`; semantic primary files lead the file group, while full-result and status commands stay copyable and untruncated. The separate command result message deliberately does not use digest bounds. Interactive command transcripts order the cards as started, finished, then exact result, so the useful output remains last; non-interactive JSON preserves exact-result-before-`workflow_end` because that terminal receipt closes the external protocol. A completed run with an exact result does not repeat a clipped copy in the finished receipt. A Package `task/plan` result labels its primary `plan.md` path and renders a human-only next action that requires review and explicit approval before main Pi starts `task/implement-plan-template` on the approved planning workspace. A Package `task/implement-plan-template` result labels the generated `implement-plan.workflow.mjs` and renders the explicit-path run command as the next action after review; a fail-closed `planning-blocker.md` primary instead renders a rerun instruction. One agent occupies one row for the whole run: the row is written on `agent_start` and rewritten in place on `agent_end`, keyed by the runtime-owned `callId` (falling back to agent/label/slot/round), so a reader never meets the same agent twice. An agent whose `agent_end` never arrives is not collapsed and not dropped — its row reads `■ agent <name> started — no end recorded (evidence missing)`, because a missing end must never be folded into a green run. Replayed work carries its own marker, `↻ agent <name> replayed from run #<source>`, rather than a success glyph plus a suffix; the source run id is taken from the runtime's own resume metadata and is never parsed out of log text. When it is unavailable the row still declares the replay and says the source run is unknown. A continuation run opens with `↳ continues run #<source>` plus the operator's answer, so it is legible without its source run on screen. A run that stops at an operator gate renders that gate as its own block: a blank line, `◐ WAITING FOR OPERATOR — <title>`, the stage that was current and the tool that opened the gate, the questions, and the pending-answer line. The handoff envelope records no asking agent, so the block names the stage and never infers an agent from adjacency. Raw result/journal detail never enters the digest. Workflow agent lines use the stable catalog `agent` plus `label` and status, not the workflow parent-row petname: the live panel may collapse that parent in favour of an SDK child with a different canonical petname. Terminal markers are status-aware: `✓ … finished` only for `completed`, `◐ … awaiting operator` for a successful handoff, `⊘ … cancelled` for `cancelled`, and `✗ … failed` for `failed`. Agent-row markers are `✓ finished`, `⊘ cancelled`, `✗ failed`/`blocked`, `↻ replayed`, `■ ended (<status>)`, and `■ … no end recorded`. Journal `error` lines are not persisted separately: a failed run always emits exactly one final failure with `eventKind: "workflow_end"`, using the journal text only as a fallback when the final result has none. On the command path, evidence warnings and failures to persist the completion messages remain correctly levelled `warning` notifications. A `result.json` write failure already belongs to the final live/typed result and is not repeated as a toast. If `waitForIdle`, the final idle check, or `sendMessage` is unavailable or fails, completion persistence stops and a clear warning is shown; the persisted journal/result artifacts remain source truth. The fallback never calls `sendMessage` and therefore cannot steer the parent agent.
 
-The compact workflow panel fits to the terminal height, keeps its journal internally, and shows the workflow/run header, the declared/reached/current stage frontier, the run's agent roster, bounded diagnostics, and the `/ps` inspection hint. The roster is the whole run in the order it happened: settled agents keep their status marker, duration, and token counter; the agent working right now keeps its spinner, the shared `accent` color every working agent carries, and its activity sub-line; and every declared stage the run has not reached yet follows as a dim `○ <title> · planned · <detail>` row, with the detail read statically from `meta.phases`. An undeclared dynamic stage appears only once it actually runs, so the roster never advertises work no declaration promised. A loop that re-enters a slot updates that one row and shows its `r<N>` round badge instead of appending a duplicate. When the roster does not fit the terminal, the oldest settled rows collapse behind an announced `(+N earlier agents)` line — the current row, the pending stages, and the final verdict are never the part that is dropped. It does not publish or expand the global fleet selection. Every `agent_end` status is terminal in the projection: `completed`, `failed`, and `cancelled` all leave `active`, atomically clear `currentTools`, `currentToolArgs`, and `currentToolStartMs`, freeze `elapsedMs`, stop the spinner, and render their own marker. Drill therefore cannot retain a stale command such as `sleep 60`, and duration cannot keep growing after cancel. Live-row settlement alone does not decide the workflow outcome: a bare result remains script-controlled, while a result returned directly from a `parallel()` branch or `pipeline()` stage with `status: "failed" | "blocked" | "cancelled"` becomes typed group failure after the barrier. Those rows participate in the shared fleet, but bare `Up`/`Down` always remain Pi editor/history input; `/ps` opens fleet management and `Shift+Down` is the registered fallback. Aggregate group rows remain visible status headings and are never selectable or actionable; in focused mode, `Enter`, `/ps last`, and direct targets operate only on exact leaf rows. Workflow leaf rows are inspectable but never keyboard-stoppable. `x` asks for confirmation only for a selected standalone working SDK child through its live `AbortController` seam. Terminal rows keep drill/back but expose no `x stop` affordance.
+The compact workflow panel fits to the terminal height, keeps its journal internally, and shows the workflow/run header, the declared/reached/current stage frontier, the run's agent roster, bounded diagnostics, and the `/ps` inspection hint. The roster is the whole run in the order it happened: settled agents keep their status marker, duration, and token counter; the agent working right now keeps its spinner, the shared `accent` color every working agent carries, and its activity sub-line; and every declared stage the run has not reached yet follows as a dim `○ <title> · planned · <detail>` row, with the detail read statically from `meta.phases`. An undeclared dynamic stage appears only once it actually runs, so the roster never advertises work no declaration promised. A loop that re-enters a slot updates that one row and shows its `r<N>` round badge instead of appending a duplicate. When the roster does not fit the terminal, the oldest settled rows collapse behind an announced `(+N earlier agents)` line — the current row, the pending stages, and the final verdict are never the part that is dropped. It does not publish or expand the global fleet selection. Every `agent_end` status is terminal in the projection: `completed`, `failed`, and `cancelled` all leave `active`, atomically clear `currentTools`, `currentToolArgs`, and `currentToolStartMs`, freeze `elapsedMs`, stop the spinner, and render their own marker. Drill therefore cannot retain a stale command such as `sleep 60`, and duration cannot keep growing after cancel. Live-row settlement alone does not decide the workflow outcome: the shared returned-outcome classifier evaluates the root and direct `parallel()`/`pipeline()` values, while typed group failure is emitted only after the barrier has preserved sibling evidence. Those rows participate in the shared fleet, but bare `Up`/`Down` always remain Pi editor/history input; `/ps` opens fleet management and `Shift+Down` is the registered fallback. Aggregate group rows remain visible status headings and are never selectable or actionable; in focused mode, `Enter`, `/ps last`, and direct targets operate only on exact leaf rows. Workflow leaf rows are inspectable but never keyboard-stoppable. `x` asks for confirmation only for a selected standalone working SDK child through its live `AbortController` seam. Terminal rows keep drill/back but expose no `x stop` affordance.
 
 `dsl.log()` records one readable script event with `source: "script"` and appears in the live panel as
 `│ script · <message>`. Internal workflow enter/exit and resume metadata record
@@ -628,12 +628,19 @@ value, or throwing `toJSON` becomes an explicit
 mandatory evidence: an envelope/filesystem write failure also makes the returned
 run `ok:false`, preserves the typed `resultPersistence` reason, and records a
 runtime `error` journal line so `/workflows status` remains failed without a valid
-result artifact. After this detach boundary, a JSON-safe top-level result with
-boolean `ok:false` or `partial:true` is semantic non-success. Either condition
-sets the returned and persisted run envelope to `ok:false`; status, command/tool
-completion, `result.json`, and read-side status therefore cannot present the run
-as success. A deliberate `partial:true` recovery may omit an `error` string.
-Missing `ok`, nested `ok`, and non-boolean `ok` values retain legacy
+result artifact. At a direct `parallel()` branch or `pipeline()` stage, failed
+preparation becomes a typed group-boundary failure before semantic
+classification. It is not a fourth returned-outcome kind, and the original raw
+branch or stage value remains in group evidence. After successful detachment,
+the shared returned-outcome
+classifier treats a JSON-safe top-level object with boolean `ok:false`,
+`partial:true`, or `status: "failed" | "blocked" | "cancelled"` as semantic
+non-success. Any condition sets the returned and persisted run envelope to
+`ok:false`; status, command/tool completion, `result.json`, and read-side status
+therefore cannot present the run as success. A deliberate `partial:true`
+recovery may omit an `error` string. A failure status remains preserved domain
+detail; the workflow disposition is `failed`. Missing fields, nested fields,
+non-boolean `ok`/`partial`, and other status strings retain legacy
 execution-success semantics. For a semantic failure without a technical error,
 the shared result owner formats the non-empty `summary`, then stable sorted
 `unresolvedRows`; the transcript, tool/command result block, and live progress
@@ -1119,7 +1126,13 @@ with:
 Run the same check for every declared direct child. The tool comes from the
 installed workflows extension and resolves the workflow path inside the
 current project. Build is not successful until the checker passes, the module imports, and
-the source still matches its reviewed design.
+the source still matches its reviewed design. Diagnostic text uses
+`path:line:column [CODE] message`; structured tool details include the same
+stable code, `error`/`warning` severity, one-based source span, and optional
+related spans. Errors fail the tool. Warning-only results remain successful so
+authors can repair declaration drift without losing the rest of the checker
+output. The pure compatibility API `standardWorkflowSourceShapeErrors()` still
+returns the legacy sorted error-message array and omits warnings.
 Standard source treats semantic input, plain model text, and items as opaque whole values:
 only exact prompt/publication/return forwarding and unchanged item scheduling
 are allowed. Runtime-owned choices, list identity, status, and counters remain
@@ -1213,19 +1226,29 @@ Rules:
   computed value, template interpolation, spread, or non-object element discards
   the entire declaration rather than reporting a partial pipeline — the same
   fail-closed rule an interpolated `description` already follows.
-- **A declaration, not a contract.** Nothing validates `phases` at runtime.
-  `/workflows status <runId>` matches declared titles against the `phase()` lines
-  the run actually emitted: a declared phase that never ran shows as unreached,
-  and a `phase()` with no declaration is appended as its own group marked
-  `(undeclared)`. Neither fails a run — a `phase()` inside a branch may
-  legitimately never execute.
+- **Static declaration contract.** An absent or empty declaration remains
+  valid. A non-empty declaration is the complete unique vocabulary of literal
+  `phase("...")` calls, in planned first-source order. The standard source
+  checker reports `WF_PHASE_DUPLICATE_DECLARATION`,
+  `WF_PHASE_CASE_MISMATCH`, and `WF_PHASE_UNDECLARED` as errors;
+  `WF_PHASE_UNUSED_DECLARATION` and `WF_PHASE_ORDER_DRIFT` are warnings.
+  Repeated calls to one phase are not duplicates, and the checker does not try
+  to prove which branch will execute.
+- **Runtime projection remains observational.** Runtime does not fail a run
+  because a declared branch was not reached. `/workflows status <runId>`
+  matches declared titles against the `phase()` lines the run actually emitted:
+  an unreached declaration stays planned, while an observed undeclared phase is
+  appended and marked `(undeclared)`. The static checker prevents that drift in
+  authored `standard` source before execution; the status reader stays honest
+  for legacy, integration, or historical runs.
 - **Where it shows.** `/workflows info <name>` lists the declared stages with
   their details; `/workflows list` adds `phases=<count>` to the row; `detail` is
   shortened past 96 characters like `description`.
 
-Titles should equal the `phase()` argument they describe, so the two stay
-readable together. A curated workflow's declaration is regression-tested against
-its own `phase()` calls for exactly that reason.
+Titles exactly equal the literal `phase()` arguments they describe. Every
+packaged workflow with a non-empty declaration is regression-tested against its
+own unique literal calls in first-source order; workflows without a declaration
+remain valid.
 
 ### Workflow input and host continuation
 
@@ -1494,6 +1517,39 @@ value instead of producing a new one. Calling `Date.now()` or `Math.random()`
 directly is not forbidden — those values are simply unrecorded, and a script
 containing them is refused for replay. See "Resume and replay".
 
+### Returned outcome contract
+
+After the JSON detach boundary, root runs, direct `parallel()` branches, and
+direct `pipeline()` stages use one classifier. A value that cannot cross
+`prepareWorkflowResult()` JSON detachment fails separately at the group
+boundary; examples include unsupported `BigInt`, circular values, and throwing
+`toJSON`. This preparation diagnostic is not a fourth semantic kind. For a
+successfully detached object, semantic failure holds when any of these exact
+conditions is true:
+
+```text
+ok === false
+partial === true
+status === "failed" | "blocked" | "cancelled"
+```
+
+The checks are additive and context-independent. For example,
+`{ status: "blocked", summary: "Owner decision required" }` fails at the root
+and inside a group; `{ partial: true }` also fails in both places. The runtime
+classifies the detached value returned by `prepareWorkflowResult()` in both
+contexts. Group failure slots keep the original raw branch or stage value as
+evidence; the root keeps its detached result. A failure `status` remains domain
+detail, while the durable workflow disposition is `failed`. Missing fields,
+non-boolean `ok`/`partial`, and other status strings retain legacy success
+semantics.
+
+This is a one-way compatibility change. A direct group value with
+`partial:true` previously resolved as success and now rejects with typed group
+failure. A root value with a failure `status` previously completed and now
+fails. A direct non-JSON-safe branch or stage value could previously pass the
+group barrier and now fails closed as a typed boundary error. Direct or root
+`ok:false` was already failure and remains unchanged.
+
 ### Group failure contract
 
 `parallel()` and `pipeline()` are fail-closed full barriers. They let already
@@ -1501,9 +1557,11 @@ scheduled independent siblings settle before reporting the group outcome. If
 every slot succeeds, both primitives preserve input order and return the same
 success arrays as before; an explicitly fulfilled `null` is a valid value.
 
-An ordinary branch or stage fails when it throws, or when its **direct return
-value** is an object with `ok:false` or
-`status: "failed" | "blocked" | "cancelled"`.
+An ordinary branch or stage fails when it throws, when its **direct return
+value** cannot cross the JSON preparation boundary, or when the successfully
+detached value matches the shared returned-outcome contract above (`ok:false`,
+`partial:true`, or a failure status). Preparation failure remains separate from
+the exact three-kind semantic classifier.
 `pipeline()` stops later stages for that item while other items continue to the
 barrier. After the barrier, either primitive rejects one
 `WorkflowGroupFailureError` with stable `code: "WORKFLOW_GROUP_FAILURE"`,
@@ -2183,7 +2241,7 @@ When the Pi SDK host cannot spawn a child agent session:
 2. `workflow-agent-bridge.ts` branches on that typed cause — never on the diagnostic text — and throws `WorkflowAgentUnavailableError`, carrying the same `failureCause` and the honest `AGENT_SDK_UNAVAILABLE_HINT` ("Pi SDK host") reason. Re-wording the diagnostic therefore cannot turn a run-ending failure into a blocked result a script might read as an answer.
 3. A bare `agent()` call rejects (propagates the error to the script).
 4. Inside `parallel()` / `pipeline()`, the branch is marked failed; scheduled siblings finish, then the group rejects `WorkflowGroupFailureError` instead of returning a normal `null` slot.
-5. If the script does not deliberately catch that stable typed error, `runWorkflowScript` writes a JSON-safe group-failure `result`, persists outer `ok:false`, and returns the group error text. A deliberate typed catch must return `partial:true`, which also remains non-success.
+5. If the script does not deliberately catch that stable typed error, `runWorkflowScript` writes a JSON-safe group-failure `result`, persists outer `ok:false`, and returns the group error text. A deliberate typed catch must return an explicit failure outcome such as `partial:true`, `ok:false`, or a failure `status`; the shared classifier keeps each form non-success at the root.
 
 **No fake success is ever reported.**
 

@@ -40,6 +40,7 @@ import {
 import type { EvidenceEvaluation } from "../../_shared/agent-runtime/agent-evidence-evaluator.js";
 import type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { WorkflowPrimaryFileReference } from "./workflow-output.js";
+import { classifyWorkflowReturnedFailure, prepareWorkflowResult } from "./workflow-result.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
 // `agent-failure-cause.ts`, a module with no imports at all. Reading it as a value here keeps
 // this core host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the
@@ -3777,25 +3778,34 @@ function classifyReturnedGroupFailure(
   index: number,
   stageIndex?: number,
 ): WorkflowBranchFailure | undefined {
-  if (!isRecord(value)) return undefined;
-  const status = typeof value.status === "string" ? value.status : undefined;
-  const failedStatus = status === "failed" || status === "blocked" || status === "cancelled";
-  if (value.ok !== false && !failedStatus) return undefined;
-  const summary = typeof value.summary === "string" && value.summary.trim() !== "" ? value.summary : undefined;
-  const firstDiagnostic = Array.isArray(value.diagnostics)
-    ? value.diagnostics.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+  const prepared = prepareWorkflowResult(value);
+  if (prepared.diagnostic !== undefined) {
+    return {
+      index,
+      kind: "returned-failure",
+      message: workflowErrorMessage(prepared.diagnostic.message),
+      ...(stageIndex !== undefined ? { stageIndex } : {}),
+    };
+  }
+  const returnedFailure = classifyWorkflowReturnedFailure(prepared.value);
+  if (returnedFailure === undefined) return undefined;
+  const record = isRecord(value) ? value : {};
+  const firstDiagnostic = Array.isArray(record.diagnostics)
+    ? record.diagnostics.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
     : undefined;
-  const message = workflowErrorMessage(
-    summary ??
-      firstDiagnostic ??
-      (status === undefined ? "branch returned ok:false" : `branch returned status=${status}`),
-  );
+  const fallback =
+    returnedFailure.status !== undefined
+      ? `branch returned status=${returnedFailure.status}`
+      : returnedFailure.kind === "partial"
+        ? "branch returned partial:true"
+        : "branch returned ok:false";
+  const message = workflowErrorMessage(returnedFailure.summary ?? firstDiagnostic ?? fallback);
   return {
     index,
     kind: "returned-failure",
     message,
     ...(stageIndex !== undefined ? { stageIndex } : {}),
-    ...(status !== undefined ? { status } : {}),
+    ...(returnedFailure.status !== undefined ? { status: returnedFailure.status } : {}),
   };
 }
 

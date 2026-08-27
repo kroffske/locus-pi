@@ -2,6 +2,8 @@
 
 `model` provides persisted routing roles and thinking-effort controls without replacing Pi's built-in `/model` or `/models` commands.
 
+It also treats global `enabledModels` as a hard execution allowlist. Pi may show a larger provider catalog, but input is handled without an LLM request when the active `provider/model` does not match `~/.pi/agent/settings.json` `enabledModels`. Explicit `--model` therefore cannot bypass the configured list. An empty or malformed configured list fails closed; an absent `enabledModels` key leaves the host's default behavior unchanged.
+
 ## Commands
 
 ```text
@@ -24,6 +26,7 @@ Effective precedence is session, settings compatibility state, project, then use
 ## Implementation
 
 - Entrypoint: `extensions/model/index.ts`
+- Hard allowlist: `extensions/model/model-allowlist.ts`
 - Selector: `extensions/model/model-role-selector.ts`
 - Persistence and resolution: `extensions/_shared/model/model-settings.ts`
 - Effort command: `extensions/model/effort-command.ts`

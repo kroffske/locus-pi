@@ -3,10 +3,14 @@ export const meta = {
   description: "Apply authorized work from a prepared plan or review, then independently verify it once.",
   profile: "standard",
   phases: [
-    { title: "Prepare", detail: "Normalize the source and decide whether execution is authorized." },
-    { title: "Implement", detail: "Apply only the selected action level and record focused checks." },
-    { title: "Verify", detail: "Inspect the live result and allow at most one corrective pass." },
-    { title: "Report", detail: "Publish the implementation outcome and remaining work." },
+    { title: "prepare", detail: "Normalize the source into one bounded implementation plan." },
+    { title: "readiness", detail: "Classify the plan as executable, no-work, or operator-blocked." },
+    { title: "report", detail: "Publish the terminal outcome for any completed route." },
+    { title: "operator-decision", detail: "Stop with a precise handoff when owner input is required." },
+    { title: "implement", detail: "Apply only the selected action level and record focused checks." },
+    { title: "verify", detail: "Inspect the live result independently before acceptance." },
+    { title: "correct", detail: "Apply at most one bounded corrective pass." },
+    { title: "verify-correction", detail: "Verify the corrected result without widening scope." },
   ],
 };
 

@@ -8,7 +8,7 @@ import { errorResult, getProjectRoot, textResult } from "../../_shared/host/pi-a
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { safeToolText } from "../../_shared/host/safe-output.js";
 import { validateParams } from "../../_shared/host/validation.js";
-import { standardWorkflowSourceShapeErrors } from "./workflow-source-shape.js";
+import { standardWorkflowSourceShapeDiagnostics, type WorkflowSourceDiagnostic } from "./workflow-source-shape.js";
 
 const WorkflowSourceCheckParams = Type.Object(
   {
@@ -41,13 +41,28 @@ export function registerWorkflowSourceCheckTool(pi: ExtensionAPI): void {
         const projectRoot = getProjectRoot(ctx);
         const sourcePath = confinedProjectFile(projectRoot, valid.value.path);
         const displayPath = path.relative(projectRoot, sourcePath).split(path.sep).join("/");
-        const errors = standardWorkflowSourceShapeErrors(readFileSync(sourcePath, "utf8"));
-        const details = { owner: "workflows", path: displayPath, errorCount: errors.length };
-        if (errors.length > 0) {
+        const diagnostics = standardWorkflowSourceShapeDiagnostics(readFileSync(sourcePath, "utf8"));
+        const errorDiagnostics = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+        const errorCount = new Set(errorDiagnostics.map((diagnostic) => diagnostic.message)).size;
+        const warningCount = diagnostics.length - errorDiagnostics.length;
+        const details = { owner: "workflows", path: displayPath, errorCount, warningCount, diagnostics };
+        if (errorDiagnostics.length > 0) {
           const output = safeToolText(
-            `${displayPath}: standard workflow source shape failed:\n${errors.map((error) => `- ${error}`).join("\n")}`,
+            `${displayPath}: standard workflow source shape failed:
+${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, diagnostic)).join("\n")}`,
           );
           return errorResult(output.text, {
+            ...details,
+            outputTruncated: output.truncated,
+            outputRedacted: output.redacted,
+          });
+        }
+        if (warningCount > 0) {
+          const output = safeToolText(
+            `${displayPath}: standard workflow source shape passed with ${warningCount} warning(s):
+${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, diagnostic)).join("\n")}`,
+          );
+          return textResult(output.text, {
             ...details,
             outputTruncated: output.truncated,
             outputRedacted: output.redacted,
@@ -59,6 +74,10 @@ export function registerWorkflowSourceCheckTool(pi: ExtensionAPI): void {
       }
     },
   });
+}
+
+function formatWorkflowSourceDiagnostic(displayPath: string, diagnostic: WorkflowSourceDiagnostic): string {
+  return `${displayPath}:${diagnostic.line}:${diagnostic.column} [${diagnostic.code}] ${diagnostic.message}`;
 }
 
 function confinedProjectFile(projectRoot: string, relativePath: string): string {

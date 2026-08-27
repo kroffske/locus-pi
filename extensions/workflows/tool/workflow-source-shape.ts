@@ -1,32 +1,232 @@
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 
+export type WorkflowSourceDiagnosticSeverity = "error" | "warning";
+
+export interface WorkflowSourceSpan {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+}
+
+export interface WorkflowSourceDiagnosticRelated extends WorkflowSourceSpan {
+  message: string;
+}
+
+const WORKFLOW_SOURCE_DIAGNOSTIC_CODES = {
+  binding: "WF_BINDING",
+  call: "WF_CALL",
+  dataFlow: "WF_DATA_FLOW",
+  expression: "WF_EXPRESSION",
+  identifier: "WF_IDENTIFIER",
+  import: "WF_IMPORT",
+  metaProfile: "WF_META_PROFILE",
+  phaseCaseMismatch: "WF_PHASE_CASE_MISMATCH",
+  phaseDuplicateDeclaration: "WF_PHASE_DUPLICATE_DECLARATION",
+  phaseOrderDrift: "WF_PHASE_ORDER_DRIFT",
+  phaseUndeclared: "WF_PHASE_UNDECLARED",
+  phaseUnusedDeclaration: "WF_PHASE_UNUSED_DECLARATION",
+  policy: "WF_POLICY",
+  runExport: "WF_RUN_EXPORT",
+  sourceParse: "WF_SOURCE_PARSE",
+  statement: "WF_STATEMENT",
+  topLevel: "WF_TOP_LEVEL",
+} as const;
+
+export type WorkflowSourceDiagnosticCode =
+  (typeof WORKFLOW_SOURCE_DIAGNOSTIC_CODES)[keyof typeof WORKFLOW_SOURCE_DIAGNOSTIC_CODES];
+
+export interface WorkflowSourceDiagnostic extends WorkflowSourceSpan {
+  code: WorkflowSourceDiagnosticCode;
+  severity: WorkflowSourceDiagnosticSeverity;
+  message: string;
+  related?: readonly WorkflowSourceDiagnosticRelated[];
+}
+
+interface WorkflowSourceDiagnosticRelatedNode {
+  message: string;
+  node: SgNode;
+}
+
+interface WorkflowSourceDiagnosticSink {
+  add(
+    message: string,
+    node?: SgNode,
+    code?: WorkflowSourceDiagnosticCode,
+    severity?: WorkflowSourceDiagnosticSeverity,
+    related?: readonly WorkflowSourceDiagnosticRelatedNode[],
+  ): void;
+}
+
+class WorkflowSourceDiagnosticBag {
+  readonly #diagnostics: WorkflowSourceDiagnostic[] = [];
+  readonly #keys = new Set<string>();
+
+  sink(defaultCode: WorkflowSourceDiagnosticCode, fallbackNode?: SgNode): WorkflowSourceDiagnosticSink {
+    return {
+      add: (message, node = fallbackNode, code = defaultCode, severity = "error", related) => {
+        this.add(code, severity, message, node, related);
+      },
+    };
+  }
+
+  add(
+    code: WorkflowSourceDiagnosticCode,
+    severity: WorkflowSourceDiagnosticSeverity,
+    message: string,
+    node?: SgNode,
+    related?: readonly WorkflowSourceDiagnosticRelatedNode[],
+  ): void {
+    const span = workflowSourceSpan(node);
+    const normalizedRelated = related?.map((item) => ({ message: item.message, ...workflowSourceSpan(item.node) }));
+    const diagnostic: WorkflowSourceDiagnostic = {
+      code,
+      severity,
+      message,
+      ...span,
+      ...(normalizedRelated !== undefined && normalizedRelated.length > 0 ? { related: normalizedRelated } : {}),
+    };
+    const key = workflowSourceDiagnosticIdentity(diagnostic);
+    if (this.#keys.has(key)) return;
+    this.#keys.add(key);
+    this.#diagnostics.push(diagnostic);
+  }
+
+  values(): WorkflowSourceDiagnostic[] {
+    return [...this.#diagnostics].sort(
+      (left, right) =>
+        left.line - right.line ||
+        left.column - right.column ||
+        left.endLine - right.endLine ||
+        left.endColumn - right.endColumn ||
+        severityRank(left.severity) - severityRank(right.severity) ||
+        compareCodeUnits(left.code, right.code) ||
+        compareCodeUnits(left.message, right.message) ||
+        compareCodeUnits(workflowSourceRelatedIdentity(left.related), workflowSourceRelatedIdentity(right.related)),
+    );
+  }
+}
+
+function workflowSourceDiagnosticIdentity(diagnostic: WorkflowSourceDiagnostic): string {
+  return JSON.stringify([
+    diagnostic.severity,
+    diagnostic.code,
+    diagnostic.message,
+    diagnostic.line,
+    diagnostic.column,
+    diagnostic.endLine,
+    diagnostic.endColumn,
+    workflowSourceRelatedIdentity(diagnostic.related),
+  ]);
+}
+
+function workflowSourceRelatedIdentity(related: readonly WorkflowSourceDiagnosticRelated[] | undefined): string {
+  return JSON.stringify(
+    related?.map(({ message, line, column, endLine, endColumn }) => [message, line, column, endLine, endColumn]) ?? [],
+  );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /**
  * Static authoring-profile gate. This protects the readable standard grammar;
  * it is not a runtime domain linter and does not inspect model output.
  */
-export function standardWorkflowSourceShapeErrors(source: string): string[] {
-  const errors = new Set<string>();
+export function standardWorkflowSourceShapeDiagnostics(source: string): WorkflowSourceDiagnostic[] {
+  const diagnostics = new WorkflowSourceDiagnosticBag();
   let root: SgNode;
   try {
     root = parse(Lang.JavaScript, source).root();
   } catch (error) {
-    return [`source parse failed: ${error instanceof Error ? error.message : String(error)}`];
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.sourceParse,
+      "error",
+      `source parse failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return diagnostics.values();
   }
   const parseError = root.findAll({ rule: { kind: "ERROR" } })[0];
-  if (parseError !== undefined) return [`source parse failed: ${oneLineSourceShape(parseError.text())}`];
+  if (parseError !== undefined) {
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.sourceParse,
+      "error",
+      `source parse failed: ${oneLineSourceShape(parseError.text())}`,
+      parseError,
+    );
+    return diagnostics.values();
+  }
 
-  const runEntry = validateStandardTopLevel(root, errors);
-  validateStandardStatements(runEntry, errors);
-  validateStandardDependencies(root, errors);
-  validateStandardOwnedPolicy(root, runEntry, errors);
-  validateStandardIdentifierRoots(root, errors);
+  const runEntry = validateStandardTopLevel(root, diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.topLevel, root));
+  validateStandardStatements(runEntry, diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.statement, runEntry ?? root));
+  validateStandardDependencies(root, diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.import, root));
+  validateStandardOwnedPolicy(
+    root,
+    runEntry,
+    diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.policy, runEntry ?? root),
+  );
+  validateStandardIdentifierRoots(
+    root,
+    diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.identifier, runEntry ?? root),
+  );
   const dslBindings = standardDslBindings(runEntry);
-  const bindingModel = standardBindingModel(root, runEntry, dslBindings, errors);
+  validateStandardPhaseDeclarations(root, runEntry, diagnostics);
+  const bindingModel = standardBindingModel(
+    root,
+    runEntry,
+    dslBindings,
+    diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.binding, runEntry ?? root),
+  );
   const protectedBindings = new Set([...dslBindings, ...bindingModel.collections.names, "Error"]);
-  validateStandardExpressions(root, protectedBindings, dslBindings, bindingModel, errors);
-  validateStandardCalls(root, runEntry, dslBindings, bindingModel.collections, errors);
-  validateStandardValueUses(root, runEntry, dslBindings, bindingModel, errors);
-  return [...errors].sort();
+  validateStandardExpressions(
+    root,
+    protectedBindings,
+    dslBindings,
+    bindingModel,
+    diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.expression, runEntry ?? root),
+  );
+  validateStandardCalls(
+    root,
+    runEntry,
+    dslBindings,
+    bindingModel.collections,
+    diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.call, runEntry ?? root),
+  );
+  validateStandardValueUses(
+    root,
+    runEntry,
+    dslBindings,
+    bindingModel,
+    diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.dataFlow, runEntry ?? root),
+  );
+  return diagnostics.values();
+}
+
+/** Legacy message-only projection retained for existing tests and automation. */
+export function standardWorkflowSourceShapeErrors(source: string): string[] {
+  return [
+    ...new Set(
+      standardWorkflowSourceShapeDiagnostics(source)
+        .filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => diagnostic.message),
+    ),
+  ].sort();
+}
+
+function workflowSourceSpan(node: SgNode | undefined): WorkflowSourceSpan {
+  if (node === undefined) return { line: 1, column: 1, endLine: 1, endColumn: 1 };
+  const range = node.range();
+  return {
+    line: range.start.line + 1,
+    column: range.start.column + 1,
+    endLine: range.end.line + 1,
+    endColumn: range.end.column + 1,
+  };
+}
+
+function severityRank(severity: WorkflowSourceDiagnosticSeverity): number {
+  return severity === "error" ? 0 : 1;
 }
 
 const STANDARD_RUN_NAMES = new Set(["run", "runWorkflow"]);
@@ -77,20 +277,229 @@ const STANDARD_STATEMENTS = new Set([
   "while_statement",
 ]);
 
+interface StandardDeclaredPhase {
+  title: string;
+  node: SgNode;
+}
+
+interface StandardCalledPhase {
+  title: string;
+  node: SgNode;
+}
+
+interface StandardPhaseDslBindings {
+  dsl: readonly StandardLexicalBinding[];
+  phase: readonly StandardLexicalBinding[];
+}
+
+function validateStandardPhaseDeclarations(
+  root: SgNode,
+  runEntry: SgNode | undefined,
+  diagnostics: WorkflowSourceDiagnosticBag,
+): void {
+  if (runEntry === undefined) return;
+  const meta = root
+    .children()
+    .map((statement) => exportedMetaObject(statement))
+    .find((value) => value !== undefined);
+  const phasesPair = meta
+    ?.children()
+    .find((child) => child.kind() === "pair" && staticObjectKey(child.field("key")) === "phases");
+  const phasesNode = phasesPair?.field("value");
+  if (phasesNode?.kind() !== "array") return;
+
+  const declared = phasesNode.children().flatMap((child): StandardDeclaredPhase[] => {
+    if (child.kind() !== "object") return [];
+    const titlePair = child
+      .children()
+      .find((entry) => entry.kind() === "pair" && staticObjectKey(entry.field("key")) === "title");
+    const titleNode = titlePair?.field("value");
+    const title = staticStringValue(titleNode);
+    return title === undefined || titleNode == null ? [] : [{ title, node: titleNode }];
+  });
+  if (declared.length === 0) return;
+
+  const lexicalBindings = standardLexicalBindings(runEntry);
+  const phaseBindings = standardPhaseDslBindings(runEntry, lexicalBindings);
+  const calledByTitle = new Map<string, StandardCalledPhase>();
+  for (const call of runEntry.findAll({ rule: { kind: "call_expression" } })) {
+    const callee = unwrapStandardParentheses(callCallee(call));
+    if (callee === undefined || !isTrustedStandardPhaseCall(call, callee, lexicalBindings, phaseBindings)) continue;
+    const argument = unwrapStandardParentheses(standardCallArguments(call)[0]);
+    const title = staticStringValue(argument);
+    if (title !== undefined && argument !== undefined && !calledByTitle.has(title))
+      calledByTitle.set(title, { title, node: argument });
+  }
+  const called = [...calledByTitle.values()];
+  const declaredByTitle = new Map<string, StandardDeclaredPhase>();
+  const firstDeclaredByFoldedTitle = new Map<string, StandardDeclaredPhase>();
+  for (const phase of declared) {
+    const foldedTitle = phase.title.toLowerCase();
+    const first = firstDeclaredByFoldedTitle.get(foldedTitle);
+    if (first !== undefined) {
+      const exact = first.title === phase.title;
+      diagnostics.add(
+        WORKFLOW_SOURCE_DIAGNOSTIC_CODES.phaseDuplicateDeclaration,
+        "error",
+        exact
+          ? `meta.phases repeats title "${phase.title}"`
+          : `meta.phases title "${phase.title}" duplicates "${first.title}" by case`,
+        phase.node,
+        [{ message: `first declared as "${first.title}" here`, node: first.node }],
+      );
+    } else {
+      firstDeclaredByFoldedTitle.set(foldedTitle, phase);
+    }
+    if (!declaredByTitle.has(phase.title)) declaredByTitle.set(phase.title, phase);
+  }
+
+  for (const phase of called) {
+    if (declaredByTitle.has(phase.title)) continue;
+    const caseMatch = declared.find((candidate) => candidate.title.toLowerCase() === phase.title.toLowerCase());
+    if (caseMatch !== undefined) {
+      diagnostics.add(
+        WORKFLOW_SOURCE_DIAGNOSTIC_CODES.phaseCaseMismatch,
+        "error",
+        `meta.phases title "${caseMatch.title}" differs from literal phase("${phase.title}") only by case`,
+        phase.node,
+        [{ message: `declared as "${caseMatch.title}" here`, node: caseMatch.node }],
+      );
+      continue;
+    }
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.phaseUndeclared,
+      "error",
+      `literal phase("${phase.title}") is absent from non-empty meta.phases`,
+      phase.node,
+      [{ message: "meta.phases is declared here", node: phasesNode }],
+    );
+  }
+
+  for (const phase of declaredByTitle.values()) {
+    const exactCall = calledByTitle.get(phase.title);
+    const caseCall = called.find((candidate) => candidate.title.toLowerCase() === phase.title.toLowerCase());
+    if (exactCall !== undefined || caseCall !== undefined) continue;
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.phaseUnusedDeclaration,
+      "warning",
+      `meta.phases title "${phase.title}" has no literal phase("${phase.title}") call`,
+      phase.node,
+    );
+  }
+
+  const declaredTitles = [...declaredByTitle.keys()];
+  const calledTitles = [...calledByTitle.keys()];
+  const sameExactSet =
+    declaredTitles.length === calledTitles.length && declaredTitles.every((title) => calledByTitle.has(title));
+  if (sameExactSet && declaredTitles.some((title, index) => title !== calledTitles[index])) {
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.phaseOrderDrift,
+      "warning",
+      "meta.phases order differs from first literal phase() occurrence",
+      phasesNode,
+      called[0] === undefined ? undefined : [{ message: "first literal phase() occurrence", node: called[0].node }],
+    );
+  }
+}
+
+function standardPhaseDslBindings(
+  runEntry: SgNode,
+  lexicalBindings: readonly StandardLexicalBinding[],
+): StandardPhaseDslBindings {
+  const parameters = standardFunctionParameters(runEntry);
+  const firstParameter = standardFunctionParameterNodes(parameters)[0];
+  const parameterBindings = new Set<string>();
+  if (firstParameter?.kind() === "object_pattern") addStandardDslBindings(parameterBindings, firstParameter);
+
+  const trustedDeclaratorIds = new Set<number>();
+  const runBody = runEntry.children().find((child) => child.kind() === "statement_block");
+  for (const declaration of runEntry.findAll({ rule: { kind: "variable_declarator" } })) {
+    const ownerBlock = declaration.ancestors().find((ancestor) => ancestor.kind() === "statement_block");
+    const pattern = declaration.field("name");
+    if (
+      ownerBlock?.id() !== runBody?.id() ||
+      declaration.field("value")?.text() !== "dsl" ||
+      pattern?.kind() !== "object_pattern"
+    ) {
+      continue;
+    }
+    const bindings = new Set<string>();
+    addStandardDslBindings(bindings, pattern);
+    if (bindings.has("phase")) trustedDeclaratorIds.add(declaration.id());
+  }
+
+  return {
+    dsl:
+      firstParameter?.kind() === "identifier" && firstParameter.text() === "dsl"
+        ? lexicalBindings.filter(
+            (binding) => binding.name === "dsl" && binding.bindingId === (parameters?.id() ?? firstParameter.id()),
+          )
+        : [],
+    phase: lexicalBindings.filter(
+      (binding) =>
+        binding.name === "phase" &&
+        ((parameterBindings.has("phase") && binding.bindingId === parameters?.id()) ||
+          trustedDeclaratorIds.has(binding.bindingId)),
+    ),
+  };
+}
+
+function isTrustedStandardPhaseCall(
+  call: SgNode,
+  callee: SgNode,
+  lexicalBindings: readonly StandardLexicalBinding[],
+  bindings: StandardPhaseDslBindings,
+): boolean {
+  if (callee.kind() === "identifier" && callee.text() === "phase") {
+    return hasOnlyActiveTrustedBinding(call, "phase", lexicalBindings, bindings.phase);
+  }
+  return (
+    callee.kind() === "member_expression" &&
+    callee.field("object")?.text() === "dsl" &&
+    callee.field("property")?.text() === "phase" &&
+    hasOnlyActiveTrustedBinding(call, "dsl", lexicalBindings, bindings.dsl)
+  );
+}
+
+function hasOnlyActiveTrustedBinding(
+  node: SgNode,
+  name: string,
+  lexicalBindings: readonly StandardLexicalBinding[],
+  trustedBindings: readonly StandardLexicalBinding[],
+): boolean {
+  const ancestorIds = new Set(node.ancestors().map((ancestor) => ancestor.id()));
+  const nodeIndex = node.range().start.index;
+  const visible = lexicalBindings.filter(
+    (binding) => binding.name === name && ancestorIds.has(binding.scopeId) && nodeIndex >= binding.shadowIndex,
+  );
+  const activeTrustedIds = new Set(
+    trustedBindings
+      .filter(
+        (binding) =>
+          ancestorIds.has(binding.scopeId) && nodeIndex >= binding.shadowIndex && nodeIndex >= binding.activationIndex,
+      )
+      .map((binding) => binding.bindingId),
+  );
+  return activeTrustedIds.size > 0 && visible.every((binding) => activeTrustedIds.has(binding.bindingId));
+}
+
 /** Validate the closed standard module surface and return its one visible run function. */
-function validateStandardTopLevel(root: SgNode, errors: Set<string>): SgNode | undefined {
+function validateStandardTopLevel(root: SgNode, errors: WorkflowSourceDiagnosticSink): SgNode | undefined {
   let metaCount = 0;
   const runEntries: SgNode[] = [];
   for (const statement of root.children()) {
     if (statement.kind() === "comment" || statement.kind() === "hash_bang_line" || statement.kind() === ";") continue;
     if (statement.kind() === "lexical_declaration") {
       if (!isLiteralConstDeclaration(statement)) {
-        errors.add("standard profile top-level constants must contain only literal data");
+        errors.add("standard profile top-level constants must contain only literal data", statement);
       }
       continue;
     }
     if (statement.kind() !== "export_statement") {
-      errors.add("standard profile top level permits only literal constants, literal meta, and one default run export");
+      errors.add(
+        "standard profile top level permits only literal constants, literal meta, and one default run export",
+        statement,
+      );
       continue;
     }
 
@@ -98,7 +507,11 @@ function validateStandardTopLevel(root: SgNode, errors: Set<string>): SgNode | u
     if (meta !== undefined) {
       metaCount += 1;
       if (!isExactLiteralMetaExport(statement, meta) || staticMetaProfile(meta) !== "standard") {
-        errors.add('standard profile requires one literal `export const meta` with `profile: "standard"`');
+        errors.add(
+          'standard profile requires one literal `export const meta` with `profile: "standard"`',
+          statement,
+          WORKFLOW_SOURCE_DIAGNOSTIC_CODES.metaProfile,
+        );
       }
       continue;
     }
@@ -114,40 +527,56 @@ function validateStandardTopLevel(root: SgNode, errors: Set<string>): SgNode | u
     if (statement.children().some((child) => child.kind() === "default") && entry !== undefined) {
       const name = entry.field("name")?.text();
       if (name !== undefined && !STANDARD_RUN_NAMES.has(name)) {
-        errors.add("standard profile run export is named run or runWorkflow");
+        errors.add(
+          "standard profile run export is named run or runWorkflow",
+          entry.field("name") ?? entry,
+          WORKFLOW_SOURCE_DIAGNOSTIC_CODES.runExport,
+        );
       }
       runEntries.push(entry);
       continue;
     }
 
-    errors.add("standard profile exports only literal meta and one visible default run function");
+    errors.add("standard profile exports only literal meta and one visible default run function", statement);
   }
-  if (metaCount !== 1)
-    errors.add('standard profile requires one literal `export const meta` with `profile: "standard"`');
-  if (runEntries.length !== 1) errors.add("standard profile requires exactly one visible default run function");
+  if (metaCount !== 1) {
+    errors.add(
+      'standard profile requires one literal `export const meta` with `profile: "standard"`',
+      root,
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.metaProfile,
+    );
+  }
+  if (runEntries.length !== 1) {
+    errors.add(
+      "standard profile requires exactly one visible default run function",
+      root,
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.runExport,
+    );
+  }
   return runEntries.length === 1 ? runEntries[0] : undefined;
 }
 
 /** Standard orchestration uses ordinary declarations/control flow, never hidden statement machinery. */
-function validateStandardStatements(runEntry: SgNode | undefined, errors: Set<string>): void {
+function validateStandardStatements(runEntry: SgNode | undefined, errors: WorkflowSourceDiagnosticSink): void {
   if (runEntry === undefined) return;
   for (const block of runEntry.findAll({ rule: { kind: "statement_block" } })) {
     for (const statement of block.children()) {
       if (isStructuralStatementNode(statement)) continue;
       if (!STANDARD_STATEMENTS.has(String(statement.kind()))) {
-        errors.add(`standard profile does not permit ${statement.kind()} in the run body`);
+        errors.add(`standard profile does not permit ${statement.kind()} in the run body`, statement);
       }
     }
   }
 }
 
-function validateStandardDependencies(root: SgNode, errors: Set<string>): void {
+function validateStandardDependencies(root: SgNode, errors: WorkflowSourceDiagnosticSink): void {
   for (const statement of root.findAll({ rule: { kind: "import_statement" } })) {
     const specifier = staticStringValue(statement.children().find((child) => child.kind() === "string"));
     errors.add(
       specifier?.startsWith("node:") === true
         ? "standard profile imports no node: modules"
         : "standard profile imports no modules",
+      statement,
     );
   }
   for (const statement of root.findAll({ rule: { kind: "export_statement" } })) {
@@ -157,45 +586,50 @@ function validateStandardDependencies(root: SgNode, errors: Set<string>): void {
       specifier?.startsWith("node:") === true
         ? "standard profile re-exports no node: modules"
         : "standard profile re-exports no modules",
+      statement,
     );
   }
   for (const call of root.findAll({ rule: { kind: "call_expression" } })) {
     const callee = unwrapStandardParentheses(callCallee(call));
     if (callee?.kind() === "import") {
-      errors.add("standard profile uses no dynamic imports");
+      errors.add("standard profile uses no dynamic imports", call);
     } else if (callee?.kind() === "identifier" && callee.text() === "require") {
-      errors.add("standard profile uses no require() imports");
+      errors.add("standard profile uses no require() imports", call);
     }
   }
 }
 
-function validateStandardOwnedPolicy(root: SgNode, runEntry: SgNode | undefined, errors: Set<string>): void {
-  if (root.findAll({ rule: { kind: "try_statement" } }).length > 0) {
-    errors.add("standard profile owns no try/catch recovery");
+function validateStandardOwnedPolicy(
+  root: SgNode,
+  runEntry: SgNode | undefined,
+  errors: WorkflowSourceDiagnosticSink,
+): void {
+  for (const statement of root.findAll({ rule: { kind: "try_statement" } })) {
+    errors.add("standard profile owns no try/catch recovery", statement);
   }
-  if (root.findAll({ rule: { kind: "class_declaration" } }).length > 0) {
-    errors.add("standard profile owns no class helpers");
+  for (const declaration of root.findAll({ rule: { kind: "class_declaration" } })) {
+    errors.add("standard profile owns no class helpers", declaration);
   }
   for (const pair of root.findAll({ rule: { kind: "pair" } })) {
     const key = staticObjectKey(pair.field("key"));
-    if (key === "schema" || key === "validate") errors.add(`standard profile owns no raw ${key}`);
+    if (key === "schema" || key === "validate") errors.add(`standard profile owns no raw ${key}`, pair);
   }
-  if (root.findAll({ rule: { kind: "computed_property_name" } }).length > 0) {
-    errors.add("standard profile uses no computed object keys that hide policy");
+  for (const property of root.findAll({ rule: { kind: "computed_property_name" } })) {
+    errors.add("standard profile uses no computed object keys that hide policy", property);
   }
-  if (root.findAll({ rule: { kind: "regex" } }).length > 0) {
-    errors.add("standard profile owns no regex gates");
+  for (const regex of root.findAll({ rule: { kind: "regex" } })) {
+    errors.add("standard profile owns no regex gates", regex);
   }
   for (const declaration of root.findAll({ rule: { kind: "function_declaration" } })) {
     if (declaration.id() === runEntry?.id()) continue;
     const name = declaration.field("name")?.text() ?? "anonymous";
-    errors.add(`standard profile keeps no nested or top-level helper function ${name}`);
+    errors.add(`standard profile keeps no nested or top-level helper function ${name}`, declaration);
   }
   for (const declaration of root.findAll({ rule: { kind: "variable_declarator" } })) {
     const name = declaration.field("name")?.text() ?? "";
     const value = declaration.field("value");
     if (value?.kind() === "arrow_function" || value?.kind() === "function_expression") {
-      errors.add(`standard profile keeps no function-valued helper ${name || "binding"}`);
+      errors.add(`standard profile keeps no function-valued helper ${name || "binding"}`, declaration);
     }
   }
   for (const callback of [
@@ -204,60 +638,85 @@ function validateStandardOwnedPolicy(root: SgNode, runEntry: SgNode | undefined,
   ]) {
     if (callback.id() === runEntry?.id()) continue;
     if (callback.kind() === "function_expression") {
-      errors.add("standard profile uses arrow functions for inline callbacks");
+      errors.add("standard profile uses arrow functions for inline callbacks", callback);
     }
     const owner = callback.parent();
     if (owner?.kind() === "pair" || owner?.kind() === "variable_declarator") {
-      errors.add("standard profile keeps no object or variable function wrapper");
+      errors.add("standard profile keeps no object or variable function wrapper", callback);
     } else if (containsStandardEdgeCall(callback) && !isVisibleInlineEdgeCallback(callback)) {
-      errors.add("standard profile keeps inline agent edges only inside visible parallel, pipeline, or workflow calls");
+      errors.add(
+        "standard profile keeps inline agent edges only inside visible parallel, pipeline, or workflow calls",
+        callback,
+      );
     }
   }
   for (const method of root.findAll({ rule: { kind: "method_definition" } })) {
-    errors.add(`standard profile keeps no object/class method helper ${method.field("name")?.text() ?? "method"}`);
+    errors.add(
+      `standard profile keeps no object/class method helper ${method.field("name")?.text() ?? "method"}`,
+      method,
+    );
   }
 }
 
 interface StandardLexicalBinding {
+  activationIndex: number;
+  bindingId: number;
   name: string;
+  shadowIndex: number;
   scopeId: number;
 }
 
-function validateStandardIdentifierRoots(root: SgNode, errors: Set<string>): void {
+function validateStandardIdentifierRoots(root: SgNode, errors: WorkflowSourceDiagnosticSink): void {
   const bindings = standardLexicalBindings(root);
   const approvedGlobals = new Set(["Error"]);
-  if (
-    root.findAll({ rule: { kind: "this" } }).length > 0 ||
-    root.findAll({ rule: { kind: "meta_property" } }).length > 0
-  ) {
-    errors.add("standard profile reads values only from declared lexical bindings and approved language roots");
+  for (const rootValue of [
+    ...root.findAll({ rule: { kind: "this" } }),
+    ...root.findAll({ rule: { kind: "meta_property" } }),
+  ]) {
+    errors.add(
+      "standard profile reads values only from declared lexical bindings and approved language roots",
+      rootValue,
+    );
   }
   for (const identifier of [
     ...root.findAll({ rule: { kind: "identifier" } }),
     ...root.findAll({ rule: { kind: "shorthand_property_identifier" } }),
   ]) {
     if (identifier.text() === "arguments") {
-      errors.add("standard profile does not use the implicit arguments object");
+      errors.add("standard profile does not use the implicit arguments object", identifier);
       continue;
     }
     if (approvedGlobals.has(identifier.text())) continue;
+    if (isStandardBindingOccurrence(identifier)) continue;
     const ancestorIds = new Set(identifier.ancestors().map((ancestor) => ancestor.id()));
+    const identifierIndex = identifier.range().start.index;
     if (
       bindings.some(
         (binding) =>
-          binding.name === identifier.text() && (binding.scopeId === root.id() || ancestorIds.has(binding.scopeId)),
+          binding.name === identifier.text() &&
+          identifierIndex >= binding.activationIndex &&
+          (binding.scopeId === root.id() || ancestorIds.has(binding.scopeId)),
       )
     ) {
       continue;
     }
-    errors.add("standard profile reads values only from declared lexical bindings and approved language roots");
+    errors.add(
+      "standard profile reads values only from declared lexical bindings and approved language roots",
+      identifier,
+    );
   }
 }
 
 function standardLexicalBindings(root: SgNode): StandardLexicalBinding[] {
   const bindings: StandardLexicalBinding[] = [];
-  const add = (names: readonly string[], scope: SgNode): void => {
-    for (const name of names) bindings.push({ name, scopeId: scope.id() });
+  const add = (
+    names: readonly string[],
+    scope: SgNode,
+    bindingId: number,
+    activationIndex = scope.range().start.index,
+    shadowIndex = scope.range().start.index,
+  ): void => {
+    for (const name of names) bindings.push({ activationIndex, bindingId, name, shadowIndex, scopeId: scope.id() });
   };
 
   for (const callable of [
@@ -265,22 +724,50 @@ function standardLexicalBindings(root: SgNode): StandardLexicalBinding[] {
     ...root.findAll({ rule: { kind: "function_declaration" } }),
     ...root.findAll({ rule: { kind: "function_expression" } }),
   ]) {
-    add(boundStandardNames(standardFunctionParameters(callable)), callable);
+    const parameters = standardFunctionParameters(callable);
+    add(boundStandardNames(parameters), callable, parameters?.id() ?? callable.id());
     const name = callable.field("name")?.text();
     if (name === undefined) continue;
-    add([name], callable.kind() === "function_expression" ? callable : standardLexicalOwner(callable, root));
+    add(
+      [name],
+      callable.kind() === "function_expression" ? callable : standardLexicalOwner(callable, root),
+      callable.id(),
+    );
   }
 
   for (const declaration of root.findAll({ rule: { kind: "variable_declarator" } })) {
-    add(boundStandardNames(declaration.field("name") ?? undefined), standardLexicalOwner(declaration, root));
+    const scope = standardLexicalOwner(declaration, root);
+    const functionScoped =
+      declaration
+        .ancestors()
+        .find((ancestor) => ["lexical_declaration", "variable_declaration"].includes(String(ancestor.kind())))
+        ?.kind() === "variable_declaration";
+    const activationIndex = functionScoped
+      ? scope.range().start.index
+      : (declaration.field("value")?.range().end.index ?? declaration.range().end.index);
+    add(boundStandardNames(declaration.field("name") ?? undefined), scope, declaration.id(), activationIndex);
   }
   for (const loop of root.findAll({ rule: { kind: "for_in_statement" } })) {
-    add(standardLoopBindingNames(loop.field("left") ?? undefined), loop);
+    add(
+      standardLoopBindingNames(loop.field("left") ?? undefined),
+      loop,
+      loop.id(),
+      loop.field("left")?.range().end.index ?? loop.range().start.index,
+    );
   }
   return bindings;
 }
 
 function standardLexicalOwner(node: SgNode, root: SgNode): SgNode {
+  if (node.ancestors().some((ancestor) => ancestor.kind() === "variable_declaration")) {
+    return (
+      node
+        .ancestors()
+        .find((ancestor) =>
+          ["arrow_function", "function_declaration", "function_expression"].includes(String(ancestor.kind())),
+        ) ?? root
+    );
+  }
   const loop = node.ancestors().find((ancestor) => {
     if (ancestor.kind() === "for_statement") {
       return nodeWithinStandardNode(node, ancestor.field("initializer") ?? undefined);
@@ -302,10 +789,10 @@ function validateStandardExpressions(
   protectedBindings: ReadonlySet<string>,
   dslBindings: ReadonlySet<string>,
   bindingModel: StandardBindingModel,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): void {
-  if (root.findAll({ rule: { kind: "sequence_expression" } }).length > 0) {
-    errors.add("standard profile uses no sequence expressions");
+  for (const expression of root.findAll({ rule: { kind: "sequence_expression" } })) {
+    errors.add("standard profile uses no sequence expressions", expression);
   }
   for (const expression of [
     ...root.findAll({ rule: { kind: "assignment_expression" } }),
@@ -313,12 +800,12 @@ function validateStandardExpressions(
     ...root.findAll({ rule: { kind: "update_expression" } }),
   ]) {
     if (!isOwnedForLoopCounterMutation(expression, protectedBindings)) {
-      errors.add("standard profile does not mutate semantic values or build parser/renderer accumulators");
+      errors.add("standard profile does not mutate semantic values or build parser/renderer accumulators", expression);
     }
   }
   for (const expression of root.findAll({ rule: { kind: "new_expression" } })) {
     if (unwrapStandardParentheses(expression.field("constructor") ?? undefined)?.text() !== "Error") {
-      errors.add("standard profile constructs no helper, parser, renderer, or ledger objects");
+      errors.add("standard profile constructs no helper, parser, renderer, or ledger objects", expression);
       continue;
     }
     if (
@@ -329,7 +816,7 @@ function validateStandardExpressions(
         bindingModel.literalShadows,
       )
     ) {
-      errors.add("standard profile constructs Error only from author-known or literal values");
+      errors.add("standard profile constructs Error only from author-known or literal values", expression);
     }
   }
 }
@@ -363,14 +850,14 @@ function validateStandardCalls(
   runEntry: SgNode | undefined,
   dslBindings: ReadonlySet<string>,
   collectionBindings: StandardCollectionBindings,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): void {
   validateStandardBindingShadows(root, runEntry, dslBindings, collectionBindings, errors);
   for (const call of root.findAll({ rule: { kind: "call_expression" } })) {
     const callee = unwrapStandardParentheses(callCallee(call));
     if (callee == null || callee.kind() === "import") continue;
     if (callee.kind() === "subscript_expression") {
-      errors.add("standard profile uses no computed calls that can hide orchestration or semantic transforms");
+      errors.add("standard profile uses no computed calls that can hide orchestration or semantic transforms", call);
       continue;
     }
     const directDsl = directStandardDslCall(callee, dslBindings);
@@ -379,7 +866,7 @@ function validateStandardCalls(
       !isVisibleCollectionCall(call, collectionBindings.names, dslBindings) &&
       !isBoundaryInputNormalization(call)
     ) {
-      errors.add("standard profile calls only direct DSL primitives and visible map/prompt-join operations");
+      errors.add("standard profile calls only direct DSL primitives and visible map/prompt-join operations", call);
     }
   }
 }
@@ -478,13 +965,13 @@ function validateStandardBindingShadows(
   runEntry: SgNode | undefined,
   dslBindings: ReadonlySet<string>,
   collectionBindings: StandardCollectionBindings,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): void {
   if (runEntry === undefined) return;
   const protectedNames = new Set([...dslBindings, ...collectionBindings.names, "Error"]);
   const runParameters = standardFunctionParameters(runEntry);
   for (const name of boundStandardNames(runParameters)) {
-    if (name === "Error") errors.add("standard profile does not shadow the global Error constructor");
+    if (name === "Error") errors.add("standard profile does not shadow the global Error constructor", runParameters);
   }
 
   for (const callback of [
@@ -495,7 +982,7 @@ function validateStandardBindingShadows(
     if (callback.id() === runEntry.id()) continue;
     const parameters = standardFunctionParameters(callback);
     if (boundStandardNames(parameters).some((name) => protectedNames.has(name))) {
-      errors.add("standard profile nested callbacks do not shadow trusted DSL or collection bindings");
+      errors.add("standard profile nested callbacks do not shadow trusted DSL or collection bindings", callback);
     }
   }
 
@@ -515,12 +1002,12 @@ function validateStandardBindingShadows(
       collectionBindings.ownerIds.has(declaration.id()) &&
       names.every((name) => name !== "Error" && !dslBindings.has(name));
     if (!trustedDslDestructure && !trustedCollection) {
-      errors.add("standard profile loop, switch, and nested bindings do not shadow trusted names");
+      errors.add("standard profile loop, switch, and nested bindings do not shadow trusted names", declaration);
     }
   }
   for (const loop of runEntry.findAll({ rule: { kind: "for_in_statement" } })) {
     if (boundStandardNames(loop.field("left") ?? undefined).some((name) => protectedNames.has(name))) {
-      errors.add("standard profile loop bindings do not shadow trusted DSL, collection, or Error names");
+      errors.add("standard profile loop bindings do not shadow trusted DSL, collection, or Error names", loop);
     }
   }
 }
@@ -622,7 +1109,7 @@ function standardBindingModel(
   root: SgNode,
   runEntry: SgNode | undefined,
   dslBindings: ReadonlySet<string>,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): StandardBindingModel {
   const collections = standardCollectionBindings(root, runEntry, dslBindings);
   if (runEntry === undefined) return { collections, literalShadows: [], provenance: new Map() };
@@ -635,7 +1122,7 @@ function validateStandardValueUses(
   runEntry: SgNode | undefined,
   dslBindings: ReadonlySet<string>,
   bindingModel: StandardBindingModel,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): void {
   if (runEntry === undefined) return;
   const { literalShadows, provenance } = bindingModel;
@@ -647,9 +1134,9 @@ function validateStandardValueUses(
     if (method === undefined) continue;
     const value = standardDslCallProvenance(method, call);
     if (value.kind === "unclassified-dsl-value") {
-      errors.add("standard profile rejects DSL calls without an explicit return classification");
+      errors.add("standard profile rejects DSL calls without an explicit return classification", call);
     } else if (value.kind === "void-value" && !isDiscardedStandardCall(call)) {
-      errors.add("standard profile does not use void DSL calls as values");
+      errors.add("standard profile does not use void DSL calls as values", call);
     }
   }
 
@@ -661,7 +1148,7 @@ function validateStandardValueUses(
       access.kind() === "subscript_expression" &&
       containsOpaqueIndexValue(access.field("index") ?? undefined, provenance, dslBindings, literalShadows)
     ) {
-      errors.add("standard profile does not select a subscript with opaque semantic or model-produced values");
+      errors.add("standard profile does not select a subscript with opaque semantic or model-produced values", access);
     }
     const owner = standardExpressionProvenance(
       access.field("object") ?? undefined,
@@ -680,24 +1167,28 @@ function validateStandardValueUses(
       if (!isInsideBoundaryInputDefault(access)) {
         errors.add(
           "standard profile does not inspect properties of opaque semantic, model, file, host, or runtime values",
+          access,
         );
       }
       continue;
     }
     if (owner.kind === "runtime-status") {
       if (access.kind() === "member_expression" && access.field("property")?.text() === "status") continue;
-      errors.add("standard profile reads only the exact status identity from a runtime-owned result");
+      errors.add("standard profile reads only the exact status identity from a runtime-owned result", access);
       continue;
     }
     if (owner.kind === "runtime-control") {
-      errors.add("standard profile uses runtime-owned control values only by exact identity");
+      errors.add("standard profile uses runtime-owned control values only by exact identity", access);
       continue;
     }
     if (access.kind() === "subscript_expression") continue;
     const property = access.field("property")?.text();
     if (property === "length" || property === "map") continue;
     if (property === "join" && isInsideApprovedOpaqueSink(access, dslBindings)) continue;
-    errors.add("standard profile inspects opaque lists only through length, indexing, visible map, or prompt join");
+    errors.add(
+      "standard profile inspects opaque lists only through length, indexing, visible map, or prompt join",
+      access,
+    );
   }
 
   for (const expression of [
@@ -714,7 +1205,7 @@ function validateStandardValueUses(
       continue;
     }
     if (containsOpaqueValue(expression, provenance, dslBindings, literalShadows)) {
-      errors.add("standard profile does not compare, transform, or branch on opaque semantic values");
+      errors.add("standard profile does not compare, transform, or branch on opaque semantic values", expression);
     }
   }
 
@@ -726,7 +1217,10 @@ function validateStandardValueUses(
   ]) {
     const condition = statement.field("condition") ?? statement.field("value");
     if (condition !== null && containsOpaqueValue(condition, provenance, dslBindings, literalShadows)) {
-      errors.add("standard profile control flow uses runtime-owned choices, list identity, status, or counters");
+      errors.add(
+        "standard profile control flow uses runtime-owned choices, list identity, status, or counters",
+        condition ?? statement,
+      );
     }
   }
 
@@ -735,7 +1229,10 @@ function validateStandardValueUses(
       containsOpaqueValue(template, provenance, dslBindings, literalShadows) &&
       !isInsideApprovedOpaqueSink(template, dslBindings)
     ) {
-      errors.add("standard profile renders opaque values only inside an agent prompt or exact text publication");
+      errors.add(
+        "standard profile renders opaque values only inside an agent prompt or exact text publication",
+        template,
+      );
     }
   }
 
@@ -748,11 +1245,11 @@ function validateStandardValueUses(
     if (value === undefined || ["known-collection", "known-value", "runtime-control"].includes(value.kind)) continue;
     if (isStandardBindingOccurrence(identifier) || isDirectProvenanceAlias(identifier)) continue;
     if (value.kind === "void-value") {
-      errors.add("standard profile does not use void DSL calls as values");
+      errors.add("standard profile does not use void DSL calls as values", identifier);
       continue;
     }
     if (value.kind === "unclassified-dsl-value") {
-      errors.add("standard profile rejects DSL calls without an explicit return classification");
+      errors.add("standard profile rejects DSL calls without an explicit return classification", identifier);
       continue;
     }
     if (isInsideBoundaryInputDefault(identifier) || isInsideApprovedOpaqueSink(identifier, dslBindings)) continue;
@@ -762,7 +1259,10 @@ function validateStandardValueUses(
     if (isPublishedArtifactContinuationUse(identifier, value, dslBindings)) continue;
     if (isPublishedArtifactHandoffDetailUse(identifier, value, dslBindings)) continue;
     if (isUnchangedScheduledValueUse(identifier, value, dslBindings)) continue;
-    errors.add("standard profile forwards opaque semantic, model, file, host, and runtime values only as whole values");
+    errors.add(
+      "standard profile forwards opaque semantic, model, file, host, and runtime values only as whole values",
+      identifier,
+    );
   }
 }
 
@@ -771,7 +1271,7 @@ function standardValueProvenance(
   runEntry: SgNode,
   dslBindings: ReadonlySet<string>,
   collections: StandardCollectionBindings,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): Pick<StandardBindingModel, "literalShadows" | "provenance"> {
   const provenance = new Map<string, StandardValueProvenance>();
   const owners = new Map<string, number>();
@@ -810,7 +1310,7 @@ function standardValueProvenance(
     if (list?.kind !== "opaque-list" && list?.kind !== "known-collection") continue;
     const left = loop.field("left") ?? undefined;
     if (left?.kind() !== "identifier" || !["const", "let"].includes(loop.field("kind")?.text() ?? "")) {
-      errors.add("standard profile binds each opaque loop item to one unchanged identifier");
+      errors.add("standard profile binds each opaque loop item to one unchanged identifier", left ?? loop);
     }
     for (const name of standardLoopBindingNames(left)) {
       reserve(name, { kind: list.kind === "opaque-list" ? "opaque-value" : "known-value" }, left?.id() ?? loop.id());
@@ -821,7 +1321,7 @@ function standardValueProvenance(
 
   collectStandardDeclarationProvenance(root, provenance, dslBindings, errors, reserve);
   if (duplicateNames.size > 0) {
-    errors.add("standard profile gives every semantic or runtime-owned value binding one unique name");
+    errors.add("standard profile gives every semantic or runtime-owned value binding one unique name", runEntry);
   }
   const literalShadows: StandardLiteralShadow[] = [];
   for (const declaration of root.findAll({ rule: { kind: "variable_declarator" } })) {
@@ -844,7 +1344,7 @@ function classifyStandardCallbackParameters(
   provenance: Map<string, StandardValueProvenance>,
   dslBindings: ReadonlySet<string>,
   reserve: (name: string, value: StandardValueProvenance, ownerId: number) => void,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
 ): void {
   const callbacks = [
     ...root.findAll({ rule: { kind: "arrow_function" } }),
@@ -866,7 +1366,7 @@ function classifyStandardCallbackParameters(
     if (callee?.kind() === "member_expression" && callee.field("property")?.text() === "map") {
       const receiver = standardExpressionProvenance(callee.field("object") ?? undefined, provenance, dslBindings);
       if (receiver?.kind !== "opaque-list" && receiver?.kind !== "known-collection") {
-        errors.add("standard profile classifies every value-bearing callback parameter");
+        errors.add("standard profile classifies every value-bearing callback parameter", callback);
         continue;
       }
       const parameterKinds: StandardValueKind[] = [
@@ -893,7 +1393,7 @@ function classifyStandardCallbackParameters(
       continue;
     }
 
-    errors.add("standard profile classifies every value-bearing callback parameter");
+    errors.add("standard profile classifies every value-bearing callback parameter", callback);
   }
 }
 
@@ -901,17 +1401,20 @@ function classifyKnownStandardCallbackParameters(
   parameters: readonly SgNode[],
   kinds: readonly StandardValueKind[],
   reserve: (name: string, value: StandardValueProvenance, ownerId: number) => void,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
   owner: string,
 ): void {
   if (parameters.length > kinds.length) {
-    errors.add(`standard profile permits only documented ${owner} callback parameters`);
+    errors.add(
+      `standard profile permits only documented ${owner} callback parameters`,
+      parameters[kinds.length] ?? parameters.at(-1),
+    );
   }
   parameters.forEach((parameter, index) => {
     const kind = kinds[index];
     if (kind === undefined) return;
     if (parameter.kind() !== "identifier") {
-      errors.add(`standard profile keeps each ${owner} callback parameter as one visible identifier`);
+      errors.add(`standard profile keeps each ${owner} callback parameter as one visible identifier`, parameter);
       return;
     }
     reserve(parameter.text(), { kind }, parameter.id());
@@ -922,7 +1425,7 @@ function collectStandardDeclarationProvenance(
   root: SgNode,
   provenance: Map<string, StandardValueProvenance>,
   dslBindings: ReadonlySet<string>,
-  errors: Set<string>,
+  errors: WorkflowSourceDiagnosticSink,
   reserve: (name: string, value: StandardValueProvenance, ownerId: number) => void,
 ): void {
   for (const declaration of root.findAll({ rule: { kind: "variable_declarator" } })) {
@@ -930,7 +1433,7 @@ function collectStandardDeclarationProvenance(
     if (value === undefined) continue;
     const name = declaration.field("name");
     if (name?.kind() !== "identifier") {
-      errors.add("standard profile does not destructure opaque or runtime-owned values");
+      errors.add("standard profile does not destructure opaque or runtime-owned values", name ?? declaration);
       continue;
     }
     reserve(name.text(), value, declaration.id());

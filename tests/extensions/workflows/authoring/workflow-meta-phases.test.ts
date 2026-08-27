@@ -42,7 +42,7 @@ function fixture(contents: string, name = "phased.workflow.mjs"): string {
 /** Phase titles a workflow actually emits, in source order. */
 function phaseCallTitles(file: string): string[] {
   const source = readFileSync(file, "utf8");
-  return [...source.matchAll(/\bphase\("([^"]+)"\)/gu)].map((match) => match[1]!);
+  return [...new Set([...source.matchAll(/\bphase\("([^"]+)"\)/gu)].map((match) => match[1]!))];
 }
 
 describe("static meta.phases", () => {
@@ -199,29 +199,23 @@ describe("/workflows status <runId> declared-versus-observed", () => {
   });
 });
 
-describe("curated workflow declarations", () => {
-  it("declares exactly the phase() titles each curated workflow actually emits, in order", () => {
-    const declaring = [
-      "task/implement-plan-template",
-      "task/plan",
-      "task/substep",
-      "workflow-creator",
-      "workflow-creator/build",
-      "workflow-creator/design",
-      "workflow-creator/svg",
-    ] as const;
+describe("packaged workflow declarations", () => {
+  it("declares exactly the unique literal phase() titles every phased workflow emits, in first-source order", () => {
+    const declaring = packagedWorkflowNames().filter(
+      (name) => readWorkflowMeta(packagedWorkflowPath(name)).phases.length > 0,
+    );
 
     for (const name of declaring) {
       const file = packagedWorkflowPath(name);
       const declared = readWorkflowMeta(file).phases.map((phase) => phase.title);
 
-      // Without this, a renamed stage leaves the declaration quietly lying.
+      // Without this, a renamed stage or an omitted branch leaves the planned pipeline quietly lying.
       expect(declared, name).toEqual(phaseCallTitles(file));
-      expect(declared.length, name).toBeGreaterThan(0);
     }
+    expect(declaring.length).toBeGreaterThan(0);
   });
 
-  it("keeps meta.phases optional across the curated registry", () => {
+  it("keeps meta.phases optional across the packaged registry", () => {
     const undeclared = packagedWorkflowNames().filter(
       (name) => readWorkflowMeta(packagedWorkflowPath(name)).phases.length === 0,
     );
