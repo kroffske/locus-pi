@@ -7,7 +7,10 @@ import {
   formatWorkflowFailureDiagnosticLines,
   parseWorkflowFailureDiagnostic,
 } from "../../../../extensions/workflows/runtime/workflow-failure.js";
-import { readWorkflowRunResult } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  readWorkflowRunResult,
+  readWorkflowRunSummary,
+} from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../../test-harness.js";
@@ -137,28 +140,35 @@ describe("workflow failure diagnostic", () => {
     }
   });
 
-  it("leaves a deliberate ok:false verdict without a repair request", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "wf-semantic-verdict-"));
-    const harness = createHarness(root, { sessionId: "wf-semantic-verdict" });
-    try {
-      writeFileSync(
-        path.join(root, "verdict.workflow.mjs"),
-        "export default () => ({ ok: false, summary: 'Acceptance remains open' });\n",
-        "utf8",
-      );
+  it("leaves deliberate returned-outcome failures without a repair request", async () => {
+    const cases = [
+      { name: "ok-false", expression: "{ ok: false, summary: 'Acceptance remains open' }" },
+      { name: "blocked", expression: "{ status: 'blocked', summary: 'Owner decision required' }" },
+    ];
 
-      const result = await runWorkflowScript({
-        pi: harness.pi,
-        ctx: harness.ctx,
-        signal: new AbortController().signal,
-        scriptPath: "verdict.workflow.mjs",
-      });
+    for (const testCase of cases) {
+      const root = mkdtempSync(path.join(tmpdir(), `wf-semantic-${testCase.name}-`));
+      const harness = createHarness(root, { sessionId: `wf-semantic-${testCase.name}` });
+      try {
+        writeFileSync(
+          path.join(root, "verdict.workflow.mjs"),
+          `export default () => (${testCase.expression});\n`,
+          "utf8",
+        );
+        const result = await runWorkflowScript({
+          pi: harness.pi,
+          ctx: harness.ctx,
+          signal: new AbortController().signal,
+          scriptPath: "verdict.workflow.mjs",
+        });
 
-      expect(result.ok).toBe(false);
-      expect(result.error).toBeUndefined();
-      expect(result.failureDiagnostic).toBeUndefined();
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+        expect(result.ok, testCase.name).toBe(false);
+        expect(result.error, testCase.name).toBeUndefined();
+        expect(result.failureDiagnostic, testCase.name).toBeUndefined();
+        expect(readWorkflowRunSummary(root, result.runId).status, testCase.name).toBe("failed");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 });

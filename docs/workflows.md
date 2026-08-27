@@ -2,11 +2,11 @@
 title: Workflow guide
 type: guide
 status: active
-updated: 2026-08-19T22:43:07Z
-source_commit: aeb217fe8dab
-update_event: cleanup
-context: changes=S files=4
-description: Guide workflow discovery, execution, and storage.
+updated: 2026-08-26T22:46:41Z
+source_commit: 292b981
+update_event: changed
+context: workflow DSL outcomes, phases, and source diagnostics
+description: Guide workflow discovery, execution, evidence, and author checks.
 owner: locus-pi maintainers
 tags: [workflows, guide]
 ---
@@ -90,6 +90,8 @@ Workflow-owned working files live separately under a unique `.locus-pi/plans/<ge
 
 Use `/workflows result` for complete prose output and `/workflows status` for stages, evidence, replay markers, and actionable handoffs.
 
+Root results and direct `parallel()`/`pipeline()` returns share one terminal-outcome rule. A JSON object is semantic failure when `ok === false`, `partial === true`, or `status` is `"failed"`, `"blocked"`, or `"cancelled"`. The original result remains in evidence, but the durable workflow disposition is `failed`. Other JSON-safe shapes retain legacy success semantics.
+
 ## Resume and replay
 
 `--resume <runId>` reuses eligible recorded agent answers only when source identity and request-prefix checks match. Replayed answers are marked as recorded evidence, not fresh work. Replay does not repeat child side effects or re-read files; use it only when those semantics are acceptable. Repeat the same `--run-name <name>` when resuming a named non-task workflow. Supplying a different workspace fails closed.
@@ -122,3 +124,11 @@ Inside Pi, validate a standard-profile workflow source with the
 ```json
 { "path": "path/to/example.workflow.mjs" }
 ```
+
+The tool prints compiler-style diagnostics as
+`path:line:column [CODE] message` and returns structured one-based spans in
+`details.diagnostics`. Errors fail the check. Warning-only results remain
+successful; current warnings identify unused or out-of-order non-empty
+`meta.phases` declarations. A non-empty declaration must cover every unique
+literal `phase("...")` call exactly once and in planned first-source order;
+duplicate or case-equivalent declarations fail the check.

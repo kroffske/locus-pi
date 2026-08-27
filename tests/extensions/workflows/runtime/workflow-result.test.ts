@@ -6,6 +6,7 @@ import {
   WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE,
   WORKFLOW_RESULT_NOT_JSON_SAFE,
   WORKFLOW_RESULT_WRITE_FAILED,
+  classifyWorkflowReturnedFailure,
   formatWorkflowResultDetail,
   formatWorkflowFailureSummary,
   formatWorkflowResultSummary,
@@ -96,16 +97,29 @@ describe("workflow result JSON boundary", () => {
     ).toEqual({ status: "failed" });
   });
 
-  it("treats explicit ok:false and partial:true as semantic non-success", () => {
-    expect(isWorkflowResultExplicitFailure({ ok: false, summary: "stopped" })).toBe(true);
+  it("classifies one returned-outcome failure policy for root and grouped execution", () => {
+    expect(classifyWorkflowReturnedFailure({ ok: false, status: "blocked", summary: "stopped" })).toEqual({
+      kind: "ok-false",
+      status: "blocked",
+      summary: "stopped",
+    });
+    expect(classifyWorkflowReturnedFailure({ partial: true })).toEqual({ kind: "partial" });
+    expect(classifyWorkflowReturnedFailure({ status: "failed" })).toEqual({ kind: "status", status: "failed" });
+    expect(classifyWorkflowReturnedFailure({ status: "blocked" })).toEqual({ kind: "status", status: "blocked" });
+    expect(classifyWorkflowReturnedFailure({ status: "cancelled" })).toEqual({
+      kind: "status",
+      status: "cancelled",
+    });
+    expect(classifyWorkflowReturnedFailure({ status: "completed" })).toBeUndefined();
+    expect(classifyWorkflowReturnedFailure({ ok: true, partial: false })).toBeUndefined();
+    expect(classifyWorkflowReturnedFailure({ ok: "false", partial: "true" })).toBeUndefined();
+    expect(classifyWorkflowReturnedFailure({ summary: "legacy success" })).toBeUndefined();
+    expect(classifyWorkflowReturnedFailure(null)).toBeUndefined();
+
+    expect(isWorkflowResultExplicitFailure({ ok: false })).toBe(true);
     expect(isWorkflowResultExplicitFailure({ partial: true })).toBe(true);
-    expect(isWorkflowResultExplicitFailure({ ok: true, partial: true })).toBe(true);
-    expect(isWorkflowResultExplicitFailure({ ok: true })).toBe(false);
-    expect(isWorkflowResultExplicitFailure({ ok: true, partial: false })).toBe(false);
-    expect(isWorkflowResultExplicitFailure({ ok: "false" })).toBe(false);
-    expect(isWorkflowResultExplicitFailure({ partial: "true" })).toBe(false);
-    expect(isWorkflowResultExplicitFailure({ summary: "legacy success" })).toBe(false);
-    expect(isWorkflowResultExplicitFailure(null)).toBe(false);
+    expect(isWorkflowResultExplicitFailure({ status: "blocked" })).toBe(true);
+    expect(isWorkflowResultExplicitFailure({ status: "completed" })).toBe(false);
   });
 
   it("formats semantic failures with stable unresolved ids while technical errors retain priority", () => {

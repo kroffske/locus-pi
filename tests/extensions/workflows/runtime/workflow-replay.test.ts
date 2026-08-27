@@ -27,6 +27,7 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import { assessWorkflowReplaySafety } from "../../../../extensions/workflows/runtime/workflow-script-identity.js";
 import {
+  WorkflowGroupFailureError,
   createWorkflowRuntime,
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
@@ -947,6 +948,78 @@ export default async function runWorkflow(dsl, input) {
     expect(digest).toContain("✗ workflow stages failed");
     expect(digest).toContain(`2 replayed from run #${first.runId.slice(-4)}`);
     expect(digestFor(root, first)).not.toContain("replayed from");
+  });
+
+  it("turns a direct partial:true group result into typed failure after replaying its recorded child", async () => {
+    const root = temporaryProject();
+    const sourceRunId = "20260827-004100-a001";
+    const resumedRunId = "20260827-004101-a002";
+    const sourcePrompts: string[] = [];
+    const resumedPrompts: string[] = [];
+    const createRuntime = (
+      runId: string,
+      replay: WorkflowReplayController,
+      prompts: string[],
+    ): ReturnType<typeof createWorkflowRuntime> =>
+      createWorkflowRuntime({
+        runId,
+        replay,
+        agentRunner: async (request) => {
+          prompts.push(request.prompt);
+          return {
+            ok: true,
+            status: "completed",
+            summary: "done",
+            text: `answer(${request.prompt})`,
+            diagnostics: [],
+            agent: request.agent,
+          };
+        },
+      });
+
+    const source = createRuntime(
+      sourceRunId,
+      createWorkflowReplayController({ runDir: ensureWorkflowRunDir(root, sourceRunId) }),
+      sourcePrompts,
+    );
+    await expect(
+      source.dsl.parallel([
+        async () => ({ ok: true, partial: false, answer: await source.dsl.agent("recorded-stage") }),
+      ]),
+    ).resolves.toEqual([{ ok: true, partial: false, answer: "answer(recorded-stage)" }]);
+    expect(sourcePrompts).toEqual(["recorded-stage"]);
+
+    const recorded = readWorkflowReplayLog(root, sourceRunId);
+    const resumedController = createWorkflowReplayController({
+      runDir: ensureWorkflowRunDir(root, resumedRunId),
+      recorded,
+    });
+    const resumed = createRuntime(resumedRunId, resumedController, resumedPrompts);
+
+    let caught: unknown;
+    try {
+      await resumed.dsl.parallel([
+        async () => ({ ok: true, partial: true, answer: await resumed.dsl.agent("recorded-stage") }),
+      ]);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(WorkflowGroupFailureError);
+    const failure = caught as WorkflowGroupFailureError<unknown>;
+    expect(failure.partialResults).toEqual([{ ok: true, partial: true, answer: "answer(recorded-stage)" }]);
+    expect(failure.failures).toEqual([{ index: 0, kind: "returned-failure", message: "branch returned partial:true" }]);
+    expect(failure.toEnvelope()).toMatchObject({
+      ok: false,
+      kind: "workflow_group_failure",
+      code: "WORKFLOW_GROUP_FAILURE",
+      groupKind: "parallel",
+      completed: 0,
+      failed: 1,
+      failures: [{ index: 0, kind: "returned-failure", message: "branch returned partial:true" }],
+    });
+    expect(resumedPrompts).toEqual([]);
+    expect(resumedController.counts()).toEqual({ replayedCalls: 1, freshCalls: 0 });
   });
 
   it("keeps the recorded payload out of journal.ndjson and in the sidecar record", async () => {

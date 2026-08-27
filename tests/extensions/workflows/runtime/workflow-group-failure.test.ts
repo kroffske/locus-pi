@@ -86,6 +86,144 @@ describe("workflow group failure contract", () => {
     });
   });
 
+  it("fails direct partial:true group results even when ok remains true", async () => {
+    const { dsl } = createWorkflowRuntime({ runId: "parallel-partial-return", agentRunner: okRunner });
+
+    await expect(
+      dsl.parallel<unknown>([
+        async () => ({ ok: true, partial: true, diagnostics: ["one requirement remains"] }),
+        async () => "kept",
+      ]),
+    ).rejects.toMatchObject({
+      code: WORKFLOW_GROUP_FAILURE,
+      partialResults: [{ ok: true, partial: true, diagnostics: ["one requirement remains"] }, "kept"],
+      failures: [{ index: 0, kind: "returned-failure", message: "one requirement remains" }],
+    });
+  });
+
+  it("classifies the same detached toJSON failure at root and in a direct group while preserving group evidence", async () => {
+    const rawGroupValue = {
+      status: "completed",
+      marker: "raw-group-evidence",
+      toJSON: () => ({ status: "blocked", summary: "detached owner decision" }),
+    };
+    const { dsl } = createWorkflowRuntime({ runId: "group-detached-return", agentRunner: okRunner });
+
+    let groupError: unknown;
+    try {
+      await dsl.parallel([async () => rawGroupValue]);
+    } catch (error) {
+      groupError = error;
+    }
+
+    expect(groupError).toBeInstanceOf(WorkflowGroupFailureError);
+    const groupFailure = groupError as WorkflowGroupFailureError<typeof rawGroupValue>;
+    expect(groupFailure.failures).toEqual([
+      {
+        index: 0,
+        kind: "returned-failure",
+        status: "blocked",
+        message: "detached owner decision",
+      },
+    ]);
+    expect(groupFailure.partialResults[0]).toBe(rawGroupValue);
+    expect(groupFailure.slots[0]).toMatchObject({ index: 0, status: "failed" });
+    expect((groupFailure.slots[0] as { value?: unknown }).value).toBe(rawGroupValue);
+
+    const root = mkdtempSync(path.join(tmpdir(), "wf-root-detached-return-"));
+    const harness = createHarness(root, { sessionId: "wf-root-detached-return" });
+    try {
+      writeFileSync(
+        path.join(root, "detached.workflow.mjs"),
+        [
+          "export default () => ({",
+          "  status: 'completed',",
+          "  marker: 'raw-root-value',",
+          "  toJSON: () => ({ status: 'blocked', summary: 'detached owner decision' }),",
+          "});",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const result = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        scriptPath: "detached.workflow.mjs",
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.result).toEqual({ status: "blocked", summary: "detached owner decision" });
+      expect(result.error).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed with raw evidence when direct group JSON preparation reports a diagnostic", async () => {
+    const cases = [
+      {
+        name: "raw-ok-false",
+        value: {
+          ok: false,
+          summary: "raw failure must stay failed",
+          toJSON(): never {
+            throw new Error("raw ok:false detachment refused");
+          },
+        },
+      },
+      {
+        name: "ordinary-value",
+        value: {
+          ok: true,
+          summary: "ordinary value with broken JSON",
+          toJSON(): never {
+            throw new Error("ordinary detachment refused");
+          },
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const { dsl } = createWorkflowRuntime({ runId: `group-diagnostic-${testCase.name}`, agentRunner: okRunner });
+      let caught: unknown;
+      try {
+        await dsl.parallel([async () => testCase.value]);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught, testCase.name).toBeInstanceOf(WorkflowGroupFailureError);
+      const failure = caught as WorkflowGroupFailureError<typeof testCase.value>;
+      expect(failure.partialResults[0], testCase.name).toBe(testCase.value);
+      expect((failure.slots[0] as { value?: unknown }).value, testCase.name).toBe(testCase.value);
+      expect(failure.failures, testCase.name).toEqual([
+        {
+          index: 0,
+          kind: "returned-failure",
+          message: expect.stringContaining("Workflow result is unavailable because it is not JSON-safe"),
+        },
+      ]);
+      expect(failure.failures[0]?.message, testCase.name).toContain("detachment refused");
+      expect(failure.toEnvelope(), testCase.name).toMatchObject({
+        ok: false,
+        kind: "workflow_group_failure",
+        code: WORKFLOW_GROUP_FAILURE,
+        groupKind: "parallel",
+        completed: 0,
+        failed: 1,
+        failures: [
+          {
+            index: 0,
+            kind: "returned-failure",
+            message: expect.stringContaining("not JSON-safe"),
+          },
+        ],
+      });
+    }
+  });
+
   it("persists a JSON-safe typed envelope and failed status for an unhandled group failure", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-group-unhandled-"));
     const harness = createHarness(root, { sessionId: "wf-group-unhandled" });
@@ -118,15 +256,23 @@ describe("workflow group failure contract", () => {
       };
 
       expect(result.ok).toBe(false);
-      expect(result.error).toContain("parallel failed in 1/2 branch(es)");
+      expect(result.error).toContain("parallel failed in 2/2 branch(es)");
       expect(result.result).toMatchObject({
         ok: false,
         kind: "workflow_group_failure",
         code: WORKFLOW_GROUP_FAILURE,
         groupKind: "parallel",
         total: 2,
-        completed: 1,
-        failed: 1,
+        completed: 0,
+        failed: 2,
+        failures: [
+          {
+            index: 0,
+            kind: "returned-failure",
+            message: expect.stringContaining("not JSON-safe"),
+          },
+          { index: 1, kind: "thrown", message: "branch exploded" },
+        ],
       });
       expect(persisted).toMatchObject({ ok: false, result: result.result, error: result.error });
       expect(readWorkflowRunSummary(root, result.runId).status).toBe("failed");
