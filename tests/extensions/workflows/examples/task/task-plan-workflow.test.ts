@@ -75,6 +75,8 @@ function fakeDsl(record: { calls: FakeCall[]; phases: string[]; published: strin
   return {
     phase: (name: string) => record.phases.push(name),
     log: () => undefined,
+    projectRoot: () => "/tmp/locus-plan-fake-project",
+    outputDir: () => "tmp/cron-to-dag",
     parallel: (thunks: Array<() => Promise<unknown>>) => Promise.all(thunks.map((thunk) => thunk())),
     agent: async (prompt: string, options: FakeCall) => {
       record.calls.push({ ...options, prompt });

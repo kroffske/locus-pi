@@ -110,7 +110,9 @@ describe("Package workflow: task/implement-plan-template", () => {
     expect(standardWorkflowSourceShapeErrors(rendered)).toEqual([]);
     expect(rendered).toContain('name: "implement-plan"');
     expect(rendered).toContain('profile: "standard"');
-    expect(rendered.match(/await agent\(/gu)).toHaveLength(3);
+    // Per step: the step node, its bounded repair node, and its single retry of
+    // the same literal prompt; plus the one summary node.
+    expect(rendered.match(/await agent\(/gu)).toHaveLength(7);
     expect(rendered.match(/phase\("/gu)).toHaveLength(3);
     expect(rendered).toContain('{ title: "S1", detail: "Add the \\"DAG\\" module" }');
     expect(rendered).toContain('{ title: "S2", detail: "Retire the cron entry" }');
@@ -118,8 +120,14 @@ describe("Package workflow: task/implement-plan-template", () => {
     expect(rendered).toContain("history/S2.md");
     expect(rendered).toContain("Goal: add \\`src\\\\dag.ts\\`.");
     expect(rendered).toContain("Goal: drop the \\`\\${CRON_ENV}\\` hook.");
-    expect(rendered.match(/choice: \["completed", "blocked"\]/gu)).toHaveLength(2);
+    expect(rendered.match(/choice: \["completed", "blocked"\]/gu)).toHaveLength(4);
+    expect(rendered.match(/choice: \["repaired", "unrepairable"\]/gu)).toHaveLength(2);
+    expect(rendered).toContain("const S1Prompt = `");
+    expect(rendered).toContain("const S1Status = await agent(S1Prompt, {");
     expect(rendered).toContain('if (S1Status === "blocked")');
+    expect(rendered).toContain('if (S1Repair !== "repaired")');
+    expect(rendered).toContain('label: "S1-repair"');
+    expect(rendered).toContain('label: "S1-retry"');
     expect(rendered).toContain('if (S2Status === "blocked")');
     expect(rendered).toContain("throw new Error");
     expect(rendered).toContain('return publishPrimaryFile("result.md");');
@@ -127,7 +135,7 @@ describe("Package workflow: task/implement-plan-template", () => {
     expect(rendered).not.toMatch(/\b(?:for|while)\s*\(/u);
   });
 
-  it("turns a blocked step into a workflow failure before the next literal node", async () => {
+  it("turns an unrepairable blocked step into a workflow failure before the next literal node", async () => {
     const rendered = renderImplementPlan([
       { id: "S1", title: "Create the DAG", block: "## S1 — Create the DAG\n\nGoal: add the DAG." },
       { id: "S2", title: "Remove cron", block: "## S2 — Remove cron\n\nGoal: remove cron." },
@@ -143,12 +151,14 @@ describe("Package workflow: task/implement-plan-template", () => {
         log: () => undefined,
         agent: async (_prompt: string, options: { label: string }) => {
           blockedLabels.push(options.label);
-          return options.label === "S1" ? "blocked" : "completed";
+          if (options.label === "S1") return "blocked";
+          if (options.label === "S1-repair") return "unrepairable";
+          return "completed";
         },
         publishPrimaryFile: () => ({ relativePath: "result.md" }),
       }),
     ).rejects.toThrow("Step S1 — Create the DAG is blocked; read history/S1.md.");
-    expect(blockedLabels).toEqual(["S1"]);
+    expect(blockedLabels).toEqual(["S1", "S1-repair"]);
 
     const completedLabels: string[] = [];
     const published: string[] = [];
@@ -169,6 +179,59 @@ describe("Package workflow: task/implement-plan-template", () => {
     expect(result).toEqual({ relativePath: "result.md" });
   });
 
+  it("gives a blocked step one bounded repair round, retries the same prompt, then continues or fails", async () => {
+    const rendered = renderImplementPlan([
+      { id: "S1", title: "Create the DAG", block: "## S1 — Create the DAG\n\nGoal: add the DAG." },
+      { id: "S2", title: "Verify the DAG", block: "## S2 — Verify the DAG\n\nGoal: verify the DAG." },
+    ]);
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(rendered).toString("base64")}`)) as {
+      default: (dsl: unknown) => Promise<unknown>;
+    };
+
+    // Repair succeeds and the retried step completes: the run reaches summary.
+    const repairedLabels: string[] = [];
+    const repairedPrompts: string[] = [];
+    const published: string[] = [];
+    await module.default({
+      phase: () => undefined,
+      log: () => undefined,
+      agent: async (prompt: string, options: { label: string }) => {
+        repairedLabels.push(options.label);
+        repairedPrompts.push(prompt);
+        if (options.label === "S2") return "blocked";
+        if (options.label === "S2-repair") return "repaired";
+        return options.label === "summary" ? "summary written" : "completed";
+      },
+      publishPrimaryFile: (relativePath: string) => {
+        published.push(relativePath);
+        return { relativePath };
+      },
+    });
+    expect(repairedLabels).toEqual(["S1", "S2", "S2-repair", "S2-retry", "summary"]);
+    expect(published).toEqual(["result.md"]);
+    // The retry re-runs the exact same literal step prompt, not a new one.
+    expect(repairedPrompts[3]).toEqual(repairedPrompts[1]);
+    expect(repairedPrompts[2]).toContain("repair agent");
+
+    // Repair succeeds but the retried step still blocks: exactly one round, then failure.
+    const stillBlockedLabels: string[] = [];
+    await expect(
+      module.default({
+        phase: () => undefined,
+        log: () => undefined,
+        agent: async (_prompt: string, options: { label: string }) => {
+          stillBlockedLabels.push(options.label);
+          if (options.label === "S1") return "blocked";
+          if (options.label === "S1-repair") return "repaired";
+          if (options.label === "S1-retry") return "blocked";
+          return "completed";
+        },
+        publishPrimaryFile: () => ({ relativePath: "result.md" }),
+      }),
+    ).rejects.toThrow("Step S1 — Create the DAG is blocked; read history/S1.md.");
+    expect(stillBlockedLabels).toEqual(["S1", "S1-repair", "S1-retry"]);
+  });
+
   it("keeps the generated plan out of registered directories and removes stale targets before rendering", () => {
     const template = readFileSync(templatePath, "utf8");
 
@@ -185,5 +248,13 @@ describe("Package workflow: task/implement-plan-template", () => {
     // forbid the JSON that contract then asks for, or the child is told two different things.
     expect(template).toContain("Do not return the\n  history Markdown or any other text.");
     expect(template).not.toContain("Markdown, JSON");
+    // History discipline: the status line is a bare exact line and the file is mandatory.
+    expect(template).toContain("never a heading and never a variant spelling");
+    expect(template).toContain("part of the step, never optional");
+    // Bounded repair round: one repair node with its own exact choice, then one retry.
+    expect(template).toContain("repair agent");
+    expect(template).toContain('choice: ["repaired", "unrepairable"]');
+    expect(template).toContain("Return exactly \\`repaired\\`");
+    expect(template).toContain('label: "<<STEP_ID>>-retry"');
   });
 });

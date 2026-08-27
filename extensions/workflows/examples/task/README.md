@@ -105,7 +105,9 @@ use that same workspace.
 - `planning-blocker.md` — written only when the run fails closed; names what
   failed and what the owner can change before rerunning.
 - `implement-plan.workflow.mjs` — generated only after plan approval; one
-  literal implementation node per step followed by one summary node.
+  literal implementation node per step, each carrying a single bounded
+  blocked-repair branch (repair the named defect once, retry the same step
+  once, otherwise fail), followed by one summary node.
 - `history/S<n>.md` — idempotent result of one executed step.
 - `result.md` — summary published by the generated complete-plan workflow.
 

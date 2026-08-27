@@ -33,8 +33,8 @@ export default async function runWorkflow(dsl) {
   return `The approved plan has been rendered and nothing has been executed.
 
 Review implement-plan.workflow.mjs in the workflow workspace. It contains one
-literal implementation node per step-<n>.md file in catalog order, followed by
-one summary node.
+literal implementation node per step-<n>.md file in catalog order, each with a
+single bounded blocked-repair branch, followed by one summary node.
 
 Running the generated file is a separate explicit act. Use its exact path and
 the same planning workspace. Workflow JavaScript runs in Pi's main Node.js
