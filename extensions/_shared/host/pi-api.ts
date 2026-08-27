@@ -173,6 +173,9 @@ export interface EventPayload {
 }
 
 export interface EventResult {
+  action?: "continue" | "transform" | "handled";
+  text?: string;
+  images?: unknown[];
   block?: boolean;
   reason?: string;
   modify?: Partial<EventPayload>;
@@ -374,6 +377,8 @@ export interface ExtensionContext {
   /** Current host thinking level. */
   thinkingLevel?: ThinkingLevel;
   modelRegistry?: ModelRegistryLike;
+  /** Models resolved from enabledModels/--models for the current session. */
+  scopedModels?: ReadonlyArray<{ model: ModelLike; thinkingLevel?: ThinkingLevel }>;
   /** Real Pi ctx.isIdle(): false through runs, retries, compaction retries, and queued continuation. */
   isIdle(): boolean;
   /** Abort the active parent agent turn (real Pi: ctx.abort()). */
