@@ -24,6 +24,7 @@
 - Parallel or multi-stage orchestration belongs to the workflow runtime, not one `spawn_agent` call.
 - `/ps` and `/agent drill` inspect live and retained child rows; closing the view does not stop a child.
 - In TUI mode `/ps` focuses the agent roster already visible below the editor instead of drawing a second copy. Its row membership and order stay fixed until close, live fields keep updating, and Up/Down can reach every leaf through the eight-row viewport. Reopen `/ps` to include agents that arrived while it was focused.
+- `/agent drill` uses the full viewport only when its request/transcript needs it. Short retained results stay top-aligned at their real content height; long results keep tail-follow plus Home/End/PageUp/PageDown and mouse history controls.
 - Workflow completion rows retain the durable catalog identity and add the same session petname shown by `/ps`. Fresh JSONL/HTML transcript filenames include their stage and petname, and HTML browser titles use that human identity when the host export exposes a title element.
 - Package-owned SDK children use a file-backed Pi session manager inside the owning run/report evidence directory and therefore do not appear beside operator sessions in `pi --resume`. Their durable named JSONL/HTML evidence is exported explicitly before disposal.
 
