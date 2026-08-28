@@ -717,6 +717,5 @@ function historyWindow(lines: readonly string[], height: number, offset: number)
   if (height <= 0) return [];
   const end = Math.max(0, lines.length - Math.max(0, offset));
   const start = Math.max(0, end - height);
-  const visible = lines.slice(start, end);
-  return [...Array.from({ length: height - visible.length }, () => ""), ...visible];
+  return lines.slice(start, end);
 }

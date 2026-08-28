@@ -242,11 +242,38 @@ describe("AgentSessionViewer", () => {
     setViewerExternalRows("test-active-workflow", 3);
     try {
       const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
-      expect(viewer.render(80)).toHaveLength(12 - 1 - 3);
+      expect(viewer.render(80)).toHaveLength(6);
       viewer.dispose();
     } finally {
       clearViewerExternalRows("test-active-workflow");
     }
+  });
+
+  it("top-aligns a short transcript and releases unused terminal rows", () => {
+    const row = agentLiveStore.begin({
+      id: "short-top-aligned-viewer",
+      agentName: "reviewer",
+      label: "Review",
+      request: "Check one file.",
+    });
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "text", text: "One-line result." }], stopReason: "stop" },
+    });
+    const tui = { terminal: { rows: 24, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+    const rendered = viewer.render(80);
+    expect(rendered).toHaveLength(6);
+    expect(rendered[0]).toMatch(/^╭─ \[agent/u);
+    expect(rendered[1]).toMatch(/^├─ REQUEST/u);
+    expect(rendered[2]).toContain("Check one file.");
+    expect(rendered[3]).toMatch(/^├─ RUNTIME/u);
+    expect(rendered[4]).toContain("One-line result.");
+    expect(rendered[5]).toMatch(/^╰─ STATUS:/u);
+    expect(rendered.every((line) => line.trim() !== "")).toBe(true);
+    expect(rendered.length).toBeLessThan(tui.terminal.rows - 1);
+    viewer.dispose();
   });
 
   it("renders request control characters as text instead of terminal control sequences", () => {
@@ -562,7 +589,8 @@ describe("AgentSessionViewer", () => {
     });
 
     const initial = viewer.render(80);
-    expect(initial).toHaveLength(tui.terminal.rows - 1);
+    expect(initial).toHaveLength(9);
+    expect(initial.length).toBeLessThan(tui.terminal.rows - 1);
     expect(initial.join("\n")).not.toContain("Message to Agent");
     expect(initial.join("\n")).not.toContain("MESSAGE TO AGENT");
     expect(initial.at(-1)).toMatch(/^╰─ STATUS: queued/u);
@@ -628,7 +656,7 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
-  it("mounts the installed Pi native editor inside the fixed viewport", async () => {
+  it("mounts the installed Pi native editor inside the compact content-height viewport", async () => {
     const { initTheme } = await import("@earendil-works/pi-coding-agent");
     initTheme(undefined, false);
     const loaded = await loadAgentViewerCapability();
@@ -645,7 +673,8 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     const rendered = viewer.render(80);
-    expect(rendered).toHaveLength(terminal.rows - 1);
+    expect(rendered).toHaveLength(12);
+    expect(rendered.length).toBeLessThan(terminal.rows - 1);
     expect(rendered.join("\n")).toContain("↵ send · ⇧↵ newline");
     viewer.handleInput("o");
     viewer.handleInput("k");
