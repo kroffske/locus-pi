@@ -4,6 +4,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
 import {
+  agentLiveStore,
   createAgentSdkSessionExecutor,
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
@@ -104,7 +105,13 @@ function fakeSession(config: {
             const target = config.htmlOutsideReports
               ? path.join(exportDir, "escaped.html")
               : (outputPath ?? path.join(exportDir, "session.html"));
-            writeFileSync(target, config.htmlEmpty === true ? "" : "<html><body>session</body></html>", "utf8");
+            writeFileSync(
+              target,
+              config.htmlEmpty === true
+                ? ""
+                : "<html><head><title>Session Export</title></head><body>session</body></html>",
+              "utf8",
+            );
             return target;
           },
         }
@@ -457,11 +464,10 @@ describe("agent SDK evidence surfacing", () => {
     });
 
     const result = await executor.run(req, new AbortController().signal);
-    assert.deepEqual(result.childTrace, {
-      path: realpathSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.jsonl")),
-      format: "pi-session-jsonl",
-      childSessionId: "sdk-child",
-    });
+    assert.equal(result.childTrace?.format, "pi-session-jsonl");
+    assert.equal(result.childTrace?.childSessionId, "sdk-child");
+    assert.match(path.basename(result.childTrace?.path ?? ""), /^agent-sdk-reviewer-[a-z0-9-]+-fixed\.jsonl$/u);
+    assert.equal(path.dirname(result.childTrace?.path ?? ""), realpathSync(reportsDir));
 
     const withArtifact = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result);
     assert.ok(withArtifact.resultArtifact !== undefined);
@@ -473,23 +479,31 @@ describe("agent SDK evidence surfacing", () => {
   it("renders the session to HTML beside its JSONL and names the verified file in the run evidence", async () => {
     const req = request();
     const reportsDir = path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports");
+    const rowId = "workflow:run-proof:call-0001";
     const executor = createAgentSdkSessionExecutor({
       createSession: (async () => ({
         session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed."), exportsHtml: true }),
       })) as CreateAgentSessionFactory,
       reportsDir,
       now: () => "fixed",
+      live: { rowId, label: "draft recon" },
     });
 
     const result = await executor.run(req, new AbortController().signal);
-    const htmlPath = realpathSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.html"));
+    const displayName = agentLiveStore.rows.get(rowId)?.displayName;
+    assert.ok(displayName);
+    const stem = `agent-sdk-reviewer-draft-recon-${displayName.toLocaleLowerCase()}-fixed`;
+    const htmlPath = realpathSync(path.join(reportsDir, `${stem}.html`));
     assert.deepEqual(result.childTrace, {
-      path: realpathSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.jsonl")),
+      path: realpathSync(path.join(reportsDir, `${stem}.jsonl`)),
       format: "pi-session-jsonl",
       childSessionId: "sdk-child",
       htmlPath,
     });
-    assert.equal(readFileSync(htmlPath, "utf8"), "<html><body>session</body></html>");
+    assert.equal(
+      readFileSync(htmlPath, "utf8"),
+      `<html><head><title>Agent transcript — ${displayName} · draft recon</title></head><body>session</body></html>`,
+    );
     assert.ok(result.diagnostics.some((line) => line === `HTML transcript render exported: ${htmlPath}`));
 
     // Durable: the per-call result envelope is where a reader finds it later.

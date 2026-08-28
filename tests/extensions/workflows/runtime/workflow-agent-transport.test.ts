@@ -368,6 +368,41 @@ describe("agent failure cause — run boundary", () => {
 });
 
 describe("agent failure cause — bridge", () => {
+  it("projects the live execution petname as an additive workflow result identity", async () => {
+    const harness = createHarness(bridgeProject(), { sessionId: "transport-petname" });
+    const rowId = "workflow:transport-petname:call-0001";
+    const runner = createWorkflowAgentRunner({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      createExecutor: (options): AgentExecutor => ({
+        async run(request) {
+          const execution = agentLiveStore.beginExecution({
+            id: rowId,
+            agentName: request.agent?.name ?? "sub-agent",
+            label: "default (identity proof)",
+            isolated: false,
+            noMcp: false,
+          });
+          options.onLiveExecution?.(execution);
+          return {
+            status: "completed",
+            ...(request.agent?.name === undefined ? {} : { agentName: request.agent.name }),
+            reason: "done",
+            text: "done",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    const result = await runner({ prompt: "work", agent: "default", label: "identity proof" });
+    const displayName = agentLiveStore.rows.get(rowId)?.displayName;
+    expect(displayName).toBeDefined();
+    expect(result).toMatchObject({ agent: "default", displayName, status: "completed" });
+  });
+
   it("names an unknown catalog agent as an author error", async () => {
     const harness = createHarness(bridgeProject(), { sessionId: "transport-unknown-agent" });
     const runner = createWorkflowAgentRunner({

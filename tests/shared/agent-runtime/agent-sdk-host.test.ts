@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
@@ -1118,7 +1118,10 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       },
     });
     expect(disposeSpy).toHaveBeenCalledTimes(1);
-    expect(existsSync(path.join(reportsDir, "agent-sdk-reviewer-fixed.jsonl"))).toBe(true);
+    const transcripts = readdirSync(reportsDir).filter((name) => name.endsWith(".jsonl"));
+    expect(transcripts).toHaveLength(1);
+    expect(transcripts[0]).toMatch(/^agent-sdk-reviewer-[a-z0-9-]+-fixed\.jsonl$/u);
+    expect(existsSync(path.join(reportsDir, transcripts[0]!))).toBe(true);
   });
 
   it("routes viewer input into the active SDK child as a steering message", async () => {
