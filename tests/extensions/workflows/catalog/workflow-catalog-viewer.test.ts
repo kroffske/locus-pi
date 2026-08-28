@@ -46,7 +46,8 @@ describe("focused workflow catalog", () => {
 
     expect(harness.customComponents).toHaveLength(1);
     expect(harness.customRenderFrames[0]?.join("\n")).toContain("[SELECT] Workflow catalog");
-    expect(harness.customRenderFrames[0]?.join("\n")).toContain("> alpha · [P]");
+    expect(harness.customRenderFrames[0]?.join("\n")).toContain("[Package 18]");
+    expect(harness.customRenderFrames[0]?.join("\n")).toContain("> implement · [PKG]");
     expect(harness.widgets.get("workflows")).toBe("");
   });
 
@@ -58,7 +59,7 @@ describe("focused workflow catalog", () => {
     writeRun(root, "20260101-000001-alpha", "alpha");
     const harness = createHarness(root);
     harness.ctx.hasUI = true;
-    harness.customInputQueue.push("down", "enter", "escape", "escape");
+    harness.customInputQueue.push("left", "left", "down", "enter", "escape", "escape");
     workflows(harness.pi);
 
     await harness.commands.get("workflows")!.handler("list", harness.ctx);
@@ -78,6 +79,7 @@ describe("focused workflow catalog", () => {
     writeRun(root, "20260101-000001-alpha", "alpha");
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 18);
+    focusProject(viewer);
 
     let lines = viewer.render(146);
     let row = lines.findIndex((line) => line.includes("> alpha · [P]"));
@@ -108,8 +110,6 @@ describe("focused workflow catalog", () => {
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 48);
 
-    viewer.handleInput("right");
-    viewer.handleInput("right");
     for (const width of [40, 48, 80]) {
       const lines = viewer.render(width);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
@@ -153,6 +153,7 @@ describe("focused workflow catalog", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", description) });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 18);
+    focusProject(viewer);
 
     const rendered = viewer.render(48).join("\n");
     expect(rendered).toContain("    · Alpha workflow description uses complete");
@@ -167,6 +168,10 @@ describe("focused workflow catalog", () => {
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 48);
 
+    expect(viewer.render(146).join("\n")).toContain("Project 1  User 0  [Package 18]  History 1");
+    viewer.handleInput("left");
+    expect(viewer.render(146).join("\n")).toContain("Project 1  [User 0]  Package 18  History 1");
+    viewer.handleInput("left");
     expect(viewer.render(146).join("\n")).toContain("[Project 1]  User 0  Package 18  History 1");
     viewer.handleInput("left");
     const history = viewer.render(146).join("\n");
@@ -175,25 +180,47 @@ describe("focused workflow catalog", () => {
     expect(history).not.toContain("> alpha · [P]");
   });
 
+  it("opens the richest current source and keeps fixed-order ties deterministic", () => {
+    const personalRichRoot = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    writeWorkflow(
+      path.join(personalRichRoot, "home", ".pi", "workflows"),
+      "personal-19",
+      source("personal-19", "Personal"),
+    );
+    for (let index = 0; index < 18; index += 1) {
+      const name = `personal-${String(index).padStart(2, "0")}`;
+      writeWorkflow(path.join(personalRichRoot, "home", ".pi", "workflows"), name, source(name, "Personal"));
+    }
+    const personal = createViewer(
+      buildWorkflowCatalogModel(personalRichRoot, personalRichRoot),
+      personalRichRoot,
+    ).viewer;
+    expect(personal.render(100).join("\n")).toContain("Project 1  [User 19]  Package 18");
+
+    const tiedRoot = projectWithWorkflows(manyWorkflows(18));
+    const tied = createViewer(buildWorkflowCatalogModel(tiedRoot, tiedRoot), tiedRoot).viewer;
+    expect(tied.render(100).join("\n")).toContain("[Project 18]  User 0  Package 18");
+  });
+
   it("cycles catalog tabs with Tab plus named, ANSI, and application arrow keys", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 18);
 
     viewer.handleInput("tab");
-    expect(viewer.render(100).join("\n")).toContain("[User 0]");
+    expect(viewer.render(100).join("\n")).toContain("[History 0]");
     viewer.handleInput("right");
-    expect(viewer.render(100).join("\n")).toContain("[Package 18]");
-    viewer.handleInput("\x1b[C");
-    expect(viewer.render(100).join("\n")).toContain("[History 0]");
-    viewer.handleInput("\x1bOC");
     expect(viewer.render(100).join("\n")).toContain("[Project 1]");
-    viewer.handleInput("left");
-    expect(viewer.render(100).join("\n")).toContain("[History 0]");
-    viewer.handleInput("\x1b[D");
-    expect(viewer.render(100).join("\n")).toContain("[Package 18]");
-    viewer.handleInput("\x1bOD");
+    viewer.handleInput("\x1b[C");
     expect(viewer.render(100).join("\n")).toContain("[User 0]");
+    viewer.handleInput("\x1bOC");
+    expect(viewer.render(100).join("\n")).toContain("[Package 18]");
+    viewer.handleInput("left");
+    expect(viewer.render(100).join("\n")).toContain("[User 0]");
+    viewer.handleInput("\x1b[D");
+    expect(viewer.render(100).join("\n")).toContain("[Project 1]");
+    viewer.handleInput("\x1bOD");
+    expect(viewer.render(100).join("\n")).toContain("[History 0]");
   });
 
   it("reports deletion and returns without losing the selected row", () => {
@@ -202,6 +229,7 @@ describe("focused workflow catalog", () => {
     const file = path.join(root, ".pi", "workflows", "alpha.workflow.mjs");
     rmSync(file);
     const { viewer, done } = createViewer(model, root);
+    focusProject(viewer);
 
     viewer.handleInput("enter");
     expect(viewer.render(80).join("\n")).toContain("is no longer in the current catalog");
@@ -219,6 +247,7 @@ describe("focused workflow catalog", () => {
     const model = buildWorkflowCatalogModel(root, root);
     writeWorkflow(path.join(root, ".pi", "workflows"), "same", source("same", "New project shadow"));
     const { viewer } = createViewer(model, root);
+    viewer.handleInput("left");
 
     viewer.handleInput("enter");
     const rendered = viewer.render(100).join("\n");
@@ -234,6 +263,7 @@ describe("focused workflow catalog", () => {
     chmodSync(file, 0o000);
     try {
       const { viewer } = createViewer(model, root);
+      focusProject(viewer);
       viewer.handleInput("enter");
       expect(viewer.render(80).join("\n")).toContain("could not be read");
     } finally {
@@ -246,6 +276,7 @@ describe("focused workflow catalog", () => {
     const root = projectWithWorkflows({ alpha: lines.join("\n") });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 7);
+    focusProject(viewer);
 
     viewer.handleInput("enter");
     expect(viewer.render(80).join("\n")).toContain("const line1 = 1;");
@@ -262,6 +293,7 @@ describe("focused workflow catalog", () => {
     const root = projectWithWorkflows({ alpha: lines.join("\n") });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 32);
+    focusProject(viewer);
 
     viewer.handleInput("enter");
     const first = viewer.render(80).join("\n");
@@ -358,7 +390,7 @@ describe("focused workflow catalog", () => {
   });
 
   it("also reserves the active workflow widget beneath the focused catalog", () => {
-    const root = projectWithWorkflows(manyWorkflows(14));
+    const root = projectWithWorkflows(manyWorkflows(24));
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 24);
 
@@ -380,6 +412,7 @@ describe("focused workflow catalog", () => {
     });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer, terminal } = createViewer(model, root, rows);
+    focusProject(viewer);
     viewer.handleInput("down");
 
     const compact = viewer.render(48).join("\n");
@@ -405,6 +438,7 @@ describe("focused workflow catalog", () => {
     writeRun(root, "20260101-000001-alpha", "alpha");
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer, terminal } = createViewer(model, root, 6);
+    focusProject(viewer);
 
     expect(viewer.render(48).join("\n")).toContain("alpha · [P] · Alpha workflow");
     viewer.handleInput("left");
@@ -421,6 +455,7 @@ describe("focused workflow catalog", () => {
       writeRun(root, "20260101-000001-alpha", "alpha");
       const model = buildWorkflowCatalogModel(root, root);
       const { viewer } = createViewer(model, root, rows);
+      focusProject(viewer);
 
       viewer.handleInput("left");
 
@@ -482,6 +517,7 @@ describe("focused workflow catalog", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer, done } = createViewer(model, root);
+    focusProject(viewer);
 
     viewer.handleInput("enter");
     expect(viewer.render(80).join("\n")).toContain("› [Back] Start Edit Review");
@@ -534,6 +570,7 @@ describe("focused workflow catalog", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root);
+    focusProject(viewer);
 
     viewer.handleInput("enter");
     viewer.handleInput("left");
@@ -683,7 +720,7 @@ describe("focused workflow catalog", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const harness = createHarness(root);
     harness.ctx.hasUI = true;
-    harness.customInputQueue.push("enter", "tab", "enter");
+    harness.customInputQueue.push("left", "left", "enter", "tab", "enter");
     workflows(harness.pi);
 
     await harness.commands.get("workflows")!.handler("list", harness.ctx);
@@ -927,6 +964,11 @@ function createInfoViewer(block: OperatorBlock, rows = 12) {
   const terminal = { rows, columns: 100 };
   const viewer = new WorkflowInfoViewer({ requestRender: vi.fn(), terminal }, {}, {}, block, done);
   return { viewer, done, terminal };
+}
+
+function focusProject(viewer: WorkflowCatalogViewer): void {
+  viewer.handleInput("left");
+  viewer.handleInput("left");
 }
 
 function collectInfoLines(viewer: WorkflowInfoViewer, width: number, pages: number): Set<string> {
