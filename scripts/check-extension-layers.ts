@@ -145,7 +145,7 @@ interface RegistryEntry {
 const REGISTRIES: readonly RegistryEntry[] = [
   { symbol: "locus-pi.agent-live-store.v5", owner: "extensions/_shared/agent-runtime/agent-sdk-host.ts" },
   { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-journal.ts" },
-  { symbol: "locus-pi.fleet-menu-state.v2", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
+  { symbol: "locus-pi.fleet-menu-state.v3", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.fleet-viewed-row.v1", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },
   { symbol: "locus-pi.operator-status.v1", owner: "extensions/_shared/operator/operator-status.ts" },

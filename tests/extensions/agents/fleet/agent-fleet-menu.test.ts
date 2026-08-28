@@ -163,7 +163,7 @@ describe("agent fleet menu", () => {
     expect(h.customComponents).toHaveLength(0);
   });
 
-  it("renders focused rows and controls in the shared selector while the passive widget stays below editor", () => {
+  it("focuses the existing below-editor roster while the custom component captures keys without a duplicate", () => {
     const active = row("screen-order-row", "prove screen order");
     const h = createHarness();
     h.ctx.hasUI = true;
@@ -178,20 +178,20 @@ describe("agent fleet menu", () => {
     fleetMenuState.setFocused(true);
     const keyCapture = new FleetFocusComponent(() => [active], {}, { requestRender: vi.fn() }, vi.fn());
 
-    const focused = keyCapture.render(120);
-    const passive = widget.render(120);
+    const keyCaptureFrame = keyCapture.render(120);
+    const focusedRoster = widget.render(120);
 
     expect(h.widgetOptions.get("fleet-order")).toEqual({ placement: "belowEditor" });
-    expect(focused.join("\n")).toContain("prove screen order");
-    expect(focused.at(-1)).toContain("stop");
-    expect(focused.at(-1)).toContain("back");
-    expect(passive.join("\n")).toContain("prove screen order");
-    expect(passive.at(-1)).toContain("manage");
+    expect(keyCaptureFrame).toEqual([]);
+    expect(focusedRoster.join("\n")).toContain("prove screen order");
+    expect(focusedRoster.some((line) => line.startsWith("> "))).toBe(true);
+    expect(focusedRoster.at(-1)).toContain("stop");
+    expect(focusedRoster.at(-1)).toContain("back");
     keyCapture.dispose();
     widget.dispose();
   });
 
-  it("derives /ps rows from the global live store when ordinary and workflow panels coexist", async () => {
+  it("projects the global /ps snapshot through the primary workflow panel when ordinary rows coexist", () => {
     const h = createHarness();
     h.ctx.hasUI = true;
     agents(h.pi);
@@ -212,18 +212,86 @@ describe("agent fleet menu", () => {
     workflowPanel.push(workflowLine);
     const workflowRow = agentLiveStore.rows.get(workflowAgentLiveRowId(workflowLine));
     if (workflowRow === undefined) throw new Error("expected projected workflow row");
-    fleetMenuState.setVisibleRows([workflowRow]);
-    workflowPanel.render(120);
-
-    h.customInputQueue.push("escape");
-    await h.commands.get("ps")!.handler("", h.ctx);
-
-    const focused = h.customRenderFrames.at(-1)?.join("\n") ?? "";
+    if (workflowRow.displayName === undefined) throw new Error("expected workflow petname");
+    const workflowChild = agentLiveStore.begin({
+      id: "workflow-coexistence-sdk-child",
+      parentRowId: workflowRow.id,
+      agentName: "reviewer",
+      label: "SDK child session",
+      workflowRunId: workflowLine.runId,
+    });
+    agentLiveStore.patch(workflowChild.id, { status: "working" });
+    const factory = h.widgetPayloads.get("workflow-coexistence") as (
+      tui: { requestRender(): void; terminal: { rows: number; columns: number } },
+      theme: unknown,
+    ) => WorkflowProgressComponent;
+    const widget = factory({ requestRender: vi.fn(), terminal: { rows: 30, columns: 120 } }, {});
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const keyCapture = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+    const focused = widget.render(120).join("\n");
     expect(focused).toContain(ordinary.displayName);
     expect(focused).toContain(workflowRow.displayName);
-    expect(fleetMenuState.visibleRows()).toEqual([]);
-    expect(fleetMenuState.selectedRowId).toBeUndefined();
+    expect(focused).toContain("SDK child session");
+    expect(focused).not.toContain("workflow agent work");
+    expect(focused.match(new RegExp(workflowRow.displayName, "gu"))).toHaveLength(1);
+    expect(keyCapture.render(120)).toEqual([]);
+    keyCapture.dispose();
+    fleetMenuState.setFocused(false);
+    fleetMenuState.setVisibleRows([]);
     workflowPanel.dispose();
+  });
+
+  it("freezes focused membership and traverses every leaf through an eight-row viewport", () => {
+    const rows = Array.from({ length: 11 }, (_unused, index) => row(`snapshot-${index}`, `snapshot task ${index}`));
+    fleetMenuState.beginFocus(rows);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    const arrival = row("snapshot-arrival", "arrived after open");
+    for (let index = 1; index < rows.length; index += 1) component.handleInput("down");
+
+    expect(fleetMenuState.selectedRowId).toBe(rows.at(-1)?.id);
+    expect(fleetMenuState.visibleRows()).not.toContainEqual(expect.objectContaining({ id: arrival.id }));
+    const rendered = component.render(120).join("\n");
+    expect(rendered).toContain("snapshot task 10");
+    expect(rendered).toMatch(/↑ \d+ earlier/u);
+    expect(rendered).not.toContain("arrived after open");
+    component.dispose();
+  });
+
+  it("keeps the selected row and controls visible in a standard 24-row terminal", () => {
+    const rows = Array.from({ length: 10 }, (_unused, index) => {
+      const value = row(`compact-focus-${index}`, `compact task ${index}`, "done");
+      return agentLiveStore.patch(value.id, { finalAnswer: `compact result ${index}` })!;
+    });
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    const panel = installWorkflowProgress(h.ctx, "compact-focused-fleet", "compact", "run");
+    const factory = h.widgetPayloads.get("compact-focused-fleet") as (
+      tui: { requestRender(): void; terminal: { rows: number; columns: number } },
+      theme: unknown,
+    ) => WorkflowProgressComponent;
+    const widget = factory({ requestRender: vi.fn(), terminal: { rows: 24, columns: 120 } }, {});
+    fleetMenuState.beginFocus(rows);
+    fleetMenuState.setFocused(true);
+
+    const rendered = widget.render(120);
+
+    expect(rendered.length).toBeLessThanOrEqual(18);
+    expect(rendered.some((line) => line.startsWith("> "))).toBe(true);
+    expect(rendered.at(-1)).toContain("back");
+    panel.dispose();
   });
 
   it("routes x through a stop request instead of cancelling immediately, while Esc only returns", () => {

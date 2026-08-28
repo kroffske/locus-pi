@@ -6,6 +6,7 @@ import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../../_
 import {
   AgentLivePanel,
   AGENT_LIVE_SPINNER_FRAME_COUNT,
+  compactWorkflowParentRows,
   elapsedSinceStart,
   formatAgentIdentity,
   formatDuration,
@@ -15,6 +16,7 @@ import {
 } from "../../_shared/agent-runtime/agent-live-panel.js";
 import {
   fleetMenuState,
+  registerFleetProjectionOwner,
   fleetViewedRowId,
   renderFleetMenuRows,
   selectFleetMenuLeafRows,
@@ -89,6 +91,8 @@ export interface WorkflowProgressOptions {
    * suppresses every repaint. Defaults from render-profile.ts (auto-on under WSL).
    */
   calm?: boolean;
+  /** Internal host wiring: only an installed below-editor component may own focused fleet projection. */
+  ownsFleetProjection?: boolean;
 }
 
 /** One stage a workflow declared before the run started. */
@@ -124,6 +128,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     this.#syncLiveTimer();
     this.#scheduler.request();
   };
+  #fleetProjectionOwner: ReturnType<typeof registerFleetProjectionOwner> | undefined;
 
   constructor(
     public tui: WidgetFactoryTui,
@@ -158,6 +163,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
 
   attachTui(tui: WidgetFactoryTui): void {
     this.tui = tui;
+    if (this.options.ownsFleetProjection === true && this.#fleetProjectionOwner === undefined) {
+      this.#fleetProjectionOwner = registerFleetProjectionOwner(this.options.scope === "workflow" ? 2 : 1);
+    }
     this.#syncLiveTimer();
   }
 
@@ -170,6 +178,12 @@ export class WorkflowProgressComponent implements CustomUiComponent {
 
   dispose(): void {
     clearViewerExternalRows(WORKFLOW_VIEWER_RESERVATION_OWNER);
+    this.#stopRuntimeUpdates();
+    this.#fleetProjectionOwner?.release();
+    this.#fleetProjectionOwner = undefined;
+  }
+
+  #stopRuntimeUpdates(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     agentLiveStore.emitter.off("change", this.#onStoreChange);
@@ -214,7 +228,7 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       ...(res.resultPersistence !== undefined ? { resultPersistence: res.resultPersistence } : {}),
       ...(res.failureDiagnostic !== undefined ? { failureDiagnostic: res.failureDiagnostic } : {}),
     };
-    this.dispose();
+    this.#stopRuntimeUpdates();
     this.tui.requestRender();
   }
 
@@ -233,10 +247,21 @@ export class WorkflowProgressComponent implements CustomUiComponent {
     const liveRows = this.visibleRows();
     const doneLines = this.doneLines(width);
     const header = this.renderHeader(width, liveRows);
+    if (fleetMenuState.focused && this.#fleetProjectionOwner !== undefined && !this.#fleetProjectionOwner.isPrimary()) {
+      const rendered = fitLines([header, ...doneLines], [], budget, width, doneLines.length);
+      setViewerExternalRows(WORKFLOW_VIEWER_RESERVATION_OWNER, rendered.length);
+      return rendered;
+    }
     if (this.options.scope !== "workflow") {
-      const fleetLines = renderFleetMenuRows(liveRows, width, {
+      const focused = fleetMenuState.focused && this.#fleetProjectionOwner?.isPrimary() === true;
+      const fleetLines = renderFleetMenuRows(focused ? fleetMenuState.visibleRows() : liveRows, width, {
         spinnerIndex: this.#spinnerIndex,
         theme: this.theme,
+        ...(focused ? { focused: true } : {}),
+        ...(focused ? { maxRows: focusedFleetRowBudget(budget) } : {}),
+        ...(focused && fleetMenuState.selectedRowId !== undefined
+          ? { selectedRowId: fleetMenuState.selectedRowId }
+          : {}),
         emptyEditorFocusAvailable: fleetMenuState.emptyEditorFocusAvailable,
         fallbackFocusAvailable: fleetMenuState.fallbackFocusAvailable,
         ...(this.#calm ? { calm: true } : {}),
@@ -247,6 +272,21 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       const tailLines = this.progressTailLines(width);
       if (fleetFooter === undefined) return fitLines(fixedLines, tailLines, budget, width, doneLines.length);
       return [...fitLines(fixedLines, tailLines, Math.max(0, budget - 1), width, doneLines.length), fleetFooter];
+    }
+
+    if (fleetMenuState.focused && this.#fleetProjectionOwner?.isPrimary() === true) {
+      const fleetLines = renderFleetMenuRows(fleetMenuState.visibleRows(), width, {
+        focused: true,
+        maxRows: focusedFleetRowBudget(budget),
+        ...(fleetMenuState.selectedRowId !== undefined ? { selectedRowId: fleetMenuState.selectedRowId } : {}),
+        spinnerIndex: this.#spinnerIndex,
+        theme: this.theme,
+        ...(this.#calm ? { calm: true } : {}),
+      });
+      const body = [header, ...fleetLines, ...doneLines];
+      const rendered = fitLines(body, [], budget, width, doneLines.length);
+      setViewerExternalRows(WORKFLOW_VIEWER_RESERVATION_OWNER, rendered.length);
+      return rendered;
     }
 
     const passiveDiagnostics = this.journal
@@ -745,13 +785,10 @@ export function installWorkflowProgress(
   runIdPlaceholder: string,
   options: WorkflowProgressOptions = {},
 ): WorkflowProgressComponent {
-  const component = new WorkflowProgressComponent(
-    NOOP_TUI,
-    coerceTheme(undefined),
-    scriptRef,
-    runIdPlaceholder,
-    options,
-  );
+  const component = new WorkflowProgressComponent(NOOP_TUI, coerceTheme(undefined), scriptRef, runIdPlaceholder, {
+    ...options,
+    ownsFleetProjection: true,
+  });
   if (ctx.hasUI === true) {
     if (ctx.mode !== "tui") {
       const requestRender = () => {
@@ -785,31 +822,6 @@ export function renderAgentLiveRowsText(): string {
   return new AgentLivePanel({})
     .renderRows(orderAgentLiveRows(compactWorkflowParentRows(rows)), Number.POSITIVE_INFINITY)
     .join("\n");
-}
-
-export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] {
-  const rowById = new Map(rows.map((row) => [row.id, row]));
-  const parentIdsWithChildren = new Set(
-    rows.map((row) => row.parentRowId).filter((id): id is string => id !== undefined),
-  );
-  const collapsedParentIds = new Set(
-    rows.filter((row) => parentIdsWithChildren.has(row.id) && isWorkflowAgentParentRow(row)).map((row) => row.id),
-  );
-  if (collapsedParentIds.size === 0) return rows;
-
-  return rows
-    .filter((row) => !collapsedParentIds.has(row.id))
-    .map((row) => {
-      if (row.parentRowId === undefined || !collapsedParentIds.has(row.parentRowId)) return row;
-      const collapsedParent = rowById.get(row.parentRowId);
-      const nextParentRowId = collapsedParent?.parentRowId;
-      const { parentRowId: _oldParentRowId, ...rest } = row;
-      return nextParentRowId === undefined ? rest : { ...rest, parentRowId: nextParentRowId };
-    });
-}
-
-function isWorkflowAgentParentRow(row: AgentLiveRow): boolean {
-  return row.id.startsWith("workflow:") && !row.id.includes(":group:");
 }
 
 export function renderAgentObserverText(): string {
@@ -1026,4 +1038,13 @@ function fitLines(
   const visibleMiddle = middle.slice(0, middleSlots);
   const hiddenCount = fixedLines.length + visibleTail.length - visibleMiddle.length - doneBlock.length;
   return [...visibleMiddle, truncate(`  (+${hiddenCount} more)`, width), ...doneBlock].slice(0, budget);
+}
+
+/**
+ * A settled focused row can use two lines (identity + final-answer preview),
+ * while a working row can add one tool-activity line. Reserve the rail,
+ * viewport count and controls before choosing how many logical rows to show.
+ */
+function focusedFleetRowBudget(panelLines: number): number {
+  return Math.max(1, Math.min(8, Math.floor((panelLines - 3) / 2)));
 }

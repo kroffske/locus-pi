@@ -103,6 +103,36 @@ export function orderAgentLiveRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   return ordered;
 }
 
+/**
+ * A workflow journal anchor and the SDK child it launches describe one logical
+ * agent. Once the child exists, keep the child and splice it into the anchor's
+ * place in the tree so every fleet/status surface shows that actor once.
+ */
+export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const parentIdsWithChildren = new Set(
+    rows.map((row) => row.parentRowId).filter((id): id is string => id !== undefined),
+  );
+  const collapsedParentIds = new Set(
+    rows.filter((row) => parentIdsWithChildren.has(row.id) && isWorkflowAgentParentRow(row)).map((row) => row.id),
+  );
+  if (collapsedParentIds.size === 0) return rows;
+
+  return rows
+    .filter((row) => !collapsedParentIds.has(row.id))
+    .map((row) => {
+      if (row.parentRowId === undefined || !collapsedParentIds.has(row.parentRowId)) return row;
+      const collapsedParent = rowById.get(row.parentRowId);
+      const nextParentRowId = collapsedParent?.parentRowId;
+      const { parentRowId: _oldParentRowId, ...rest } = row;
+      return nextParentRowId === undefined ? rest : { ...rest, parentRowId: nextParentRowId };
+    });
+}
+
+function isWorkflowAgentParentRow(row: AgentLiveRow): boolean {
+  return row.id.startsWith("workflow:") && !row.id.includes(":group:");
+}
+
 export function selectAgentLiveRowsForParents(rows: AgentLiveRow[], parentIds: Iterable<string>): AgentLiveRow[] {
   const byId = new Map(rows.map((row) => [row.id, row]));
   const byParent = new Map<string, AgentLiveRow[]>();

@@ -107,7 +107,7 @@ async function openFleetMenu(
     ctx.ui.notify("/ps found no live agent rows.", "warning");
     return;
   }
-  fleetMenuState.setVisibleRows(initialRows);
+  fleetMenuState.beginFocus(rows());
   fleetMenuState.setFocused(true);
   let component: FleetFocusComponent | undefined;
   const disposeComponent = (): void => {
