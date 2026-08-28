@@ -496,6 +496,14 @@ session petname, and timestamp. The sibling HTML render uses the same filename a
 replaces the host's generic title with `Agent transcript — <petname> · <stage>`
 when the export contains a title element. The completion digest names the shared
 `artifacts/transcripts/` directory once instead of printing every call path.
+Workflow child sessions use Pi's public file-backed session manager inside their
+run-scoped evidence directory, so they do not enter the operator session catalog
+and the host can still render HTML. The runtime explicitly exports each named
+child JSONL/HTML pair into that directory before disposal. The parent operator
+session and built-in `/export`
+remain host-owned; current Pi hosts materialize the session file only after an
+assistant turn, so a slash-only workflow session can require one ordinary turn
+before the built-in exporter becomes available.
 
 Authors can add or connect deterministic text evidence through four surfaces:
 
