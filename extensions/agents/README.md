@@ -24,6 +24,7 @@
 - Parallel or multi-stage orchestration belongs to the workflow runtime, not one `spawn_agent` call.
 - `/ps` and `/agent drill` inspect live and retained child rows; closing the view does not stop a child.
 - In TUI mode `/ps` focuses the agent roster already visible below the editor instead of drawing a second copy. Its row membership and order stay fixed until close, live fields keep updating, and Up/Down can reach every leaf through the eight-row viewport. Reopen `/ps` to include agents that arrived while it was focused.
+- Workflow completion rows retain the durable catalog identity and add the same session petname shown by `/ps`. Fresh JSONL/HTML transcript filenames include their stage and petname, and HTML browser titles use that human identity when the host export exposes a title element.
 
 The catalog follows project -> user precedence: project `.agents/agents/`, then user `~/.agents/agents/`. The package ships no profiles.
 
