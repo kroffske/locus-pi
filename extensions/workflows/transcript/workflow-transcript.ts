@@ -25,7 +25,6 @@ export { registerWorkflowTranscriptRenderers } from "../command/completion-prese
  */
 const TRANSCRIPT_AGENT_ROW_LIMIT = 20;
 const TRANSCRIPT_LINE_MAX_CHARS = 160;
-const TRANSCRIPT_RULE_WIDTH = 64;
 const TRANSCRIPT_ANSWER_MAX_CHARS = 96;
 
 export type WorkflowTranscriptSurfaceMode = "command" | "tool";
@@ -94,7 +93,7 @@ export function createWorkflowTranscript(
         journalPath: workflowJournalFile(runDir),
         resultPath: workflowResultFile(runDir),
         text: [
-          workflowRunRule(safeTarget, id, "started", startedAt),
+          workflowRunHeader(safeTarget, id, "started", startedAt),
           "● workflow started · live progress in the panel below · /ps opens the agent fleet",
           `runDir: ${runDir}`,
         ].join("\n"),
@@ -221,11 +220,8 @@ export function createWorkflowTranscript(
           bodyLines.push(firstTranscriptLine(line));
         }
       }
-      if (presentation.nextAction !== undefined) {
-        bodyLines.push("Next action", presentation.nextAction);
-      }
       const headerLines = [
-        workflowRunRule(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),
+        workflowRunHeader(safeTarget, res.runId, terminalStamp(disposition.status), Date.now()),
         ...formatContinuationLine(res, options.input),
       ];
       completion = {
@@ -250,7 +246,7 @@ export function createWorkflowTranscript(
       if (!announced) this.start(runId, runDir);
       const message = compactTranscriptText(error instanceof Error ? error.message : String(error));
       const lines = [
-        workflowRunRule(safeTarget, runId, "failed", Date.now()),
+        workflowRunHeader(safeTarget, runId, "failed", Date.now()),
         `✗ workflow ${safeTarget} failed · ${message}`,
         `journal: ${workflowJournalFile(runDir)}`,
       ];
@@ -316,15 +312,12 @@ function replaySourceLabel(resumeFromRunId: string | undefined): string {
 }
 
 /**
- * The run boundary the operator asked for: a rule that opens every block, names
- * the workflow, its run, and when the block was written. Two runs in one
- * scrollback are therefore self-separating without any styling, which this
- * surface does not have.
+ * Semantic run identity persisted in session/model context. The custom renderer
+ * turns this line into a width-aware rule; non-TUI readers retain complete plain
+ * text without presentation bytes tied to one terminal width.
  */
-function workflowRunRule(target: string, runId: string, stamp: string, at: number): string {
-  const head = `── workflow ${target} · run #${shortWorkflowRunId(runId)} · ${stamp} ${clockStamp(at)} `;
-  const fill = Math.max(3, TRANSCRIPT_RULE_WIDTH - head.length);
-  return `${head}${"─".repeat(fill)}`;
+function workflowRunHeader(target: string, runId: string, stamp: string, at: number): string {
+  return `workflow ${target} · run #${shortWorkflowRunId(runId)} · ${stamp} ${clockStamp(at)}`;
 }
 
 function terminalStamp(status: WorkflowDispositionProjection["status"]): string {

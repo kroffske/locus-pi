@@ -1,6 +1,6 @@
 import path from "node:path";
-import { Box, Text } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ThemeLike } from "../../_shared/host/pi-api.js";
+import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import type { CustomUiComponent, ExtensionAPI, ThemeLike } from "../../_shared/host/pi-api.js";
 import { formatWorkflowCommandToken } from "./command-parser.js";
 import { WORKFLOW_RESULT_CUSTOM_TYPE, WORKFLOW_RUN_CUSTOM_TYPE } from "./receipts.js";
 import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
@@ -77,7 +77,7 @@ export function registerWorkflowTranscriptRenderers(pi: ExtensionAPI): void {
     // Only the run card gets digest tone: its content is the digest, whose line
     // vocabulary is known. The result card below carries the workflow's own prose,
     // where a leading `✓` is the agent's sentence and not a status marker.
-    return workflowTranscriptCard(title, paintWorkflowDigest(message.content, theme), outputPad, theme);
+    return workflowTranscriptCard(title, message.content, outputPad, theme, undefined, true);
   });
   pi.registerMessageRenderer(WORKFLOW_RESULT_CUSTOM_TYPE, (message, { outputPad }, theme) => {
     if (typeof message.content !== "string") return undefined;
@@ -104,7 +104,6 @@ function workflowRunTitle(eventKind: unknown): string {
 const WORKFLOW_DIGEST_GROUP_TONES = new Map<string, string>([
   ["Files", "accent"],
   ["Commands", "accent"],
-  ["Next action", "accent"],
   ["Failure", "error"],
 ]);
 
@@ -152,11 +151,52 @@ function workflowTranscriptCard(
   outputPad: number,
   theme: ThemeLike,
   footer?: { title: string; text: string },
-): Box {
-  const box = new Box(outputPad, 1, (text) => theme.bg("customMessageBg", text));
-  const footerText = footer === undefined ? "" : `\n\n${theme.fg("accent", theme.bold(footer.title))}\n${footer.text}`;
-  box.addChild(new Text(`${theme.fg("accent", theme.bold(title))}\n${content}${footerText}`, 0, 0));
-  return box;
+  decorateDigest = false,
+): CustomUiComponent {
+  return new WorkflowTranscriptCard(title, content, outputPad, theme, footer, decorateDigest);
+}
+
+class WorkflowTranscriptCard implements CustomUiComponent {
+  constructor(
+    private readonly title: string,
+    private readonly content: string,
+    private readonly outputPad: number,
+    private readonly theme: ThemeLike,
+    private readonly footer: { title: string; text: string } | undefined,
+    private readonly decorateDigest: boolean,
+  ) {}
+
+  render(width: number): string[] {
+    const safeWidth = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 1;
+    const contentWidth = Math.max(1, safeWidth - Math.max(0, this.outputPad) * 2);
+    const content = this.decorateDigest
+      ? paintWorkflowDigest(renderWorkflowRunRules(this.content, contentWidth), this.theme)
+      : this.content;
+    const footerText =
+      this.footer === undefined
+        ? ""
+        : `\n\n${this.theme.fg("accent", this.theme.bold(this.footer.title))}\n${this.footer.text}`;
+    const box = new Box(this.outputPad, 1, (text) => this.theme.bg("customMessageBg", text));
+    box.addChild(new Text(`${this.theme.fg("accent", this.theme.bold(this.title))}\n${content}${footerText}`, 0, 0));
+    return box.render(safeWidth);
+  }
+
+  invalidate(): void {
+    // Stateless projection: width-specific rules are rebuilt on every render.
+  }
+}
+
+function renderWorkflowRunRules(digest: string, width: number): string {
+  return digest
+    .split("\n")
+    .map((line) => (line.startsWith("workflow ") ? workflowRunRule(line, width) : line))
+    .join("\n");
+}
+
+function workflowRunRule(header: string, width: number): string {
+  const prefix = `── ${header} `;
+  const fill = "─".repeat(Math.max(0, width - visibleWidth(prefix)));
+  return truncateToWidth(`${prefix}${fill}`, width);
 }
 
 function detailText(value: unknown): string | undefined {

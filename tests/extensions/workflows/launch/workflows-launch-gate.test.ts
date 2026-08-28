@@ -411,7 +411,8 @@ describe("/workflows run launch gate", () => {
       expect(sendMessage).not.toHaveBeenCalled();
       expect(result.content).toHaveLength(1);
       const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-      expect(text).toContain("── workflow live-smoke · run #run2 · failed ");
+      expect(text).toContain("workflow live-smoke · run #run2 · failed ");
+      expect(text).not.toContain("── workflow live-smoke");
       expect(text.match(/same failure/g)).toHaveLength(1);
       // Grouped file and command sections retain the command that prints the
       // reason, which its clipped verdict line cannot carry.

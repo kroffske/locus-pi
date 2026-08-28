@@ -1814,7 +1814,8 @@ describe("workflow progress widget", () => {
       expect(harness.statuses.has("locus")).toBe(false);
       const persisted = harness.sentMessages.map((entry) => String(entry.message.content));
       expect(persisted).toHaveLength(3);
-      expect(persisted[0]).toContain("── workflow slow.workflow.mjs · run #");
+      expect(persisted[0]).toContain("workflow slow.workflow.mjs · run #");
+      expect(persisted[0]).not.toContain("── workflow slow.workflow.mjs");
       expect(persisted[0]).toContain("● workflow started");
       expect(persisted[0]).toContain(`runDir: ${path.join(root, ".locus-pi", "runs")}`);
       expect(persisted[1]).toContain("✓ workflow slow.workflow.mjs finished");

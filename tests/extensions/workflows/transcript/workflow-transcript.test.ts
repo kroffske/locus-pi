@@ -34,7 +34,7 @@ describe("workflow persistent transcript", () => {
     expect(await persistCommandWorkflowTranscript(harness.pi, harness.ctx, completion)).toBe(true);
     expect(harness.sentMessages).toHaveLength(1);
     expect(harness.sentMessages[0]?.message.content).toEqual(
-      expect.stringContaining("── workflow demo.workflow.mjs · run #run1 · finished"),
+      expect.stringContaining("workflow demo.workflow.mjs · run #run1 · finished"),
     );
     expect(harness.sentMessages[0]?.message.content).toEqual(
       expect.stringContaining("✓ workflow demo.workflow.mjs finished · done"),
@@ -494,7 +494,8 @@ describe("workflow persistent transcript", () => {
     const announcement = transcript.start("20260726-183012-a6aa", "/repo/.pi/locus-pi/runs/20260726-183012-a6aa");
 
     expect(announcement).toMatchObject({ eventKind: "workflow_start", runId: "20260726-183012-a6aa" });
-    expect(announcement?.text).toContain("── workflow review · run #a6aa · started");
+    expect(announcement?.text).toContain("workflow review · run #a6aa · started");
+    expect(announcement?.text).not.toContain("──");
     expect(announcement?.text).toContain("runDir: /repo/.pi/locus-pi/runs/20260726-183012-a6aa");
     expect(announceCommandWorkflowStart(harness.pi, harness.ctx, announcement!)).toBe(true);
     expect(harness.sentMessages).toHaveLength(1);
