@@ -314,6 +314,8 @@ export interface WorkflowAgentResult {
   evidence?: EvidenceEvaluation;
   executionMode?: "bare" | "named";
   agent?: string | undefined;
+  /** Session-scoped petname from the live execution row; additive to durable `agent`. */
+  displayName?: string;
   label?: string;
   childSessionId?: string;
   childTrace?: WorkflowAgentChildTrace;
@@ -353,6 +355,7 @@ export interface WorkflowAgentChildTrace {
   path: string;
   format: "pi-session-jsonl";
   childSessionId: string;
+  htmlPath?: string;
 }
 
 export interface WorkflowSchemaValidation {
@@ -790,6 +793,8 @@ export interface WorkflowJournalLine {
   /** Explicit child identity. Absent only on legacy journals where `agent` implied named. */
   executionMode?: "bare" | "named";
   agent?: string;
+  /** Session-scoped petname captured for fresh agent_end evidence. */
+  displayName?: string;
   /** Host-enforced read-only capability boundary for this child. */
   readOnly?: boolean;
   label?: string;
@@ -2953,6 +2958,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...attemptFields,
       replayed,
       ...(finalResult.readOnly !== undefined ? { readOnly: finalResult.readOnly } : {}),
+      ...(finalResult.displayName !== undefined ? { displayName: finalResult.displayName } : {}),
       ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
       ...(finalResult.activeToolNames !== undefined ? { activeToolNames: finalResult.activeToolNames } : {}),
       status: finalResult.status,

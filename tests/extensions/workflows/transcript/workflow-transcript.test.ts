@@ -529,28 +529,39 @@ describe("workflow persistent transcript", () => {
       label: "decide clarification",
       callId: "call-1",
     });
-    transcript.event({
+    const agentEnd: WorkflowJournalLine = {
       ts: "t2",
       runId: "r",
       kind: "agent_end",
       agent: "default",
+      displayName: "Jenner",
       label: "decide clarification",
       callId: "call-1",
       status: "completed",
       durationMs: 45_000,
-    });
+      childTrace: {
+        path: "/tmp/a6aa/runtime/artifacts/transcripts/call-0001/agent-sdk-default-decide-clarification-jenner.jsonl",
+        htmlPath:
+          "/tmp/a6aa/runtime/artifacts/transcripts/call-0001/agent-sdk-default-decide-clarification-jenner.html",
+        format: "pi-session-jsonl",
+        childSessionId: "child-1",
+      },
+    };
+    transcript.event(agentEnd);
     const completion = transcript.finish({
       runId: "20260726-183012-a6aa",
       runDir: "/tmp/a6aa",
       ok: true,
       result: { summary: "done" },
-      journal: [],
+      journal: [agentEnd],
       resultPersistence: { ok: true, path: "/tmp/a6aa/result.json" },
     });
 
-    expect(completion.digest).toContain("✓ agent default finished · 45s — decide clarification");
+    expect(completion.digest).toContain("✓ agent default (Jenner) finished · 45s — decide clarification");
     expect(completion.digest).not.toContain("● agent default started");
     expect(completion.digest.match(/agent default/g)).toHaveLength(1);
+    expect(completion.digest).toContain("agent transcripts: /tmp/a6aa/runtime/artifacts/transcripts");
+    expect(completion.digest).not.toContain("agent-sdk-default-decide-clarification-jenner.jsonl");
   });
 
   it("never folds an agent without an end event into a clean run", () => {

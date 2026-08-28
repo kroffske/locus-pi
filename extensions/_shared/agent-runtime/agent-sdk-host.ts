@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
-import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import type {
   AgentChildOutputStats,
   AgentChildTrace,
@@ -937,6 +937,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
           thinkingLevel,
           execution,
           options.promptEnv,
+          options.live?.label,
         );
       } finally {
         unregisterCancel();
@@ -973,6 +974,7 @@ async function runWithSdkSession(
   thinkingLevel: ThinkingLevel | undefined,
   execution: AgentLiveExecutionHandle,
   promptEnv: NodeJS.ProcessEnv | undefined,
+  liveLabel: string | undefined,
 ): Promise<AgentRunResult> {
   const observed: ExecutedModelObservation = {};
   const result = await runChildSession(
@@ -988,6 +990,7 @@ async function runWithSdkSession(
     thinkingLevel,
     execution,
     promptEnv,
+    liveLabel,
     observed,
   );
   return {
@@ -1010,6 +1013,7 @@ async function runChildSession(
   thinkingLevel: ThinkingLevel | undefined,
   execution: AgentLiveExecutionHandle,
   promptEnv: NodeJS.ProcessEnv | undefined,
+  liveLabel: string | undefined,
   observed: ExecutedModelObservation,
 ): Promise<AgentRunResult> {
   // T-119 PRE-CHECK: getBranch UNREACHABLE
@@ -1160,7 +1164,12 @@ async function runChildSession(
   const preserveChildTrace = async (): Promise<AgentChildTrace | undefined> => {
     if (!childTraceAttempted) {
       childTraceAttempted = true;
-      childTrace = await exportEvidence(session, request, now, reportsDirOverride, diagnostics);
+      childTrace = await exportEvidence(session, request, now, reportsDirOverride, diagnostics, {
+        ...(agentLiveStore.rowForExecution(execution)?.displayName === undefined
+          ? {}
+          : { displayName: agentLiveStore.rowForExecution(execution)!.displayName! }),
+        ...(liveLabel === undefined ? {} : { label: liveLabel }),
+      });
     }
     return childTrace;
   };
@@ -1611,15 +1620,15 @@ async function exportEvidence(
   now: () => string,
   reportsDirOverride: string | undefined,
   diagnostics: string[],
+  identity: { displayName?: string; label?: string },
 ): Promise<AgentChildTrace | undefined> {
   const reportsDir = reportsDirOverride ?? path.join(runtimeStateDir(request.projectRoot ?? process.cwd()), "reports");
   const stamp = sanitizeStamp(now());
   try {
     if (session.sessionId.trim() === "") throw new Error("child session id is missing");
     mkdirSync(reportsDir, { recursive: true });
-    const exportedPath = session.exportToJsonl(
-      path.join(reportsDir, `agent-sdk-${agentRunDisplayName(request)}-${stamp}.jsonl`),
-    );
+    const stem = agentEvidenceStem(request, identity);
+    const exportedPath = session.exportToJsonl(path.join(reportsDir, `agent-sdk-${stem}-${stamp}.jsonl`));
     const realReportsDir = realpathSync(reportsDir);
     const realExportedPath = realpathSync(exportedPath);
     const relativePath = path.relative(realReportsDir, realExportedPath);
@@ -1636,7 +1645,13 @@ async function exportEvidence(
       throw new Error(`exported JSONL session header does not match child ${session.sessionId}`);
     }
     diagnostics.push(`JSONL evidence exported: ${realExportedPath}`);
-    const htmlPath = await exportHtmlRender(session, realReportsDir, realExportedPath, diagnostics);
+    const htmlPath = await exportHtmlRender(
+      session,
+      realReportsDir,
+      realExportedPath,
+      diagnostics,
+      agentEvidenceTitle(request, identity),
+    );
     return {
       path: realExportedPath,
       format: "pi-session-jsonl",
@@ -1667,6 +1682,7 @@ async function exportHtmlRender(
   realReportsDir: string,
   realExportedPath: string,
   diagnostics: string[],
+  title: string,
 ): Promise<string | undefined> {
   if (typeof session.exportToHtml !== "function") {
     diagnostics.push(`${HTML_RENDER_WARNING} unavailable: the installed Pi host exposes no AgentSession.exportToHtml`);
@@ -1688,12 +1704,53 @@ async function exportHtmlRender(
     }
     if (path.extname(realWritten) !== ".html") throw new Error(`rendered path is not HTML: ${realWritten}`);
     if (statSync(realWritten).size === 0) throw new Error(`rendered file is empty: ${realWritten}`);
+    personalizeHtmlTitle(realWritten, title);
     diagnostics.push(`${HTML_RENDER_WARNING} exported: ${realWritten}`);
     return realWritten;
   } catch (error) {
     diagnostics.push(`${HTML_RENDER_WARNING} failed: ${errorMessage(error)}`);
     return undefined;
   }
+}
+
+function agentEvidenceStem(request: AgentRunRequest, identity: { displayName?: string; label?: string }): string {
+  return [agentRunDisplayName(request), identity.label, identity.displayName]
+    .map((part) => evidenceSlug(part))
+    .filter((part, index, parts) => part !== "" && parts.indexOf(part) === index)
+    .join("-");
+}
+
+function agentEvidenceTitle(request: AgentRunRequest, identity: { displayName?: string; label?: string }): string {
+  const agent = evidenceTitlePart(identity.displayName, 48) || agentRunDisplayName(request);
+  const label = evidenceTitlePart(identity.label, 80);
+  return `Agent transcript — ${agent}${label === undefined || label === "" ? "" : ` · ${label}`}`;
+}
+
+function evidenceTitlePart(value: string | undefined, maxChars: number): string | undefined {
+  const bounded = value?.replace(/\s+/gu, " ").trim().slice(0, maxChars).trim();
+  return bounded === undefined || bounded === "" ? undefined : bounded;
+}
+
+function evidenceSlug(value: string | undefined): string {
+  return (value ?? "")
+    .normalize("NFKD")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+|-+$/gu, "")
+    .slice(0, 48)
+    .replace(/-+$/gu, "");
+}
+
+function personalizeHtmlTitle(filePath: string, title: string): void {
+  const html = readFileSync(filePath, "utf8");
+  if (!/<title>[^<]*<\/title>/iu.test(html)) return;
+  const escaped = title
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+  writeFileSync(filePath, html.replace(/<title>[^<]*<\/title>/iu, `<title>${escaped}</title>`), "utf8");
 }
 
 function withChildTrace(result: AgentRunResult, childTrace: AgentChildTrace | undefined): AgentRunResult {

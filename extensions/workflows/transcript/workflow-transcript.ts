@@ -205,6 +205,10 @@ export function createWorkflowTranscript(
         // non-prose result, so pointing there would send them to a dead end.
         commandLines.push(firstTranscriptLine(`read full reason: /workflows status ${shortWorkflowRunId(res.runId)}`));
       }
+      const transcriptDirectory = workflowAgentTranscriptDirectory(res.journal);
+      if (transcriptDirectory !== undefined) {
+        fileLines.push(firstTranscriptLine(`agent transcripts: ${transcriptDirectory}`));
+      }
       const presentation = workflowCompletionPresentation(res, safeTarget);
       if (presentation.generatedRunCommand !== undefined) {
         commandLines.push(`run generated script: ${presentation.generatedRunCommand}`);
@@ -424,17 +428,22 @@ function assertNever(value: never): never {
  */
 function formatWorkflowAgentLifecycle(line: WorkflowJournalLine, replaySourceRunId?: string): string {
   const agent = compactTranscriptText(line.agent ?? "sub-agent");
+  const displayName = line.displayName === undefined ? "" : compactTranscriptText(line.displayName);
+  const identity =
+    displayName !== "" && displayName.toLocaleLowerCase() !== agent.toLocaleLowerCase()
+      ? `${agent} (${displayName})`
+      : agent;
   const label = line.label === undefined ? "" : compactTranscriptText(line.label);
   const labelPart = label !== "" ? ` — ${label}` : "";
   const replayed = line.replayed === true;
   const replayedFrom = replayed ? ` from ${replaySourceLabel(line.resumeFromRunId ?? replaySourceRunId)}` : "";
   if (line.kind === "agent_start") {
-    return `● agent ${agent} started${replayed ? " (replay)" : ""}${labelPart}`;
+    return `● agent ${identity} started${replayed ? " (replay)" : ""}${labelPart}`;
   }
   const elapsed = formatDuration(line.durationMs);
   const elapsedPart = elapsed !== "" ? ` · ${elapsed}` : "";
   if (replayed) {
-    return `↻ agent ${agent} replayed${replayedFrom}${elapsedPart}${labelPart}`;
+    return `↻ agent ${identity} replayed${replayedFrom}${elapsedPart}${labelPart}`;
   }
   const status = line.status ?? "unknown";
   const lifecycle =
@@ -445,7 +454,16 @@ function formatWorkflowAgentLifecycle(line: WorkflowJournalLine, replaySourceRun
         : status === "failed" || status === "blocked"
           ? { marker: "✗", verb: status === "blocked" ? "blocked" : "failed" }
           : { marker: "■", verb: `ended (${compactTranscriptText(status)})` };
-  return `${lifecycle.marker} agent ${agent} ${lifecycle.verb}${elapsedPart}${labelPart}`;
+  return `${lifecycle.marker} agent ${identity} ${lifecycle.verb}${elapsedPart}${labelPart}`;
+}
+
+function workflowAgentTranscriptDirectory(journal: readonly WorkflowJournalLine[]): string | undefined {
+  const roots = journal
+    .map((line) => line.childTrace?.path)
+    .filter((tracePath): tracePath is string => tracePath !== undefined && tracePath !== "")
+    .map((tracePath) => path.dirname(path.dirname(tracePath)));
+  if (roots.length === 0) return undefined;
+  return roots.every((root) => root === roots[0]) ? roots[0] : undefined;
 }
 
 /** Main status omits agent transport markers already represented by the fleet. */

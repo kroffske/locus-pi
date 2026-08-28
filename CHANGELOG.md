@@ -13,6 +13,7 @@ User-visible changes to the public package.
 
 ### Fixed
 
+- Fresh workflow completion rows now pair the durable agent identity with the same petname shown in `/ps`. Child JSONL/HTML transcript filenames include bounded stage and petname slugs, HTML exports replace the generic browser title with that identity when possible, and the completion digest points to the shared transcript directory once.
 - Workflow completion cards now render one gated Next action beneath the exact result instead of repeating it in the persisted digest. Run separators are presentation-only and fill the live card width instead of stopping at a fixed 64 columns; session/model context keeps the same run identity as plain semantic text.
 - `/workflows list` now opens on the current source with the most selectable workflows instead of the first non-empty source; equal counts keep Project → User → Package order, and History is used only when every current source is empty.
 - `/ps` now focuses the agent roster already visible below the editor instead of drawing a duplicate list over the workflow panel. The focused roster freezes membership and order for cursor stability, keeps live fields current, and scrolls through every leaf row with explicit earlier/later counts; closing or drilling returns through the normal Pi editor lifecycle.
