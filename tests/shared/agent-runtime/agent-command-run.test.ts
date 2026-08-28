@@ -68,6 +68,7 @@ function mockSdkSession(
   opts: { summary?: string; toolCalls?: number; toolResults?: number } = {},
 ): void {
   vi.doMock("@earendil-works/pi-coding-agent", () => ({
+    SessionManager: { create: () => ({ kind: "isolated-test-session" }) },
     DefaultResourceLoader: class {
       constructor(_options: Record<string, unknown>) {}
       reload() {}
@@ -411,6 +412,7 @@ describe("interactive children resolve the same tier as workflow children", () =
   /** Same fake session as above, but the createSession options are kept for inspection. */
   function mockSdkSessionCapturing(captured: Array<Record<string, unknown>>): void {
     vi.doMock("@earendil-works/pi-coding-agent", () => ({
+      SessionManager: { create: () => ({ kind: "isolated-test-session" }) },
       DefaultResourceLoader: class {
         constructor(_options: Record<string, unknown>) {}
         reload() {}

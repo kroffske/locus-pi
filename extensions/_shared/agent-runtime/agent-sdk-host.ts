@@ -115,6 +115,11 @@ export interface SdkCreateSessionResultLike {
 }
 export interface SdkCreateSessionOptionsLike {
   cwd?: string;
+  /** Host SessionManager. The default adapter supplies a run-scoped file-backed
+   *  manager outside Pi's operator session catalog. */
+  sessionManager?: unknown;
+  /** Internal default-adapter input; stripped before createAgentSession. */
+  evidenceSessionDir?: string;
   tools?: string[];
   /** Host-level default suppression. Tool-free Fusion always requests `all`. */
   noTools?: "all" | "builtin";
@@ -1060,6 +1065,10 @@ async function runChildSession(
       : [...new Set([...baseExcludedTools, ...request.additionalExcludeTools])];
   const sessionOptions: SdkCreateSessionOptionsLike = {
     cwd,
+    evidenceSessionDir: path.join(
+      reportsDirOverride ?? path.join(runtimeStateDir(request.projectRoot ?? process.cwd()), "reports"),
+      ".sessions",
+    ),
     // Write-capable children may run `workflow`, but no child can recursively
     // call the two direct child-session entrypoints. Read-only children receive
     // the stricter allowlist above. Pi applies excludes after `tools`.
@@ -1582,12 +1591,27 @@ async function defaultCreateAgentSession(opts: SdkCreateSessionOptionsLike): Pro
   return result as unknown as SdkCreateSessionResultLike;
 }
 
-async function materializeSdkSessionOptions(
+/** Internal host-adapter seam exported for contract tests. Injected factories bypass it. */
+export async function materializeSdkSessionOptions(
   mod: unknown,
   opts: SdkCreateSessionOptionsLike,
 ): Promise<Record<string, unknown>> {
-  const { appendSystemPrompt, resourceLoaderOptions, ...sessionOptions } = opts;
-  if (appendSystemPrompt === undefined && resourceLoaderOptions === undefined) return sessionOptions;
+  const { appendSystemPrompt, resourceLoaderOptions, evidenceSessionDir, ...sessionOptions } = opts;
+  if (!isRecord(mod)) {
+    throw new AgentSdkUnavailableError("Installed Pi host does not expose SessionManager for isolated child sessions.");
+  }
+  const SessionManager = mod.SessionManager as { create?: (cwd?: string, sessionDir?: string) => unknown } | undefined;
+  if (typeof SessionManager?.create !== "function") {
+    throw new AgentSdkUnavailableError(
+      "Installed Pi host does not expose SessionManager.create for isolated child sessions.",
+    );
+  }
+  const isolatedSessionManager = SessionManager.create(
+    opts.cwd,
+    evidenceSessionDir ?? path.join(runtimeStateDir(opts.cwd ?? process.cwd()), "reports", ".sessions"),
+  );
+  const isolatedSessionOptions = { ...sessionOptions, sessionManager: isolatedSessionManager };
+  if (appendSystemPrompt === undefined && resourceLoaderOptions === undefined) return isolatedSessionOptions;
   if (!isRecord(mod) || typeof mod.DefaultResourceLoader !== "function") {
     throw new AgentSdkUnavailableError(
       "Installed Pi host does not expose DefaultResourceLoader for package-owned prompt resources.",
@@ -1611,7 +1635,7 @@ async function materializeSdkSessionOptions(
   if (typeof mod.getAgentDir === "function") loaderOptions.agentDir = (mod.getAgentDir as () => string)();
   const loader = new DefaultResourceLoader(loaderOptions);
   await loader.reload?.();
-  return { ...sessionOptions, resourceLoader: loader };
+  return { ...isolatedSessionOptions, resourceLoader: loader };
 }
 
 async function exportEvidence(

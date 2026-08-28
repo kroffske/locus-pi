@@ -8,6 +8,7 @@ import {
   AgentSdkUnavailableError,
   agentLiveStore,
   createAgentSdkSessionExecutor,
+  materializeSdkSessionOptions,
   type AgentLiveExecutionHandle,
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
@@ -157,6 +158,28 @@ function tmpReportsDir(): string {
 }
 
 describe("agent SDK session executor (insurance, not proof)", () => {
+  it("isolates default-adapter child sessions from the operator session catalog", async () => {
+    const manager = { kind: "run-scoped-child" };
+    const create = vi.fn(() => manager);
+
+    const materialized = await materializeSdkSessionOptions(
+      { SessionManager: { create } },
+      { cwd: "/repo", evidenceSessionDir: "/evidence/call-0001/.sessions", excludeTools: ["spawn_agent"] },
+    );
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledWith("/repo", "/evidence/call-0001/.sessions");
+    expect(materialized).toMatchObject({
+      cwd: "/repo",
+      excludeTools: ["spawn_agent"],
+      sessionManager: manager,
+    });
+  });
+
+  it("fails closed when the host cannot create an isolated child session manager", async () => {
+    await expect(materializeSdkSessionOptions({}, { cwd: "/repo" })).rejects.toThrow("SessionManager.create");
+  });
+
   it("keeps the package-owned generic child identity in the tool-free system prompt without a catalog persona", () => {
     const prompt = buildAgentSystemPrompt(request(), { suppressContextExtras: true });
 
@@ -1436,6 +1459,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     });
     let loaderOptions: Record<string, unknown> | undefined;
     let createdOptions: Record<string, unknown> | undefined;
+    const isolatedSessionManager = { kind: "run-scoped-child" };
     class CapturedResourceLoader {
       constructor(options: Record<string, unknown>) {
         loaderOptions = options;
@@ -1445,6 +1469,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     vi.doMock("@earendil-works/pi-coding-agent", () => ({
       DefaultResourceLoader: CapturedResourceLoader,
       getAgentDir: () => "/agent-dir",
+      SessionManager: { create: () => isolatedSessionManager },
       createAgentSession: async (options: Record<string, unknown>) => {
         createdOptions = options;
         return { session: fake.session };
@@ -1482,7 +1507,12 @@ describe("agent SDK session executor (insurance, not proof)", () => {
         "CATALOG_PERSONA_SENTINEL",
       );
       expect((loaderOptions?.appendSystemPromptOverride as (() => string[]) | undefined)?.()).toEqual([]);
-      expect(createdOptions).toMatchObject({ noTools: "all", tools: [], customTools: [] });
+      expect(createdOptions).toMatchObject({
+        noTools: "all",
+        tools: [],
+        customTools: [],
+        sessionManager: isolatedSessionManager,
+      });
       expect(createdOptions?.resourceLoader).toBeInstanceOf(CapturedResourceLoader);
       expect(createdOptions).not.toHaveProperty("resourceLoaderOptions");
       expect(createdOptions).not.toHaveProperty("appendSystemPrompt");

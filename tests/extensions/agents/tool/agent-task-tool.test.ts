@@ -47,6 +47,7 @@ function tempRootWithTaskAgent(): string {
 
 function mockSdkResult(text: string): void {
   vi.doMock("@earendil-works/pi-coding-agent", () => ({
+    SessionManager: { create: () => ({ kind: "isolated-test-session" }) },
     DefaultResourceLoader: class {
       constructor(_options: Record<string, unknown>) {}
       reload() {}
