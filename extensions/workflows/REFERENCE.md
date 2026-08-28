@@ -709,7 +709,10 @@ would split workflow progress from `/agent drill` and fleet control.
 by `/workflows run`: scan-based discovery for Project, User, and Package alike.
 It does not add a separate UI-only registry or change resolution semantics. The
 focused catalog presents `Project`, `User`, `Package`, and review-only `History`
-as persistent tabs. Tab or Right moves forward, Left moves back, and Up/Down
+as persistent tabs. It opens on the current source with the most selectable
+workflows, resolving equal counts in Project, User, Package order; History is
+the fallback only when all current sources are empty. Tab or Right moves
+forward, Left moves back, and Up/Down
 selects only inside the active source. Every row leads with the workflow name and
 a compact source badge (`[P]`, `[U]`, or `[PKG]`); descriptions wrap at word
 boundaries and omit the internal authoring-profile label. Root rows precede

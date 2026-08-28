@@ -415,8 +415,17 @@ function activeCatalogTab(index: number): (typeof CATALOG_TABS)[number] {
 }
 
 function initialCatalogTabIndex(model: WorkflowCatalogModel): number {
-  const first = CATALOG_TABS.findIndex((tab) => selectableRows(model, tab.id).length > 0);
-  return first < 0 ? 0 : first;
+  let richestIndex = 0;
+  let richestCount = 0;
+  for (let index = 0; index < CATALOG_TABS.length - 1; index += 1) {
+    const count = selectableRows(model, CATALOG_TABS[index]!.id).length;
+    if (count > richestCount) {
+      richestIndex = index;
+      richestCount = count;
+    }
+  }
+  if (richestCount > 0) return richestIndex;
+  return model.history.length > 0 ? CATALOG_TABS.length - 1 : 0;
 }
 
 function selectableRows(model: WorkflowCatalogModel, tab: CatalogTabId): SelectableWorkflowRow[] {
