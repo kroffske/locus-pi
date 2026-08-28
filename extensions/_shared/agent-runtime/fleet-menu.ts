@@ -3,6 +3,7 @@ import { keyHint, rawKeyHint } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, type KeyId } from "@earendil-works/pi-tui";
 import {
   AgentLivePanel,
+  compactWorkflowParentRows,
   orderAgentLiveRows,
   withWorkflowGroupTokenTotals,
   type AgentLiveThemeLike,
@@ -37,6 +38,8 @@ class FleetMenuState {
   #visibleRowIds: string[] = [];
   #emptyEditorFocusAvailable = false;
   #fallbackFocusAvailable = false;
+  #projectionOwners = new Map<symbol, { priority: number; order: number }>();
+  #projectionOwnerOrder = 0;
 
   get focused(): boolean {
     return this.#focused;
@@ -85,12 +88,14 @@ class FleetMenuState {
     this.emitter.emit("change");
   }
 
+  beginFocus(rows: AgentLiveRow[]): void {
+    this.#visibleRowIds = projectFleetMenuSnapshotRows(rows).map((row) => row.id);
+    this.#normalizeSelection(this.visibleRows());
+  }
+
   setVisibleRows(rows: AgentLiveRow[]): void {
     this.#visibleRowIds = rows.map((row) => row.id);
-    const selectableRowIds = new Set(selectFleetMenuLeafRows(rows).map((row) => row.id));
-    if (this.#selectedRowId === undefined || !selectableRowIds.has(this.#selectedRowId)) {
-      this.#selectedRowId = preferredInitialRow(rows)?.id;
-    }
+    this.#normalizeSelection(rows);
   }
 
   visibleRows(): AgentLiveRow[] {
@@ -100,7 +105,6 @@ class FleetMenuState {
   }
 
   move(delta: -1 | 1, rows: AgentLiveRow[]): void {
-    this.setVisibleRows(rows);
     const selectableRows = selectFleetMenuLeafRows(rows);
     if (selectableRows.length === 0) return;
     const currentIndex = selectableRows.findIndex((row) => row.id === this.#selectedRowId);
@@ -111,12 +115,63 @@ class FleetMenuState {
     this.#selectedRowId = nextId;
     this.emitter.emit("change");
   }
+
+  reconcileVisibleRows(): void {
+    const rows = this.visibleRows();
+    const ids = rows.map((row) => row.id);
+    const membershipChanged =
+      ids.length !== this.#visibleRowIds.length || ids.some((id, index) => id !== this.#visibleRowIds[index]);
+    const selectionChanged = this.#normalizeSelection(rows);
+    if (!membershipChanged && !selectionChanged) return;
+    this.#visibleRowIds = ids;
+    this.emitter.emit("change");
+  }
+
+  registerProjectionOwner(priority: number): FleetProjectionOwner {
+    const id = Symbol("fleet-projection-owner");
+    this.#projectionOwners.set(id, { priority, order: ++this.#projectionOwnerOrder });
+    if (this.#focused) this.emitter.emit("change");
+    let released = false;
+    return {
+      isPrimary: () => this.#primaryProjectionOwner() === id,
+      release: () => {
+        if (released) return;
+        released = true;
+        this.#projectionOwners.delete(id);
+        if (this.#focused) this.emitter.emit("change");
+      },
+    };
+  }
+
+  get hasProjectionOwner(): boolean {
+    return this.#projectionOwners.size > 0;
+  }
+
+  #normalizeSelection(rows: AgentLiveRow[]): boolean {
+    const previous = this.#selectedRowId;
+    const selectableRowIds = new Set(selectFleetMenuLeafRows(rows).map((row) => row.id));
+    if (this.#selectedRowId === undefined || !selectableRowIds.has(this.#selectedRowId)) {
+      this.#selectedRowId = preferredInitialRow(rows)?.id;
+    }
+    return previous !== this.#selectedRowId;
+  }
+
+  #primaryProjectionOwner(): symbol | undefined {
+    return [...this.#projectionOwners.entries()]
+      .sort((a, b) => b[1].priority - a[1].priority || b[1].order - a[1].order)
+      .at(0)?.[0];
+  }
 }
 
-const FLEET_MENU_STATE_GLOBAL_KEY = Symbol.for("locus-pi.fleet-menu-state.v2");
+export interface FleetProjectionOwner {
+  isPrimary(): boolean;
+  release(): void;
+}
+
+const FLEET_MENU_STATE_GLOBAL_KEY = Symbol.for("locus-pi.fleet-menu-state.v3");
 const FLEET_VIEWED_ROW_GLOBAL_KEY = Symbol.for("locus-pi.fleet-viewed-row.v1");
 interface SharedFleetMenuStateSlot {
-  version: 2;
+  version: 3;
   state: FleetMenuState;
 }
 
@@ -132,7 +187,7 @@ function sharedFleetMenuState(): FleetMenuState {
     if (!isSharedFleetMenuStateSlot(existing)) throw new Error("locus-pi: incompatible global fleet-menu state slot");
     return existing.state as FleetMenuState;
   }
-  const slot: SharedFleetMenuStateSlot = { version: 2, state: new FleetMenuState() };
+  const slot: SharedFleetMenuStateSlot = { version: 3, state: new FleetMenuState() };
   Object.defineProperty(runtimeGlobal, FLEET_MENU_STATE_GLOBAL_KEY, {
     value: slot,
     enumerable: false,
@@ -143,15 +198,20 @@ function sharedFleetMenuState(): FleetMenuState {
 }
 
 function isSharedFleetMenuStateSlot(value: unknown): value is SharedFleetMenuStateSlot {
-  if (!isRecord(value) || value.version !== 2 || !isRecord(value.state)) return false;
+  if (!isRecord(value) || value.version !== 3 || !isRecord(value.state)) return false;
   return (
     typeof value.state.setFocused === "function" &&
     typeof value.state.visibleRows === "function" &&
-    typeof value.state.setEmptyEditorFocusAvailable === "function"
+    typeof value.state.setEmptyEditorFocusAvailable === "function" &&
+    typeof value.state.registerProjectionOwner === "function"
   );
 }
 
 export const fleetMenuState = sharedFleetMenuState();
+
+export function registerFleetProjectionOwner(priority: number): FleetProjectionOwner {
+  return fleetMenuState.registerProjectionOwner(priority);
+}
 
 function sharedFleetViewedRowSlot(): SharedFleetViewedRowSlot {
   const runtimeGlobal = globalThis as unknown as Record<symbol, unknown>;
@@ -233,6 +293,8 @@ export interface RenderFleetMenuOptions {
   focusShortcutsAvailable?: boolean;
   /** Calm rendering (render-profile.ts): coarse elapsed text, no per-second tool timer. */
   calm?: boolean;
+  /** Focused viewport row budget supplied by the owning terminal panel. */
+  maxRows?: number;
 }
 
 /**
@@ -245,12 +307,45 @@ export function renderFleetMenuRows(
   width: number,
   options: RenderFleetMenuOptions = {},
 ): string[] {
+  if (options.focused === true) {
+    const snapshotRows = projectFleetMenuSnapshotRows(sourceRows);
+    const viewport = focusedFleetViewport(snapshotRows, options.selectedRowId, options.maxRows);
+    return renderProjectedFleetMenuRows(viewport.rows, width, options, {
+      before: viewport.hiddenBefore,
+      after: viewport.hiddenAfter,
+    });
+  }
   const rows = projectFleetMenuRows(sourceRows);
-  return renderProjectedFleetMenuRows(rows, width, options, Math.max(0, sourceRows.length - rows.length));
+  return renderProjectedFleetMenuRows(rows, width, options, { after: Math.max(0, sourceRows.length - rows.length) });
 }
 
 function projectFleetMenuRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
-  return partitionEarlierWorkflowRunRows(selectFleetMenuRows(withWorkflowGroupTokenTotals(sourceRows)));
+  return partitionEarlierWorkflowRunRows(
+    selectFleetMenuRows(withWorkflowGroupTokenTotals(compactWorkflowParentRows(sourceRows))),
+  );
+}
+
+function projectFleetMenuSnapshotRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
+  return partitionEarlierWorkflowRunRows(
+    orderAgentLiveRows(withWorkflowGroupTokenTotals(compactWorkflowParentRows(sourceRows))),
+  );
+}
+
+function focusedFleetViewport(
+  rows: AgentLiveRow[],
+  selectedRowId: string | undefined,
+  requestedLimit = FLEET_MENU_MAX_ROWS,
+): { rows: AgentLiveRow[]; hiddenBefore: number; hiddenAfter: number } {
+  const limit = Math.max(1, Math.min(FLEET_MENU_MAX_ROWS, Math.floor(requestedLimit)));
+  if (rows.length <= limit) return { rows, hiddenBefore: 0, hiddenAfter: 0 };
+  const selectedIndex = rows.findIndex((row) => row.id === selectedRowId);
+  const start = Math.max(0, Math.min(selectedIndex < 0 ? 0 : selectedIndex, rows.length - limit));
+  const end = Math.min(rows.length, start + limit);
+  return {
+    rows: rows.slice(start, end),
+    hiddenBefore: selectFleetMenuLeafRows(rows.slice(0, start)).length,
+    hiddenAfter: selectFleetMenuLeafRows(rows.slice(end)).length,
+  };
 }
 
 /**
@@ -284,7 +379,7 @@ function renderProjectedFleetMenuRows(
   rows: AgentLiveRow[],
   width: number,
   options: RenderFleetMenuOptions,
-  hidden: number,
+  hidden: { before?: number; after?: number },
 ): string[] {
   if (rows.length === 0) return [];
   const safeWidth = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 80;
@@ -321,7 +416,11 @@ function renderProjectedFleetMenuRows(
       }),
     ];
   });
-  if (hidden > 0) lines.push(truncateToWidth(`  … and ${hidden} more`, safeWidth));
+  if ((hidden.before ?? 0) > 0) lines.unshift(truncateToWidth(`  ↑ ${hidden.before} earlier`, safeWidth));
+  if ((hidden.after ?? 0) > 0) {
+    const label = focused ? `  ↓ ${hidden.after} later` : `  … and ${hidden.after} more`;
+    lines.push(truncateToWidth(label, safeWidth));
+  }
   const selected = rows.find((row) => row.groupKind === undefined && row.id === selectedRowId);
   const focusedHint = [
     safeKeyHint("tui.select.confirm", "drill", "enter drill"),
@@ -373,10 +472,12 @@ export class FleetFocusComponent implements CustomUiComponent {
     this.#scheduler = new RenderScheduler(() => this.#paintIfChanged());
     this.#requestRender = () => this.#scheduler.request();
     agentLiveStore.emitter.on("change", this.#requestRender);
+    if (fleetMenuState.visibleRows().length === 0) fleetMenuState.beginFocus(this.rows());
   }
 
   #paintIfChanged(): void {
     if (this.#disposed) return;
+    fleetMenuState.reconcileVisibleRows();
     const previous = this.#lastFrame;
     if (previous === undefined) {
       this.tui.requestRender();
@@ -391,28 +492,26 @@ export class FleetFocusComponent implements CustomUiComponent {
 
   render(width: number): string[] {
     if (this.#disposed) return [];
-    const sourceRows = this.rows();
-    const rows = projectFleetMenuRows(sourceRows);
-    fleetMenuState.setVisibleRows(rows);
-    const lines = renderProjectedFleetMenuRows(
-      rows,
-      width,
-      {
-        focused: true,
-        ...(fleetMenuState.selectedRowId !== undefined ? { selectedRowId: fleetMenuState.selectedRowId } : {}),
-        theme: this.theme,
-        ...(this.#calm ? { calm: true } : {}),
-      },
-      Math.max(0, sourceRows.length - rows.length),
-    );
+    fleetMenuState.reconcileVisibleRows();
+    const rows = fleetMenuState.visibleRows();
+    if (fleetMenuState.hasProjectionOwner) {
+      this.#lastFrame = { width, lines: [] };
+      return [];
+    }
+    const lines = renderFleetMenuRows(rows, width, {
+      focused: true,
+      ...(fleetMenuState.selectedRowId !== undefined ? { selectedRowId: fleetMenuState.selectedRowId } : {}),
+      theme: this.theme,
+      ...(this.#calm ? { calm: true } : {}),
+    });
     this.#lastFrame = { width, lines };
     return lines;
   }
 
   handleInput(data: string): void {
     if (this.#disposed) return;
-    const rows = projectFleetMenuRows(this.rows());
-    fleetMenuState.setVisibleRows(rows);
+    fleetMenuState.reconcileVisibleRows();
+    const rows = fleetMenuState.visibleRows();
     if (matchesConfigured(this.keybindings, data, "tui.select.up", Key.up)) {
       fleetMenuState.move(-1, rows);
       this.tui.requestRender();

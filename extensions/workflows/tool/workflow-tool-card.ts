@@ -8,13 +8,13 @@ import type {
 import {
   agentLiveDisplayName,
   agentLiveTitle,
+  compactWorkflowParentRows,
   formatDuration,
   formatDurationCoarse,
   orderAgentLiveRows,
 } from "../../_shared/agent-runtime/agent-live-panel.js";
 import { defaultRenderProfile } from "../../_shared/host/render-profile.js";
 import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../../_shared/agent-runtime/agent-sdk-host.js";
-import { compactWorkflowParentRows } from "../operator/progress-widget.js";
 
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"] as const;
 /**
