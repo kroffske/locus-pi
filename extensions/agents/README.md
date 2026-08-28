@@ -23,6 +23,7 @@
 - Read-only profiles are narrowed by the host adapter; they do not receive arbitrary write or shell tools.
 - Parallel or multi-stage orchestration belongs to the workflow runtime, not one `spawn_agent` call.
 - `/ps` and `/agent drill` inspect live and retained child rows; closing the view does not stop a child.
+- In TUI mode `/ps` focuses the agent roster already visible below the editor instead of drawing a second copy. Its row membership and order stay fixed until close, live fields keep updating, and Up/Down can reach every leaf through the eight-row viewport. Reopen `/ps` to include agents that arrived while it was focused.
 
 The catalog follows project -> user precedence: project `.agents/agents/`, then user `~/.agents/agents/`. The package ships no profiles.
 
