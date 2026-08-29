@@ -98,12 +98,14 @@ describe("curated workflow diagrams", () => {
     for (const child of packageChildren) {
       expect(svg, `post-code-review diagram omits child ${child}`).toContain(child);
       const childSource = readFileSync(packagedWorkflowPath(`post-code-review/${child}`), "utf8");
+      expect(childSource, `post-code-review/${child} permits model-role fallback`).toContain("requireModelRole: true");
       for (const artifact of declaredNames(childSource, /\bpublishPrimaryFile\("([^"]+)"\)/gu)) {
         expect(svg, `post-code-review diagram omits artifact ${artifact}`).toContain(artifact);
       }
     }
     expect(svg).toContain('modelRole "smol:high"');
     expect(svg).toContain('modelRole "smol:xhigh"');
+    expect(svg).toContain("final QA remains separate");
     expect(svg).toContain("Operator:");
     expect(svg).toContain("Workflow:");
     expect(svg).toContain("Agent:");
@@ -111,18 +113,41 @@ describe("curated workflow diagrams", () => {
   });
 
   it("challenges proposed fixes before synthesis and respects trusted external ownership", () => {
+    const scope = readFileSync(packagedWorkflowPath("post-code-review/scope"), "utf8");
+    const boundaries = readFileSync(packagedWorkflowPath("post-code-review/boundaries"), "utf8");
+    const simplicity = readFileSync(packagedWorkflowPath("post-code-review/simplicity"), "utf8");
     const contracts = readFileSync(packagedWorkflowPath("post-code-review/contracts"), "utf8");
     const style = readFileSync(packagedWorkflowPath("post-code-review/style"), "utf8");
     const necessity = readFileSync(packagedWorkflowPath("post-code-review/necessity"), "utf8");
     const synthesis = readFileSync(packagedWorkflowPath("post-code-review/synthesis"), "utf8");
+    const readme = readFileSync(path.join(path.dirname(packagedWorkflowPath("post-code-review")), "README.md"), "utf8");
+
+    expect(scope).toContain("must be proven to exist in the reviewed tree");
+    expect(scope).toContain("false provenance anchor");
+    expect(scope).toContain("reviewed-tree path plus head object id");
+
+    expect(boundaries).toContain("B-Q-001");
+
+    expect(simplicity).toContain("Invert the burden of proof");
+    expect(simplicity).toContain("Search production and");
+    expect(simplicity).toContain("Define a contraction metric");
+    expect(simplicity).toContain("S-Q-001");
+    expect(simplicity).toContain("current code-shape defect even when runtime behavior succeeds");
+    expect(simplicity).toContain("FINDINGS, never PASS or RESOLVED");
 
     expect(contracts).toContain("Do not require duplicate local leaf validation merely because data is external");
     expect(contracts).toContain("accepted responsibility boundary rather than a defect");
+    expect(contracts).toContain("duplicate owner of one invariant");
+    expect(contracts).toContain("C-Q-001");
+    expect(contracts).toContain("concrete silent-drift failure");
+    expect(contracts).toContain("stale derived documentation changed by the PR");
 
     expect(style).toContain("Read review-scope.md there first, then read style.md");
     expect(style).toContain("an empty file means that the operator supplied no additional style criteria");
     expect(style).toContain("misleading, stale, redundant, or missing comments");
     expect(style).toContain("turn personal taste into a defect");
+    expect(style).toContain("classify it as NO_ACTION polish rather than a finding");
+    expect(style).toContain("ST-Q-001");
 
     expect(necessity).toContain("What real failure or violated contract is proven?");
     expect(necessity).toContain("Which component owns that guarantee?");
@@ -130,6 +155,11 @@ describe("curated workflow diagrams", () => {
     expect(necessity).toContain("the simplest way to close the proven risk");
     expect(necessity).toContain("documentation and tests prove that a dependency exists and is exercised");
     expect(necessity).toContain("is not duplicate validation when the old check is removed");
+    expect(necessity).toContain("not limited to a runtime crash or a failing");
+    expect(necessity).toContain("Tests and documentation alone do not earn an internal surface");
+    expect(necessity).toContain("Split a bundled proposal");
+    expect(necessity).toContain("preserve its lane question id without renumbering");
+    expect(necessity).toContain("Every material lane question id must appear exactly once");
     expect(necessity).toContain("RETAIN");
     expect(necessity).toContain("REFRAME");
     expect(necessity).toContain("REJECT");
@@ -139,6 +169,14 @@ describe("curated workflow diagrams", () => {
     expect(synthesis).toContain("must not restore a proposal that the necessity challenge rejected");
     expect(synthesis).toContain("absence of repeat local validation is an accepted responsibility boundary");
     expect(synthesis).toContain("Do not treat current documentation or tests as proof");
+    expect(synthesis).toContain(
+      "Apply two evidence paths instead of reducing every review question to a failing consumer",
+    );
+    expect(synthesis).toContain("current code-shape defect");
+    expect(synthesis).toContain("does not require a runtime crash");
+    expect(synthesis).toContain("Low impact changes verification priority");
+    expect(synthesis).toContain("This is not a final merge or QA verdict");
+    expect(synthesis).toContain("Every material lane question id must appear exactly once");
     expect(synthesis).toContain("READY_WITH_RECOMMENDATIONS");
     expect(synthesis).toContain("CHANGES_REQUIRED");
     expect(synthesis).toContain("Action: REQUIRED, RECOMMENDED, or NO_ACTION");
@@ -146,5 +184,10 @@ describe("curated workflow diagrams", () => {
     expect(synthesis).toContain("illustrative fix snippet");
     expect(synthesis).toContain("Do not include a snippet");
     expect(synthesis).toContain("/workflows run implement");
+
+    expect(readme).toContain("assign the portable `smol` role through `/model-roles`");
+    expect(readme).toContain("replay starts no child and remains marked as not-fresh evidence");
+    expect(readme).toContain("dead surface, fake parameter, duplicated");
+    expect(readme).toContain("not the final QA or merge verdict");
   });
 });

@@ -28,14 +28,14 @@ The registry ships five curated Package workflow namespaces with eighteen runnab
 | ------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------- |
 | `implement`                    | `implement`        | Apply authorized work from a prepared plan or review, then independently verify it once.       |
 | `live-smoke`                   | `live-smoke`       | Checks that the Pi host can spawn full-tool workflow agents and collect their reports.         |
-| `post-code-review`             | `post-code-review` | Run modular post-code review lanes and publish the synthesis report.                           |
+| `post-code-review`             | `post-code-review` | Run modular code-shape review lanes and publish the code-shape decision.                       |
 | `post-code-review/boundaries`  | `post-code-review` | Audit ownership and architecture boundaries, then publish review-boundaries.md.                |
 | `post-code-review/contracts`   | `post-code-review` | Audit API and internal contracts for one post-code review scope.                               |
-| `post-code-review/necessity`   | `post-code-review` | Challenge proposed review fixes for necessity, ownership, and complexity.                      |
+| `post-code-review/necessity`   | `post-code-review` | Challenge behavioral and code-shape fixes for necessity, ownership, and complexity.            |
 | `post-code-review/scope`       | `post-code-review` | Resolve a review target into an exact evidence boundary and write review-scope.md.             |
-| `post-code-review/simplicity`  | `post-code-review` | Audit a frozen review scope for avoidable complexity and publish simplicity findings.          |
+| `post-code-review/simplicity`  | `post-code-review` | Audit a frozen review scope for delete-first contraction and publish simplicity findings.      |
 | `post-code-review/style`       | `post-code-review` | Audit comments and project-specific code style for one post-code review scope.                 |
-| `post-code-review/synthesis`   | `post-code-review` | Verify review evidence and publish the final post-code review.                                 |
+| `post-code-review/synthesis`   | `post-code-review` | Verify review evidence and publish the final code-shape decision.                              |
 | `task/draft`                   | `task`             | Translate a raw request into a saved task draft, with bounded live clarification when needed.  |
 | `task/implement-plan-template` | `task`             | Renders implement-plan.workflow.mjs from an approved plan and its ordered step files.          |
 | `task/plan`                    | `task`             | Decomposed planning: freeze scope, collect facts, analyze, plan, review, correct, verify.      |

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -15,6 +16,7 @@ import { DEFAULT_WORKFLOW_BUDGET } from "../../../../extensions/workflows/runtim
 import {
   createWorkflowReplayController,
   readWorkflowReplayLog,
+  WORKFLOW_REPLAY_SCHEMA_VERSION,
   workflowReplayFile,
   type WorkflowReplayController,
   type WorkflowReplayEntry,
@@ -789,6 +791,63 @@ export default async function runWorkflow(dsl) {
       .map((entry) => entry.key);
     expect(keys).toHaveLength(2);
     expect(keys[0]).toBe(keys[1]);
+  });
+
+  it("replays a pre-strict ordinary record without changing its canonical key", async () => {
+    const root = temporaryProject();
+    const runDir = ensureWorkflowRunDir(root, "20260829-010101-b003");
+    const prompt = "ordinary stage";
+    // Exact canonical bytes written before `requireModelRole` existed. A false/null
+    // placeholder for the new opt-in flag would change this hash and invalidate every
+    // ordinary record even though those calls retain their original fallback behavior.
+    const legacyCanonicalRequest = JSON.stringify({
+      prompt,
+      executionMode: "bare",
+      maxToolCalls: DEFAULT_WORKFLOW_BUDGET.toolCalls,
+      model: null,
+      modelRole: null,
+      timeoutMs: null,
+      maxTurns: null,
+      label: null,
+      phase: null,
+      sandbox: null,
+      permissionMode: "inherit-parent",
+      workspaceMode: "project",
+      workspaceHandle: null,
+      capabilityMode: null,
+      operatorAsk: null,
+    });
+    const recorded: WorkflowReplayEntry[] = [
+      {
+        v: WORKFLOW_REPLAY_SCHEMA_VERSION,
+        seq: 0,
+        kind: "agent",
+        key: createHash("sha256").update(legacyCanonicalRequest, "utf8").digest("hex"),
+        ok: true,
+        text: "legacy ordinary answer",
+      },
+    ];
+    const replay = createWorkflowReplayController({ runDir, recorded });
+    const executedPrompts: string[] = [];
+    const runtime = createWorkflowRuntime({
+      runId: "ordinary-resume",
+      replay,
+      agentRunner: async (request) => {
+        executedPrompts.push(request.prompt);
+        return {
+          ok: true as const,
+          status: "completed" as const,
+          summary: "fresh",
+          text: "fresh answer",
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+
+    await expect(runtime.dsl.agent(prompt)).resolves.toBe("legacy ordinary answer");
+    expect(executedPrompts).toEqual([]);
+    expect(replay.counts()).toEqual({ replayedCalls: 1, freshCalls: 0 });
   });
 
   it("refuses a pre-tier record with no-recorded-calls rather than key-mismatch", async () => {

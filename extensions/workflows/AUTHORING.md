@@ -157,6 +157,14 @@ already supplies emergency per-attempt defaults. Emit one of those fields only
 when the operator explicitly requests a narrower or raised per-attempt fuse and
 the approved Design records why. Do not mechanically sweep legacy workflows.
 
+Portable `modelRole` normally degrades to the parent session model with recorded
+evidence when no layer assigns it. A stage whose accepted evidence depends on
+that exact tier may declare `requireModelRole: true` beside its explicit
+`modelRole`. Record the fail-closed requirement in Design. Do not use the flag
+with concrete `model`, as a prestige selector, or without naming why fallback
+would invalidate a fresh run. Replay starts no child and follows the recorded
+evidence contract.
+
 Standard generated source also omits `ask: true`. Live operator questions
 (`agent({ ask: true })`, REFERENCE "Live operator questions") are an
 interactive capability for operator-attended workflows: the child asks through

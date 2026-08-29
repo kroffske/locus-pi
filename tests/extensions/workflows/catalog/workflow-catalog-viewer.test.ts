@@ -124,8 +124,8 @@ describe("focused workflow catalog", () => {
     const rendered = viewer.render(80).join("\n");
     expect(rendered).toContain("post-code-review · [PKG] · 7 children");
     expect(rendered).toContain("  └ necessity · [PKG]");
-    expect(rendered).toContain("      · Challenge proposed review fixes");
-    expect(rendered).not.toContain("    └ Challenge proposed review fixes");
+    expect(rendered).toContain("      · Challenge behavioral and code-shape fixes");
+    expect(rendered).not.toContain("    └ Challenge behavioral and code-shape fixes");
   });
 
   it("renders a group-only header once and keeps its filtered children selectable", () => {

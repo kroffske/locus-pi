@@ -925,7 +925,8 @@ describe("workflow operator catalog", () => {
           "else the session model",
       );
       expect(namedText).toContain("an unresolvable provider/id fails the call");
-      expect(namedText).toContain("an unassigned role degrades and is recorded");
+      expect(namedText).toContain("an unassigned role normally degrades and is recorded");
+      expect(namedText).toContain("requireModelRole refuses that fallback");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
       expect(namedText).toContain("the nearest Project namespace wins");
       expect(namedText).toContain(

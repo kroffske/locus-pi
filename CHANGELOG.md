@@ -6,6 +6,8 @@ User-visible changes to the public package.
 
 ### Changed
 
+- `post-code-review` now treats proven code-shape defects introduced or worsened by the reviewed change as REQUIRED even when runtime behavior still succeeds. Delete-first contraction, dead surface, fake configurability, duplicated invariant ownership, stale derived documentation, misleading behavior descriptions, and open delete/rewrite/owner moves now block that review gate until remediation and a fresh run; impact remains a separate severity axis, and final QA remains separate.
+- Workflow agents may declare `requireModelRole: true` beside an explicit `modelRole`. The opt-in contract refuses an unassigned role before child creation, records the strict request on `agent_start`, and separates its replay identity from ordinary portable role fallback; packaged `post-code-review` uses it for every review child.
 - `workflow_check_source` now returns stable compiler-style diagnostics with severity and one-based source spans while preserving the legacy message-only checker API. Non-empty `meta.phases` declarations are checked against literal `phase()` calls; duplicate declarations, case drift, and missing-stage drift fail, while unused declarations and order drift are reported as warnings.
 - Global `enabledModels` is now a hard Pi execution allowlist: an explicit `--model` outside the list is stopped before the first LLM request instead of bypassing picker-only scoping. Configured empty, malformed, or unreadable policy fails closed.
 - Extension source and tests are now grouped by responsibility under named subdirectories, so large extension roots read as a table of contents without changing entrypoints, runtime behavior, or the npm package boundary.
