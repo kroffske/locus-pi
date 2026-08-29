@@ -322,6 +322,60 @@ describe("the declared tier reaches the child session", () => {
     expect(result.modelRoleFallback).toBeUndefined();
   });
 
+  it("runs an assigned strict role and records the fail-closed declaration on agent_start", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast" });
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const runId = "strict-role-assigned";
+    const projectRoot = h.ctx.session!.projectRoot!;
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      agentRunner: runner,
+      journal: createWorkflowJournalSink(projectRoot, runId),
+    });
+
+    await expect(dsl.agent("strict work", { modelRole: "smol:high", requireModelRole: true })).resolves.toBe(
+      "tier answer",
+    );
+
+    expect(probe.captured).toHaveLength(1);
+    expect(probe.captured[0]?.model).toEqual(FAST);
+    expect(
+      readWorkflowRunJournalState(projectRoot, runId).lines.find((line) => line.kind === "agent_start"),
+    ).toMatchObject({
+      modelRole: "smol:high",
+      requireModelRole: true,
+    });
+  });
+
+  it("refuses a concrete model that would bypass an otherwise strict role", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast" });
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({
+      prompt: "strict work",
+      agent: "bare",
+      model: "test/strong",
+      modelRole: "smol:high",
+      requireModelRole: true,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain("cannot be combined with a concrete model");
+    expect(probe.captured).toHaveLength(0);
+  });
+
   it("lets a per-call model outrank the agent's frontmatter tier", async () => {
     const h = await harnessWithRoles({ smol: "test/fast" });
     const probe = sdkProbe(STRONG);
@@ -681,6 +735,30 @@ describe("an unassigned role degrades and records the degradation", () => {
     expect(result.modelRoleFallback).toContain("session");
     expect(result.modelRoleFallback).toContain("inherited the parent session model");
     expect(result.diagnostics[0]).toBe(result.modelRoleFallback);
+  });
+
+  it("refuses an unassigned strict role before creating a child session", async () => {
+    const h = await harnessWithRoles();
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+
+    const result = await runner({
+      prompt: "strict review",
+      agent: "bare",
+      modelRole: "smol:xhigh",
+      requireModelRole: true,
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.summary).toContain('modelRole "smol:xhigh" is required');
+    expect(result.summary).toContain("/model-roles");
+    expect(result.modelRoleFallback).toBeUndefined();
+    expect(probe.captured).toHaveLength(0);
   });
 
   it("carries the degradation into the run-result artifact, not just the result object", async () => {

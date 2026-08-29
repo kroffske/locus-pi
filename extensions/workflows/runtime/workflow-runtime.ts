@@ -280,6 +280,8 @@ export interface WorkflowAgentRequest {
   model?: string;
   /** Per-call tier: a name in the roles table, never a provider selector. */
   modelRole?: string;
+  /** Refuse an unassigned per-call modelRole instead of inheriting the session model. */
+  requireModelRole?: true;
   /** Runtime-owned resolved value. Workflow source cannot override it. */
   permissionMode?: PermissionMode;
   /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
@@ -518,6 +520,12 @@ export interface WorkflowAgentOptions {
    * chosen at the call site says which one the author meant.
    */
   modelRole?: string;
+  /**
+   * Require this call's explicit `modelRole` to resolve from a model-roles layer.
+   * Normal calls retain the portable recorded fallback. Evidence-critical stages
+   * can opt into fail-closed routing without pinning a provider-specific model.
+   */
+  requireModelRole?: true;
   /**
    * Wall-clock fuse for one child attempt, in milliseconds. `maxToolCalls` bounds
    * tool usage and cannot end a stalled child. On expiry the child is aborted and
@@ -855,6 +863,8 @@ export interface WorkflowJournalLine {
   requestedModel?: string;
   /** The tier the call declared, on `agent_start`. A role name, never a provider selector. */
   modelRole?: string;
+  /** The call refuses an unassigned declared role instead of inheriting the session model. */
+  requireModelRole?: true;
   /**
    * What the child session reported it ran on, read back from the host.
    * `"unavailable"` when the peer exposes no model. Absent on journals written before
@@ -2605,6 +2615,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
       ...(opts?.modelRole !== undefined ? { modelRole: opts.modelRole } : {}),
+      ...(opts?.requireModelRole === true ? { requireModelRole: true as const } : {}),
       // The declared fuse is the AUTHORITY over this child's wall clock (D4). It is
       // resolved here — default included — so the request the bridge receives always
       // carries the number the SDK turn budget is then derived from, and the two
@@ -2742,6 +2753,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
       ...(requestedLiveModel?.model !== undefined ? { requestedModel: requestedLiveModel.model } : {}),
       ...(req.modelRole !== undefined ? { modelRole: req.modelRole } : {}),
+      ...(req.requireModelRole === true ? { requireModelRole: true } : {}),
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       callId,
@@ -3708,6 +3720,10 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     // remapping `smol` in a roles config, or editing an agent's frontmatter, reuses
     // the record. Recorded runs must be invalidated by hand after such a change.
     modelRole: req.modelRole ?? null,
+    // Preserve the canonical bytes of every pre-feature ordinary call. The strict
+    // flag changes execution only when true, so adding a null field would invalidate
+    // all existing ordinary replay records without distinguishing any behavior.
+    ...(req.requireModelRole === true ? { requireModelRole: true } : {}),
     // Same class as `maxToolCalls`: a fuse that shapes execution, so changing it
     // is a different call and must not reuse the earlier record.
     timeoutMs: req.timeoutMs ?? null,

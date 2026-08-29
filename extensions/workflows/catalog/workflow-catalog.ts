@@ -448,7 +448,7 @@ function workflowContractLines(): string[] {
     "agent models: explicit model, then role, agent tier, then session model",
     "trust: reviewed workflow JavaScript runs with full Pi host access; info and catalog do not evaluate modules",
     "history: uses only the validated retained snapshot; no current-source fallback and no browser launch",
-    "model routing: the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, else the session model; an unresolvable provider/id fails the call, an unassigned role degrades and is recorded, and agent_end reports the read-back executedModel",
+    "model routing: the child session is created with opts.model, else opts.modelRole, else the agent frontmatter tier, else the session model; an unresolvable provider/id fails the call, an unassigned role normally degrades and is recorded, requireModelRole refuses that fallback, and agent_end reports the read-back executedModel",
     'agents: agent() is the single model-calling primitive and returns exact non-empty child text; opts.agent selects a discovered catalog prompt/model role, omitted agent uses role "default", and every workflow child always receives tools ["*"] with write/edit/bash available; legacy capability fields are ignored; opts.schema opts into a validated shaped answer instead of text',
     "resources: promptFile() loads one source-relative .prompt.md containing stable stage instructions plus dynamic handoffs; local prompt bytes are copied once into the run directory with SHA-256 evidence",
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",

@@ -889,7 +889,7 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
     }
   }
 
-  const booleanProblem = optionalFieldsProblem(value, ["readOnly", "replayed"], "boolean");
+  const booleanProblem = optionalFieldsProblem(value, ["readOnly", "replayed", "requireModelRole"], "boolean");
   if (booleanProblem !== undefined) return booleanProblem;
   if (value.source !== undefined && !isOneOf(value.source, ["script", "runtime"])) {
     return "Field source must be script or runtime.";
@@ -1009,6 +1009,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "model",
     "requestedModel",
     "modelRole",
+    "requireModelRole",
     "thinking",
     "replayed",
     "capabilityMode",

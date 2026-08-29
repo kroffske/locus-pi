@@ -19,15 +19,19 @@ style:
    `post-code-review/contracts`, and `post-code-review/style` run behind one
    parallel barrier. Each reopens `review-scope.md`, inspects live evidence
    independently, and writes only its own report. The style lane also reads the
-   request-local `style.md` criteria.
+   request-local `style.md` criteria. The simplicity lane uses delete-first
+   caller evidence and records a before/after contraction target.
 3. `post-code-review/necessity` runs sequentially after the barrier, reopens the
    scope and all four lane reports, and challenges every proposed fix for a
-   proven failure, a clear guarantee owner, duplicated responsibility, and net
-   simplicity. It writes `review-necessity.md`.
+   proven behavioral or code-shape defect, a clear guarantee owner, duplicated
+   responsibility, and net simplicity. It splits immediate cleanup from future
+   product work, preserves each lane's stable question id, and writes
+   `review-necessity.md`.
 4. `post-code-review/synthesis` reopens all six reports, independently verifies
    admitted claims against live source and consumers, removes unsupported or
-   duplicate findings, assigns the final action levels, and writes
-   `post-code-review.md`.
+   duplicate findings, assigns the final code-shape action levels, and writes
+   `post-code-review.md`. A proven defect introduced or materially worsened by
+   the reviewed change remains REQUIRED even when its impact is low.
 5. The parent publishes that final Markdown file as the run result.
 
 The diagram below shows these workflow boundaries, exact source filenames,
@@ -65,6 +69,13 @@ Run the external parent with a new explicit project-relative output namespace:
 /workflows run post-code-review review the current diff
 ```
 
+Before launch, assign the portable `smol` role through `/model-roles`. Every
+review child declares `requireModelRole: true`; `smol:high` and `smol:xhigh`
+use that assignment with different reasoning effort. An unassigned role stops
+each fresh review child before it runs instead of silently inheriting the parent
+session model. A resumed call may reuse that original child's recorded answer;
+replay starts no child and remains marked as not-fresh evidence.
+
 The runtime creates a unique `.locus-pi/plans/<generated-run-name>` workspace.
 To provide additional comment and style criteria before launch, select an
 explicit fresh workspace with `--output-dir <path>` and create
@@ -79,18 +90,25 @@ resume reuses the exact source run and workspace.
 
 ## Decision and remediation contract
 
-The final report answers whether source changes are needed:
+The final report answers whether the reviewed code passes this code-shape gate.
+It is not the final QA or merge verdict:
 
-- `READY` — no code change is warranted;
-- `READY_WITH_RECOMMENDATIONS` — optional improvements exist, but they do not
-  block acceptance;
-- `CHANGES_REQUIRED` — at least one proven current defect blocks acceptance;
+- `READY` — this gate passes and no source change is warranted;
+- `READY_WITH_RECOMMENDATIONS` — this gate passes and only evidence-backed
+  optional work outside the current change's acceptance contract remains;
+- `CHANGES_REQUIRED` — at least one proven current behavioral, contract,
+  documentation, ownership, style-contract, or code-shape defect must be fixed
+  and re-reviewed;
 - `BLOCKED` — live evidence is insufficient for a trustworthy decision.
 
 Each item independently carries `Action: REQUIRED`, `RECOMMENDED`, or
 `NO_ACTION`, plus `Impact: high`, `medium`, or `low`. This keeps mandatory work
-separate from impact. Rejected proposals and accepted responsibility boundaries
-remain visible as `NO_ACTION` rather than disappearing.
+separate from impact. A current-PR dead surface, fake parameter, duplicated
+invariant owner, stale derived document, misleading behavior description,
+unearned seam, or open delete/rewrite/owner move is REQUIRED when proven.
+Personal taste, rejected proposals, future product choices, and accepted
+responsibility boundaries remain visible as `NO_ACTION` or optional work rather
+than disappearing.
 
 For a REQUIRED or RECOMMENDED item, synthesis may include one small illustrative
 fix snippet when it can do so truthfully. The snippet explains intended shape;
@@ -107,6 +125,8 @@ Reuse the review workspace so the workflow can read the exact report. To include
 optional work, explicitly say `apply REQUIRED and RECOMMENDED fixes`. A `READY`
 report or an unselected recommendation produces an intentional `NO_WORK` result.
 `post-code-review` itself remains read-only and never starts implementation.
+After remediation changes the reviewed head, run a fresh post-code review; the
+old decision does not prove the new head.
 
 ## Source binding
 

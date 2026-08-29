@@ -879,6 +879,15 @@ async function resolveWorkflowTier(input: {
   // on the per-call paths would silently change three evidence surfaces.
   const frontmatterResolution = resolveAgentModelPreference(modelRoles, agent?.model ?? []);
 
+  if (req.requireModelRole === true && req.modelRole === undefined) {
+    return refusal("requireModelRole: true requires one explicit modelRole on the same agent call");
+  }
+  if (req.requireModelRole === true && req.model !== undefined) {
+    return refusal(
+      "requireModelRole: true cannot be combined with a concrete model; remove model or the strict role flag",
+    );
+  }
+
   if (req.model !== undefined) {
     const resolution = await resolveModelFn(req.model);
     if (!resolution.ok) {
@@ -921,6 +930,13 @@ async function resolveWorkflowTier(input: {
       return refusal(malformedRoleAssignmentNote(req.modelRole, "modelRole", declared.malformed), req.modelRole);
     }
     if (declared.assignment === undefined) {
+      if (req.requireModelRole === true) {
+        return refusal(
+          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but no model-roles layer ` +
+            "assigns it. Assign the role with /model-roles before running this workflow.",
+          req.modelRole,
+        );
+      }
       return {
         kind: "inherit",
         roleResolution: declared,
