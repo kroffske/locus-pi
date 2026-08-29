@@ -1,6 +1,6 @@
 {
   "name": "@kroffske/locus-pi",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "Audited Locus Pi extension package for agentic development tools.",
   "license": "MIT",
@@ -70,7 +70,8 @@
   "dependencies": {
     "@ast-grep/lang-python": "^0.0.6",
     "@ast-grep/napi": "^0.43.0",
-    "@sinclair/typebox": "^0.34.41"
+    "@sinclair/typebox": "^0.34.41",
+    "minimatch": "^10.2.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.83.0",

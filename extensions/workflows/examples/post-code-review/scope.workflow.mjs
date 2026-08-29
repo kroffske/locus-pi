@@ -18,6 +18,13 @@ commit compares with its sole parent, a root commit with Git's empty tree, a mer
 defaults to its first parent while listing all parents, a commit range uses base..head
 endpoint tree semantics, and a local PR range uses merge-base(base, head)..head.
 
+Every contract, instruction, task, specification, or documentation path admitted into
+review-scope.md must be proven to exist in the reviewed tree or named local-only scope.
+Do not copy a nearby document's path claim without checking it. A missing named source is
+an evidence gap or false provenance anchor, not a contract the later lanes may cite.
+For each admitted source, record one exact locator: reviewed-tree path plus head object id,
+or local-only path plus the reason it belongs to this review.
+
 Scope resolution is read-only mapping only. Do not execute tests, linters, typechecks,
 builds, dependency resolution, index rebuilds, runtime commands, or any command that
 materializes auxiliary output. Do not create caches, bytecode, indexes, reports, fixtures,
@@ -38,7 +45,7 @@ Caller input:
 ---
 ${input}
 ---`,
-    { modelRole: "smol:high", label: "resolve post-code review scope" },
+    { modelRole: "smol:high", requireModelRole: true, label: "resolve post-code review scope" },
   );
   return dsl.publishPrimaryFile("review-scope.md");
 }

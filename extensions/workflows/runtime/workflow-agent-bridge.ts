@@ -704,6 +704,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       if (timer !== undefined) clearTimeout(timer);
       signal.removeEventListener("abort", abortFromRun);
     }
+    const displayName =
+      liveExecution === undefined ? undefined : agentLiveStore.rowForExecution(liveExecution)?.displayName;
     if (abortOwner === "timeout" || abortOwner === "ask-unavailable") {
       // Name the fuse (or the fail-closed ask refusal). Without this the operator
       // reads only the host's generic abort reason and cannot tell them apart.
@@ -719,6 +721,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         summary: message,
         diagnostics: [...boundary.diagnostics, ...askNotes, message],
         ...resultIdentity,
+        ...(displayName !== undefined ? { displayName } : {}),
         permissionMode,
         workspaceMode,
         readOnly: agent?.readOnly ?? false,
@@ -792,6 +795,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       diagnostics: [...(degradationConfirmed ? [tier.fallback!] : []), ...boundary.diagnostics, ...askNotes],
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
       ...resultIdentity,
+      ...(displayName !== undefined ? { displayName } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
       ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
@@ -875,6 +879,15 @@ async function resolveWorkflowTier(input: {
   // on the per-call paths would silently change three evidence surfaces.
   const frontmatterResolution = resolveAgentModelPreference(modelRoles, agent?.model ?? []);
 
+  if (req.requireModelRole === true && req.modelRole === undefined) {
+    return refusal("requireModelRole: true requires one explicit modelRole on the same agent call");
+  }
+  if (req.requireModelRole === true && req.model !== undefined) {
+    return refusal(
+      "requireModelRole: true cannot be combined with a concrete model; remove model or the strict role flag",
+    );
+  }
+
   if (req.model !== undefined) {
     const resolution = await resolveModelFn(req.model);
     if (!resolution.ok) {
@@ -917,6 +930,13 @@ async function resolveWorkflowTier(input: {
       return refusal(malformedRoleAssignmentNote(req.modelRole, "modelRole", declared.malformed), req.modelRole);
     }
     if (declared.assignment === undefined) {
+      if (req.requireModelRole === true) {
+        return refusal(
+          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but no model-roles layer ` +
+            "assigns it. Assign the role with /model-roles before running this workflow.",
+          req.modelRole,
+        );
+      }
       return {
         kind: "inherit",
         roleResolution: declared,

@@ -39,7 +39,7 @@ tags: [extensions, reference]
 Shared imports through `extensions/_shared/` are infrastructure dependencies, not extension-to-extension dependencies. The current direct feature graph is:
 
 - `agents → workflows`
-- `loop → workflows/run-read.ts`
+- `loop → workflows/run/run-read.ts`
 
 The other extensions do not directly import another feature directory.
 

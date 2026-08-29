@@ -753,15 +753,23 @@ describe("ModelRoleSelectorComponent", () => {
     );
 
     const text = component.render(146).join("\n");
-    expect(text).toContain("\x1b[32m[ALL]\x1b[39m");
-    expect(text).toContain("\x1b[33mDEFAULT\x1b[39m");
-    expect(text).toContain("\x1b[33mtest/fast:high\x1b[39m");
+    // Accent marks what you are looking at (active filter, session model, cursor);
+    // success marks what is already assigned. Every route in this fixture is
+    // assigned, so the surface carries no warning at all.
+    expect(text).toContain("\x1b[36m[ALL]\x1b[39m");
+    expect(text).not.toContain("\x1b[32m[ALL]\x1b[39m");
+    expect(text).toContain("\x1b[32mCurrent\x1b[39m");
+    expect(text).toContain("\x1b[32mhigh\x1b[39m");
+    expect(text).toContain("\x1b[32mDEFAULT\x1b[39m");
+    expect(text).toContain("\x1b[32mtest/fast:high\x1b[39m");
     expect(text).toContain("\x1b[36mtest/fast\x1b[39m");
+    expect(text).toContain("\x1b[32m[CURRENT]\x1b[39m");
     expect(text).toContain("\x1b[36m>\x1b[39m");
+    expect(text).not.toContain("\x1b[33m");
     expect(text).not.toContain("Available roles:");
   });
 
-  it("renders assigned routing roles and their models in warning color on separate lines", () => {
+  it("renders assigned routes in success on separate lines and keeps warning for unset ones", () => {
     const state = buildModelRolesState(
       { project: "/project/config.json", user: "/user/config.json" },
       {},
@@ -801,11 +809,16 @@ describe("ModelRoleSelectorComponent", () => {
 
     const lines = component.render(146);
     const routingIndex = lines.findIndex((line) => line.includes("Routing roles:"));
-    expect(lines[routingIndex + 1]).toContain("\x1b[33mSUMMARY\x1b[39m");
-    expect(lines[routingIndex + 2]).toContain("\x1b[33mSMOL\x1b[39m");
-    expect(lines[routingIndex + 1]).toContain("\x1b[33mtest/strong:low\x1b[39m");
-    expect(lines.join("\n")).toContain("\x1b[33m[SUMMARY]\x1b[39m");
-    expect(lines.join("\n")).toContain("\x1b[33mtest/strong\x1b[39m");
+    expect(lines[routingIndex + 1]).toContain("\x1b[32mSUMMARY\x1b[39m");
+    expect(lines[routingIndex + 2]).toContain("\x1b[32mSMOL\x1b[39m");
+    expect(lines[routingIndex + 1]).toContain("\x1b[32mtest/strong:low\x1b[39m");
+    expect(lines.join("\n")).toContain("\x1b[32m[SUMMARY]\x1b[39m");
+    expect(lines.join("\n")).toContain("\x1b[32mtest/strong\x1b[39m");
+    // Nothing is pinned to DEFAULT and no model owns the session here, so those
+    // two labels keep warning: unset is the surviving attention case.
+    expect(lines.join("\n")).toContain("\x1b[33mDEFAULT\x1b[39m");
+    expect(lines.join("\n")).toContain("route: unset");
+    expect(lines.join("\n")).toContain("\x1b[33mCurrent\x1b[39m");
   });
 
   it("renders typed, width-safe model and action hierarchy at 146/80/48 columns", async () => {

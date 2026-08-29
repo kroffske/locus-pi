@@ -2,11 +2,11 @@
 title: Workflow guide
 type: guide
 status: active
-updated: 2026-08-19T22:43:07Z
-source_commit: aeb217fe8dab
-update_event: cleanup
-context: changes=S files=4
-description: Guide workflow discovery, execution, and storage.
+updated: 2026-08-26T22:46:41Z
+source_commit: 292b981
+update_event: changed
+context: workflow DSL outcomes, phases, and source diagnostics
+description: Guide workflow discovery, execution, evidence, and author checks.
 owner: locus-pi maintainers
 tags: [workflows, guide]
 ---
@@ -28,14 +28,14 @@ The registry ships five curated Package workflow namespaces with eighteen runnab
 | ------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------- |
 | `implement`                    | `implement`        | Apply authorized work from a prepared plan or review, then independently verify it once.       |
 | `live-smoke`                   | `live-smoke`       | Checks that the Pi host can spawn full-tool workflow agents and collect their reports.         |
-| `post-code-review`             | `post-code-review` | Run modular post-code review lanes and publish the synthesis report.                           |
+| `post-code-review`             | `post-code-review` | Run modular code-shape review lanes and publish the code-shape decision.                       |
 | `post-code-review/boundaries`  | `post-code-review` | Audit ownership and architecture boundaries, then publish review-boundaries.md.                |
 | `post-code-review/contracts`   | `post-code-review` | Audit API and internal contracts for one post-code review scope.                               |
-| `post-code-review/necessity`   | `post-code-review` | Challenge proposed review fixes for necessity, ownership, and complexity.                      |
+| `post-code-review/necessity`   | `post-code-review` | Challenge behavioral and code-shape fixes for necessity, ownership, and complexity.            |
 | `post-code-review/scope`       | `post-code-review` | Resolve a review target into an exact evidence boundary and write review-scope.md.             |
-| `post-code-review/simplicity`  | `post-code-review` | Audit a frozen review scope for avoidable complexity and publish simplicity findings.          |
+| `post-code-review/simplicity`  | `post-code-review` | Audit a frozen review scope for delete-first contraction and publish simplicity findings.      |
 | `post-code-review/style`       | `post-code-review` | Audit comments and project-specific code style for one post-code review scope.                 |
-| `post-code-review/synthesis`   | `post-code-review` | Verify review evidence and publish the final post-code review.                                 |
+| `post-code-review/synthesis`   | `post-code-review` | Verify review evidence and publish the final code-shape decision.                              |
 | `task/draft`                   | `task`             | Translate a raw request into a saved task draft, with bounded live clarification when needed.  |
 | `task/implement-plan-template` | `task`             | Renders implement-plan.workflow.mjs from an approved plan and its ordered step files.          |
 | `task/plan`                    | `task`             | Decomposed planning: freeze scope, collect facts, analyze, plan, review, correct, verify.      |
@@ -90,6 +90,8 @@ Workflow-owned working files live separately under a unique `.locus-pi/plans/<ge
 
 Use `/workflows result` for complete prose output and `/workflows status` for stages, evidence, replay markers, and actionable handoffs.
 
+Root results and direct `parallel()`/`pipeline()` returns share one terminal-outcome rule. A JSON object is semantic failure when `ok === false`, `partial === true`, or `status` is `"failed"`, `"blocked"`, or `"cancelled"`. The original result remains in evidence, but the durable workflow disposition is `failed`. Other JSON-safe shapes retain legacy success semantics.
+
 ## Resume and replay
 
 `--resume <runId>` reuses eligible recorded agent answers only when source identity and request-prefix checks match. Replayed answers are marked as recorded evidence, not fresh work. Replay does not repeat child side effects or re-read files; use it only when those semantics are acceptable. Repeat the same `--run-name <name>` when resuming a named non-task workflow. Supplying a different workspace fails closed.
@@ -122,3 +124,11 @@ Inside Pi, validate a standard-profile workflow source with the
 ```json
 { "path": "path/to/example.workflow.mjs" }
 ```
+
+The tool prints compiler-style diagnostics as
+`path:line:column [CODE] message` and returns structured one-based spans in
+`details.diagnostics`. Errors fail the check. Warning-only results remain
+successful; current warnings identify unused or out-of-order non-empty
+`meta.phases` declarations. A non-empty declaration must cover every unique
+literal `phase("...")` call exactly once and in planned first-source order;
+duplicate or case-equivalent declarations fail the check.

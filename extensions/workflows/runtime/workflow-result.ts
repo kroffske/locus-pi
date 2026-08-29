@@ -191,12 +191,49 @@ export function formatWorkflowFailureSummary(value: unknown, technicalError?: st
   return unresolvedRows.length === 0 ? summary : `${summary} · unresolved: ${unresolvedRows.join(", ")}`;
 }
 
-/** A detached script result may explicitly reject or mark partial its domain outcome.
- *  Absence/non-boolean `ok` without `partial:true` keeps legacy success semantics. */
-export function isWorkflowResultExplicitFailure(value: unknown): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+export type WorkflowReturnedFailureStatus = "failed" | "blocked" | "cancelled";
+export type WorkflowReturnedFailureKind = "ok-false" | "partial" | "status";
+
+export interface WorkflowReturnedFailure {
+  kind: WorkflowReturnedFailureKind;
+  status?: WorkflowReturnedFailureStatus;
+  summary?: string;
+}
+
+const WORKFLOW_RETURNED_FAILURE_STATUSES: ReadonlySet<string> = new Set(["failed", "blocked", "cancelled"]);
+
+/**
+ * Classify one JSON-detached returned-outcome failure shape used by root runs,
+ * parallel branches, and pipeline stages. Missing or non-boolean legacy fields
+ * remain success-compatible; only the three named terminal statuses fail closed.
+ */
+export function classifyWorkflowReturnedFailure(value: unknown): WorkflowReturnedFailure | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
-  return record.ok === false || record.partial === true;
+  const status =
+    typeof record.status === "string" && WORKFLOW_RETURNED_FAILURE_STATUSES.has(record.status)
+      ? (record.status as WorkflowReturnedFailureStatus)
+      : undefined;
+  const summary = typeof record.summary === "string" && record.summary.trim() !== "" ? record.summary : undefined;
+  const kind: WorkflowReturnedFailureKind | undefined =
+    record.ok === false
+      ? "ok-false"
+      : record.partial === true
+        ? "partial"
+        : status !== undefined
+          ? "status"
+          : undefined;
+  if (kind === undefined) return undefined;
+  return {
+    kind,
+    ...(status !== undefined ? { status } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+  };
+}
+
+/** Compatibility predicate retained for callers that only need a boolean. */
+export function isWorkflowResultExplicitFailure(value: unknown): boolean {
+  return classifyWorkflowReturnedFailure(value) !== undefined;
 }
 
 /** Bounded raw JSON for explicit status/detail views. Main surfaces must not call this. */

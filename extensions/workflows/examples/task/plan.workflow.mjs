@@ -43,11 +43,23 @@ explicit prerequisite with the exact way to obtain and check the real value.
 Never invent a concrete project value, path, owner, command, or contract.`;
 
 export default async function runWorkflow(dsl, input) {
-  const { agent, log, parallel, phase, publishPrimaryFile } = dsl;
+  const { agent, log, outputDir, parallel, phase, projectRoot, publishPrimaryFile } = dsl;
   const taskText =
     typeof input === "string" && input.trim()
       ? input.trim()
       : "No additional task text was supplied. Use draft.md when present; otherwise record a blocking input gap.";
+  // Name the workspace as a literal path in every stage prompt. Agents that only
+  // hear "the workspace named in the filesystem note" reliably retype the path
+  // from memory and land in its parent directory. The standard source shape
+  // forwards runtime values whole, so the two path parts are joined inside each
+  // agent prompt instead of being precomputed or branched on here.
+  const liveProjectRoot = projectRoot();
+  const workspaceOutputDir = outputDir();
+  const WORKSPACE_RULE = `Every workspace file this stage reads or writes lives directly under that
+exact workspace path, which is neither the project root nor the workspace's
+parent directory. When a workspace file fails to resolve, list that exact
+directory and re-check the path instead of retrying a shortened or remembered
+variant.`;
 
   phase("scope");
   log("Agent scope: freezing the exact request and planning boundary.");
@@ -55,6 +67,10 @@ export default async function runWorkflow(dsl, input) {
     `You own only request capture and scope for the Package workflow \`task/plan\`.
 
 ${NO_ASK_RULE}
+
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
 
 Do not modify project source, configuration, documentation, or tests. Write only
 workflow files in the workflow workspace named in the filesystem note above. Do
@@ -94,6 +110,10 @@ ${taskText}
 
 ${NO_ASK_RULE}
 
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
 Inspect the live project read-only before making claims. Do not modify project
 source, configuration, documentation, or tests. Write only workflow files in
 the workflow workspace named in the filesystem note above. Do not design the
@@ -125,6 +145,10 @@ ${scopeText}
 
 ${NO_ASK_RULE}
 
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
 Read \`scope.md\` and \`context.md\` in the workflow workspace as the shared
 evidence boundary. Reopen only exact cited files when confirmation is needed;
 do not broaden discovery and do not modify project source, configuration,
@@ -134,7 +158,9 @@ Analyze what the task actually asks for: the observable behavior or artifact,
 its edge cases, what is in and out of scope, which requirements conflict, and
 what "done" must mean. Distinguish requested facts from open choices.
 
-Fully replace \`analysis/task-semantics.md\`. Start it with exactly
+Fully replace \`analysis/task-semantics.md\` and keep it dense: each
+load-bearing conclusion once with its evidence, no restating of \`scope.md\`
+or \`context.md\`. Start it with exactly
 '# Task Semantics Analysis' and return one short readback: the exact file path
 written and a 3–6 line summary of its load-bearing conclusions. Do not retype
 the file.`,
@@ -146,6 +172,10 @@ the file.`,
 
 ${NO_ASK_RULE}
 
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
 Read \`scope.md\` and \`context.md\` in the workflow workspace as the shared
 evidence boundary. Reopen only exact cited files when confirmation is needed;
 do not broaden discovery and do not modify project source, configuration,
@@ -154,10 +184,14 @@ strategy.
 
 Resolve where the change lands: exact target paths, existing helpers and owners,
 package and module boundaries, conventions the change must follow, and every
-configuration or contract the work depends on. Never invent an absent owner,
-helper, path, or contract — missing evidence stays an explicit unknown.
+configuration or contract the work depends on. Open every path, owner, helper,
+and contract you assert in the live repository yourself; a claim restated from
+\`context.md\` without your own check is not analysis. Never invent an absent
+owner, helper, path, or contract — missing evidence stays an explicit unknown.
 
-Fully replace \`analysis/repository-integration.md\`. Start it with exactly
+Fully replace \`analysis/repository-integration.md\` and keep it dense: each
+load-bearing conclusion once with its evidence, no restating of \`scope.md\`
+or \`context.md\`. Start it with exactly
 '# Repository Integration Analysis' and return one short readback: the exact
 file path written and a 3–6 line summary of its load-bearing conclusions. Do
 not retype the file.`,
@@ -169,18 +203,35 @@ not retype the file.`,
 
 ${NO_ASK_RULE}
 
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
 Read \`scope.md\` and \`context.md\` in the workflow workspace as the shared
 evidence boundary. Reopen only exact cited files when confirmation is needed;
 do not broaden discovery and do not modify project source, configuration,
 documentation, or tests. Do not redesign the requested behavior or its
 integration.
 
-Define how each future step can be verified: the exact commands, tests, and
-checks that actually exist, what evidence each one produces, which observable
-assertions prove the requested outcome, and how failure would be diagnosed.
-Never invent a command — an unavailable check is an explicit gap.
+Define how each future step can be verified, in three separate layers:
+1. Checks the project already provides — the exact commands and tests that
+   exist. Never invent a project command. An absent harness is an explicit
+   fact, never a reason to conclude the work is unverifiable.
+2. Checks the implementing agent can build at run time with its own tools —
+   \`node -e\`, shell pipelines, a scratch script kept out of the repository —
+   without adding any infrastructure to the project. Logic that is executable
+   outside a GUI (a pure function, a parseable artifact) belongs in this
+   layer, not with the operator.
+3. Observations only a human can make. Assign here only what layers 1 and 2
+   genuinely cannot reach, each one a concrete observable assertion.
+Give every hard failure criterion the request itself names at least one
+executable layer-1 or layer-2 check with its expected output stated in
+advance. For each check name the evidence it produces and how a failure would
+be diagnosed.
 
-Fully replace \`analysis/verification-strategy.md\`. Start it with exactly
+Fully replace \`analysis/verification-strategy.md\` and keep it dense: each
+load-bearing conclusion once with its evidence, no restating of \`scope.md\`
+or \`context.md\`. Start it with exactly
 '# Verification Strategy Analysis' and return one short readback: the exact
 file path written and a 3–6 line summary of its load-bearing conclusions. Do
 not retype the file.`,
@@ -194,6 +245,10 @@ not retype the file.`,
     `You are the only plan writer in the Package workflow \`task/plan\`.
 
 ${NO_ASK_RULE}
+
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
 
 Do not modify project source, configuration, documentation, or tests. Write only
 workflow files in the workflow workspace named in the filesystem note above.
@@ -236,6 +291,29 @@ platform modules. Prefer one coherent independently verifiable task. Do not
 enumerate every tiny operation as a separate handoff or combine unrelated work
 to reduce task count. A task may gather requirements or evidence; it does not
 have to edit code.
+
+Cut step seams where the data allows: every value or artifact the request
+requires is computed in the work unit where it is computable, the producing
+step's \`Goal:\` names exactly what it hands to later steps, and a later step
+consumes only what an earlier step explicitly hands off. Do not split one new
+self-contained file into steps along its internal sections: that turns a
+section boundary into a runtime contract between steps that the product itself
+does not need — one new file is usually one build step plus at most a
+read-only verification step.
+
+Verification discipline for the step fields: every \`Verification:\` item is
+one exact check with its expected result stated in advance; an inspection may
+accompany an executable check but never substitutes for an available one, so
+never write an 'or at minimum re-read' fallback. Give every hard failure
+criterion the request itself names at least one agent-executable check in some
+step — the implementing agent can build one with its own tools (\`node -e\`, a
+scratch script outside the repository) even when the project has no test
+harness. \`Verification:\` and \`Done when:\` bind only what their own step
+produces or preserves: never freeze another step's implementation detail (a
+section count, an internal name) as an acceptance criterion. State an
+invariant every step shares — an ownership boundary, a clean-tree rule — once
+in \`plan.md\` under Exclusions or Final verification, not as a repeated
+per-step check.
 
 Every step is executed later by one unattended CLI implementation agent with
 this run's own toolset: reading and writing repository files and running local
@@ -297,12 +375,20 @@ ${analysisTexts.join("\n\n--- NEXT ANALYSIS READBACK ---\n\n")}
 
 ${NO_ASK_RULE}
 
-Reopen the current \`plan.md\`, every \`step-<n>.md\`, \`scope.md\`,
-\`context.md\`, \`analysis/task-semantics.md\`, and the live project. Do not
-edit any file. Check that the plan actually delivers the requested outcome:
-requirements covered, edge cases addressed or explicitly excluded, dependency
-order sound, exclusions honest, and no work unit silently dropped or invented.
-Cite exact files. Fully replace \`reviews/plan-correctness.md\` with two
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
+Reopen the current \`plan.md\`, every \`step-<n>.md\`, and \`scope.md\` in
+full; open \`context.md\`, \`analysis/task-semantics.md\`, or the live project
+only to confirm a specific doubt. Do not edit any file. Check that the plan
+actually delivers the requested outcome: requirements covered, edge cases
+addressed or explicitly excluded, dependency order sound, exclusions honest,
+and no work unit silently dropped or invented. Check the data seams: for each
+requirement, the value or artifact it needs is produced in the step where it
+is computable, the producing step's \`Goal:\` hands it off explicitly, and no
+step consumes data that no earlier step produces. Cite exact files. Fully
+replace \`reviews/plan-correctness.md\` with two
 sections: '## Checks performed' — each check you ran, what evidence you
 inspected, and its outcome with exact file citations — then '## Findings' with
 precise findings, or the single line 'No findings.' when every check passed. A
@@ -316,8 +402,13 @@ text.`,
 
 ${NO_ASK_RULE}
 
-Reopen the current \`plan.md\`, every \`step-<n>.md\`, \`scope.md\`,
-\`context.md\`, \`analysis/repository-integration.md\`, and the live project.
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
+Reopen the current \`plan.md\`, every \`step-<n>.md\`, \`context.md\`, and in
+the live project every path the plan or a step names; open \`scope.md\` or
+\`analysis/repository-integration.md\` only to confirm a specific doubt.
 Do not edit any file. Check that every step names exact existing paths, respects
 owners, package boundaries, and conventions, duplicates no existing helper, and
 invents no value, owner, or contract; assumptions and prerequisites must be
@@ -335,14 +426,24 @@ text.`,
 
 ${NO_ASK_RULE}
 
-Reopen the current \`plan.md\`, every \`step-<n>.md\`, \`scope.md\`,
-\`context.md\`, \`analysis/verification-strategy.md\`, and the live project. Do
-not edit any file. Check that each \`step-<n>.md\` is one complete flat
-\`## S<n>\` block a fresh agent can execute alone: every labeled field present,
-\`S<n>\` matching the file name, verification commands that actually exist, an
-observable done condition, no step that is really a shared constraint in
-disguise, and no step action that requires an operator, an interactive display,
-or a model other than the executing agent. Fully replace
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
+Reopen every \`step-<n>.md\`, the current \`plan.md\`, and
+\`analysis/verification-strategy.md\` in full, plus the live project to confirm
+named commands exist; open \`scope.md\` or \`context.md\` only to confirm a
+specific doubt. Do not edit any file. Check that each \`step-<n>.md\` is one
+complete flat \`## S<n>\` block a fresh agent can execute alone: every labeled
+field present, \`S<n>\` matching the file name, verification commands that
+actually exist, an observable done condition, no step that is really a shared
+constraint in disguise, and no step action that requires an operator, an
+interactive display, or a model other than the executing agent. Check the
+steps against each other: a \`Verification:\` or \`Done when:\` item that
+contradicts another step's Goal or freezes another step's implementation
+detail is a finding, a verification item hidden behind an 'or at minimum'
+fallback is a finding, and an invariant repeated in every step instead of
+stated once in \`plan.md\` is a finding. Fully replace
 \`reviews/step-usability.md\` with two sections: '## Checks performed' — each
 check you ran, what evidence you inspected, and its outcome with exact file
 citations — then '## Findings' with precise findings, or the single line
@@ -358,6 +459,10 @@ unperformed review. Return its complete text.`,
     `You own the single bounded correction in the Package workflow \`task/plan\`.
 
 ${NO_ASK_RULE}
+
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
 
 Read the three exact reviews below first. When no review lists an actionable
 finding, change no file: reply 'No correction needed.' with one line per review
@@ -384,6 +489,10 @@ ${reviewTexts.join("\n\n--- NEXT REVIEW ---\n\n")}
 
 ${NO_ASK_RULE}
 
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
+
 Ignore earlier readiness claims. Reopen \`scope.md\`, \`context.md\`, the
 current \`plan.md\`, every \`step-<n>.md\`, the three reviews, and the live
 project. Do not edit any file except \`verification.md\`.
@@ -407,7 +516,9 @@ observable, and unresolved review findings are either fixed or explicitly
 declined with a reason. An unresolved external fact is not a blocker when it is
 recorded as an exact assumption or pre-implementation prerequisite and no value
 is guessed; a plan made mostly of constraints instead of actions, an invented
-path or command, a missing field, or a contradictory step order is a blocker.
+path or command, a missing field, a step whose \`Verification:\` or
+\`Done when:\` contradicts another step's Goal, or a contradictory step order
+is a blocker.
 
 Fully replace \`verification.md\` with evidence for every claim and end it with
 exactly one line 'Conclusion: ready' or 'Conclusion: blocked'.
@@ -426,15 +537,18 @@ ${correctedPlanText}
 
   phase("route");
   const readiness = await agent(
-    `Route the final task/plan verification.
+    `Route the final task/plan verification below as its adversarial gate. Its
+conclusion line is a claim, not the decision: read the body first and decide
+whether the evidence supports that claim.
 
-Return ready only when the verification below proves the ordered step catalog is
-independently executable with existing commands, complete labeled fields, and
-explicit assumptions and prerequisites, and its conclusion line says ready.
-Return blocked for a missing field, invented evidence, ambiguous order,
-unresolved contradiction, or a blocked conclusion. Do not write files and do not
-explain the choice. Decide from the verification text below alone: do not open
-files, run commands, or gather more evidence. Reply with exactly one JSON
+Return blocked when the conclusion line says blocked — and also when the body
+defeats a ready conclusion: a labeled field reported missing, a verification
+command reported absent or invented, a contradiction between steps left
+unresolved, an ambiguous execution order, or a readiness claim asserted
+without evidence. Return ready only when the body's evidence supports every
+readiness claim and the conclusion line says ready. Do not write files and do
+not explain the choice. Decide from the verification text below alone: do not
+open files, run commands, or gather more evidence. Reply with exactly one JSON
 string — "ready" or "blocked", quotes included.
 
 --- BEGIN FINAL VERIFICATION ---
@@ -454,6 +568,10 @@ ${verificationText}
       `You write the fail-closed planning blocker for the Package workflow \`task/plan\`.
 
 ${NO_ASK_RULE}
+
+The workflow workspace for this run is ${liveProjectRoot}/${workspaceOutputDir}
+— the same directory the filesystem note names.
+${WORKSPACE_RULE}
 
 Fully replace \`planning-blocker.md\` in the workflow workspace. Start with
 exactly '# Planning Blocker', then '## What failed' with the exact verification

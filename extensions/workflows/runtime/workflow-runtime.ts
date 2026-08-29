@@ -40,6 +40,7 @@ import {
 import type { EvidenceEvaluation } from "../../_shared/agent-runtime/agent-evidence-evaluator.js";
 import type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { WorkflowPrimaryFileReference } from "./workflow-output.js";
+import { classifyWorkflowReturnedFailure, prepareWorkflowResult } from "./workflow-result.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
 // `agent-failure-cause.ts`, a module with no imports at all. Reading it as a value here keeps
 // this core host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the
@@ -279,6 +280,8 @@ export interface WorkflowAgentRequest {
   model?: string;
   /** Per-call tier: a name in the roles table, never a provider selector. */
   modelRole?: string;
+  /** Refuse an unassigned per-call modelRole instead of inheriting the session model. */
+  requireModelRole?: true;
   /** Runtime-owned resolved value. Workflow source cannot override it. */
   permissionMode?: PermissionMode;
   /** Wall-clock fuse for this attempt; the bridge aborts the child when it expires. */
@@ -313,6 +316,8 @@ export interface WorkflowAgentResult {
   evidence?: EvidenceEvaluation;
   executionMode?: "bare" | "named";
   agent?: string | undefined;
+  /** Session-scoped petname from the live execution row; additive to durable `agent`. */
+  displayName?: string;
   label?: string;
   childSessionId?: string;
   childTrace?: WorkflowAgentChildTrace;
@@ -352,6 +357,7 @@ export interface WorkflowAgentChildTrace {
   path: string;
   format: "pi-session-jsonl";
   childSessionId: string;
+  htmlPath?: string;
 }
 
 export interface WorkflowSchemaValidation {
@@ -514,6 +520,12 @@ export interface WorkflowAgentOptions {
    * chosen at the call site says which one the author meant.
    */
   modelRole?: string;
+  /**
+   * Require this call's explicit `modelRole` to resolve from a model-roles layer.
+   * Normal calls retain the portable recorded fallback. Evidence-critical stages
+   * can opt into fail-closed routing without pinning a provider-specific model.
+   */
+  requireModelRole?: true;
   /**
    * Wall-clock fuse for one child attempt, in milliseconds. `maxToolCalls` bounds
    * tool usage and cannot end a stalled child. On expiry the child is aborted and
@@ -789,6 +801,8 @@ export interface WorkflowJournalLine {
   /** Explicit child identity. Absent only on legacy journals where `agent` implied named. */
   executionMode?: "bare" | "named";
   agent?: string;
+  /** Session-scoped petname captured for fresh agent_end evidence. */
+  displayName?: string;
   /** Host-enforced read-only capability boundary for this child. */
   readOnly?: boolean;
   label?: string;
@@ -849,6 +863,8 @@ export interface WorkflowJournalLine {
   requestedModel?: string;
   /** The tier the call declared, on `agent_start`. A role name, never a provider selector. */
   modelRole?: string;
+  /** The call refuses an unassigned declared role instead of inheriting the session model. */
+  requireModelRole?: true;
   /**
    * What the child session reported it ran on, read back from the host.
    * `"unavailable"` when the peer exposes no model. Absent on journals written before
@@ -2599,6 +2615,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(effectivePhase !== undefined ? { phase: effectivePhase } : {}),
       ...(opts?.model !== undefined ? { model: opts.model } : {}),
       ...(opts?.modelRole !== undefined ? { modelRole: opts.modelRole } : {}),
+      ...(opts?.requireModelRole === true ? { requireModelRole: true as const } : {}),
       // The declared fuse is the AUTHORITY over this child's wall clock (D4). It is
       // resolved here — default included — so the request the bridge receives always
       // carries the number the SDK turn budget is then derived from, and the two
@@ -2736,6 +2753,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
       ...(requestedLiveModel?.model !== undefined ? { requestedModel: requestedLiveModel.model } : {}),
       ...(req.modelRole !== undefined ? { modelRole: req.modelRole } : {}),
+      ...(req.requireModelRole === true ? { requireModelRole: true } : {}),
       ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
       callId,
@@ -2952,6 +2970,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...attemptFields,
       replayed,
       ...(finalResult.readOnly !== undefined ? { readOnly: finalResult.readOnly } : {}),
+      ...(finalResult.displayName !== undefined ? { displayName: finalResult.displayName } : {}),
       ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
       ...(finalResult.activeToolNames !== undefined ? { activeToolNames: finalResult.activeToolNames } : {}),
       status: finalResult.status,
@@ -3701,6 +3720,10 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
     // remapping `smol` in a roles config, or editing an agent's frontmatter, reuses
     // the record. Recorded runs must be invalidated by hand after such a change.
     modelRole: req.modelRole ?? null,
+    // Preserve the canonical bytes of every pre-feature ordinary call. The strict
+    // flag changes execution only when true, so adding a null field would invalidate
+    // all existing ordinary replay records without distinguishing any behavior.
+    ...(req.requireModelRole === true ? { requireModelRole: true } : {}),
     // Same class as `maxToolCalls`: a fuse that shapes execution, so changing it
     // is a different call and must not reuse the earlier record.
     timeoutMs: req.timeoutMs ?? null,
@@ -3777,25 +3800,34 @@ function classifyReturnedGroupFailure(
   index: number,
   stageIndex?: number,
 ): WorkflowBranchFailure | undefined {
-  if (!isRecord(value)) return undefined;
-  const status = typeof value.status === "string" ? value.status : undefined;
-  const failedStatus = status === "failed" || status === "blocked" || status === "cancelled";
-  if (value.ok !== false && !failedStatus) return undefined;
-  const summary = typeof value.summary === "string" && value.summary.trim() !== "" ? value.summary : undefined;
-  const firstDiagnostic = Array.isArray(value.diagnostics)
-    ? value.diagnostics.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+  const prepared = prepareWorkflowResult(value);
+  if (prepared.diagnostic !== undefined) {
+    return {
+      index,
+      kind: "returned-failure",
+      message: workflowErrorMessage(prepared.diagnostic.message),
+      ...(stageIndex !== undefined ? { stageIndex } : {}),
+    };
+  }
+  const returnedFailure = classifyWorkflowReturnedFailure(prepared.value);
+  if (returnedFailure === undefined) return undefined;
+  const record = isRecord(value) ? value : {};
+  const firstDiagnostic = Array.isArray(record.diagnostics)
+    ? record.diagnostics.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
     : undefined;
-  const message = workflowErrorMessage(
-    summary ??
-      firstDiagnostic ??
-      (status === undefined ? "branch returned ok:false" : `branch returned status=${status}`),
-  );
+  const fallback =
+    returnedFailure.status !== undefined
+      ? `branch returned status=${returnedFailure.status}`
+      : returnedFailure.kind === "partial"
+        ? "branch returned partial:true"
+        : "branch returned ok:false";
+  const message = workflowErrorMessage(returnedFailure.summary ?? firstDiagnostic ?? fallback);
   return {
     index,
     kind: "returned-failure",
     message,
     ...(stageIndex !== undefined ? { stageIndex } : {}),
-    ...(status !== undefined ? { status } : {}),
+    ...(returnedFailure.status !== undefined ? { status: returnedFailure.status } : {}),
   };
 }
 

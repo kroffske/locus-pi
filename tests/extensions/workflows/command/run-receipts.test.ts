@@ -10,7 +10,7 @@ import {
   persistCommandWorkflowTranscript,
   WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../../extensions/workflows/command/receipts.js";
-import { createWorkflowTranscript } from "../../../../extensions/workflows/workflow-transcript.js";
+import { createWorkflowTranscript } from "../../../../extensions/workflows/transcript/workflow-transcript.js";
 import { createHarness, emit, type Harness } from "../../../test-harness.js";
 
 type HarnessOptions = NonNullable<Parameters<typeof createHarness>[1]>;

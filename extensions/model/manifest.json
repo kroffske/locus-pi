@@ -5,6 +5,7 @@
   "runtimeRequirements": [
     "Pi setModel/getThinkingLevel/setThinkingLevel APIs",
     "Pi model registry with reasoning/thinkingLevelMap capability metadata",
+    "global enabledModels is enforced as a hard pre-agent allowlist, including explicit --model selections; configured empty, malformed, or unreadable policy fails closed without an LLM request",
     "Pi custom/select UI",
     "Project-local model role config",
     "Locus model-settings role resolver",
@@ -13,6 +14,7 @@
   ],
   "stateUsed": [
     "Pi defaultProvider/defaultModel",
+    "read-only ~/.pi/agent/settings.json enabledModels policy",
     "project .pi/model-roles/config.json",
     "optional project .locus/runtime/session-state.jsonl runtime event",
     "optional Pi settings modelRoles compatibility mirror",
@@ -46,7 +48,7 @@
   },
   "permissions": {
     "filesystem": {
-      "read": ["~/.pi/agent/model-roles/config.json", ".pi/model-roles/config.json"],
+      "read": ["~/.pi/agent/settings.json", "~/.pi/agent/model-roles/config.json", ".pi/model-roles/config.json"],
       "write": [".pi/model-roles/config.json", ".locus/runtime/session-state.jsonl"]
     },
     "subprocess": [],
@@ -60,8 +62,9 @@
   "sourceAuditPath": null,
   "tests": [
     "tests/extensions/model/model.test.ts",
+    "tests/extensions/model/model-allowlist.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts",
-    "tests/shared/operator-interaction.test.ts"
+    "tests/shared/operator/operator-interaction-slot.test.ts"
   ],
   "review": {
     "status": "reviewed",

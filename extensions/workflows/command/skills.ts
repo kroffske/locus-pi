@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionCommandContext } from "../../_shared/host/pi-api.js";
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
-import { errorMessage, workflowWarningBlock } from "../operator-ui.js";
+import { errorMessage, workflowWarningBlock } from "../operator/operator-ui.js";
 
 export const WORKFLOW_SKILL_NAMES = [
   "locus-pi-workflow-create",

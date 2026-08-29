@@ -90,7 +90,7 @@ A run is good when:
 - and a `reject` verdict ends the run carrying that verdict's own `reason`, with no
   `consilium.md` published.
 
-`tests/extensions/workflows/consilium-reference-workflow.test.ts` drives the file over
+`tests/extensions/workflows/references/consilium-reference-workflow.test.ts` drives the file over
 both verdicts with a fake agent runner and asserts exactly that.
 
 ## Model tiers

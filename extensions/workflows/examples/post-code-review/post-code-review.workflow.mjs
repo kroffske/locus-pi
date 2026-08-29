@@ -1,13 +1,13 @@
 export const meta = {
   name: "post-code-review",
-  description: "Run modular post-code review lanes and publish the synthesis report.",
+  description: "Run modular code-shape review lanes and publish the code-shape decision.",
   profile: "standard",
   phases: [
-    { title: "Scope" },
-    { title: "Parallel audits" },
-    { title: "Necessity challenge" },
-    { title: "Synthesis" },
-    { title: "Publish" },
+    { title: "scope" },
+    { title: "audit-barrier" },
+    { title: "necessity" },
+    { title: "synthesis" },
+    { title: "publish" },
   ],
 };
 

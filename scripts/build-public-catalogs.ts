@@ -29,7 +29,7 @@ import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { format, resolveConfig } from "prettier";
-import { staticWorkflowMeta } from "../extensions/workflows/workflow-catalog.js";
+import { staticWorkflowMeta } from "../extensions/workflows/catalog/workflow-catalog.js";
 import {
   listPackagedWorkflowEntries,
   workflowTargetComposition,

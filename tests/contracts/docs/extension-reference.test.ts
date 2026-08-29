@@ -44,6 +44,6 @@ describe("extension reference contract", () => {
       ["loop", ["workflows"]],
     ]);
     expect(extensionDocs).toContain("`agents → workflows`");
-    expect(extensionDocs).toContain("`loop → workflows/run-read.ts`");
+    expect(extensionDocs).toContain("`loop → workflows/run/run-read.ts`");
   });
 });
