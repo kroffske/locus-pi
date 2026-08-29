@@ -4,6 +4,8 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-30
+
 ### Changed
 
 - `post-code-review` now treats proven code-shape defects introduced or worsened by the reviewed change as REQUIRED even when runtime behavior still succeeds. Delete-first contraction, dead surface, fake configurability, duplicated invariant ownership, stale derived documentation, misleading behavior descriptions, and open delete/rewrite/owner moves now block that review gate until remediation and a fresh run; impact remains a separate severity axis, and final QA remains separate.
