@@ -53,48 +53,44 @@ The native tool uses the current Pi session model. It has no per-run model
 field. When the operator requests another main model, select it with Pi's
 `/model` command and set reasoning with `/effort` before calling `workflow`.
 
-## Configure main and child models
+## Inspect model configuration
 
-Pi's persistent main-model defaults live in `~/.pi/agent/settings.json`. Keep
-the provider and model in separate fields, and keep every permitted concrete
-selector in `enabledModels`. For example, this setup makes Sol at high effort
-the main default and keeps Luna available for a child role:
+Model choice belongs to the operator. Do not recommend, assign, or replace a
+provider, model, thinking level, or workflow role merely because a workflow is
+being launched. When the request does not name a model, preserve the current Pi
+session and its configured defaults.
 
-```json
-{
-  "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-sol",
-  "defaultThinkingLevel": "high",
-  "enabledModels": ["openai-codex/gpt-5.6-sol", "openai-codex/gpt-5.6-luna"]
-}
+List the models Pi can currently resolve before using an explicit selector:
+
+```bash
+pi --list-models
+pi --list-models <provider>
 ```
 
-Do not keep a removed model as the default or in `enabledModels`. Confirm exact
-available selectors with `pi --list-models <provider>` before writing them.
+Pi's persistent main-model settings and hard allowlist live in
+`~/.pi/agent/settings.json`. When `jq` is available, inspect the relevant
+values without changing them:
 
-Workflow child roles are a separate layer. Assign project roles in
-`.pi/model-roles/config.json`, or user fallbacks in
-`~/.pi/agent/model-roles/config.json`. A role assignment uses
-`provider/model[:thinking]`:
-
-```json
-{
-  "version": 1,
-  "roles": {
-    "default": "openai-codex/gpt-5.6-sol:high",
-    "smol": "openai-codex/gpt-5.6-luna"
-  }
-}
+```bash
+jq '{defaultProvider, defaultModel, defaultThinkingLevel, enabledModels, modelRoles}' \
+  ~/.pi/agent/settings.json
 ```
 
-`modelRole: "smol"` now selects Luna in that project. A model-less child with
-no assigned `agent` role inherits the live main session model; assigning
-`default` does not replace that inheritance. Project role assignments override
-user fallbacks. Session assignments override both.
+An explicit `--model <provider/model>` must resolve in `pi --list-models` and
+must be permitted by `enabledModels` when that allowlist is configured. Never
+remove, add, or replace an allowlist entry unless the operator requested that
+exact configuration change.
 
-For an external launch, omitting `--model` and `--thinking` uses the persistent
-main defaults. Supplying those flags overrides the main model for that Pi
-process only. Neither path overrides an explicit workflow child role.
+Workflow child roles are a separate layer. Inspect project roles in
+`.pi/model-roles/config.json`, the `modelRoles` object in Pi settings, and user
+fallbacks in `~/.pi/agent/model-roles/config.json`. A role assignment uses
+`provider/model[:thinking]`. Project assignments override user fallbacks;
+session assignments override both.
+
+A model-less child with no assigned `agent` role inherits the live main session
+model; assigning `default` does not replace that inheritance. Supplying
+`--model` and `--thinking` on an external launch overrides the main model for
+that Pi process only. It does not override an explicit workflow child role.
 
 ## External Pi path
 
