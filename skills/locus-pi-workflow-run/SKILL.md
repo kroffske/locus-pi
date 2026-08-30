@@ -49,6 +49,49 @@ artifacts from the tool result.
 For any workflow, `runName: "<name>"` selects `.locus-pi/plans/<name>`. Do not
 combine `runName` with `outputDir`.
 
+The native tool uses the current Pi session model. It has no per-run model
+field. When the operator requests another main model, select it with Pi's
+`/model` command and set reasoning with `/effort` before calling `workflow`.
+
+## Inspect model configuration
+
+Model choice belongs to the operator. Do not recommend, assign, or replace a
+provider, model, thinking level, or workflow role merely because a workflow is
+being launched. When the request does not name a model, preserve the current Pi
+session and its configured defaults.
+
+List the models Pi can currently resolve before using an explicit selector:
+
+```bash
+pi --list-models
+pi --list-models <provider>
+```
+
+Pi's persistent main-model settings and hard allowlist live in
+`~/.pi/agent/settings.json`. When `jq` is available, inspect the relevant
+values without changing them:
+
+```bash
+jq '{defaultProvider, defaultModel, defaultThinkingLevel, enabledModels, modelRoles}' \
+  ~/.pi/agent/settings.json
+```
+
+An explicit `--model <provider/model>` must resolve in `pi --list-models` and
+must be permitted by `enabledModels` when that allowlist is configured. Never
+remove, add, or replace an allowlist entry unless the operator requested that
+exact configuration change.
+
+Workflow child roles are a separate layer. Inspect project roles in
+`.pi/model-roles/config.json`, the `modelRoles` object in Pi settings, and user
+fallbacks in `~/.pi/agent/model-roles/config.json`. A role assignment uses
+`provider/model[:thinking]`. Project assignments override user fallbacks;
+session assignments override both.
+
+A model-less child with no assigned `agent` role inherits the live main session
+model; assigning `default` does not replace that inheritance. Supplying
+`--model` and `--thinking` on an external launch overrides the main model for
+that Pi process only. It does not override an explicit workflow child role.
+
 ## External Pi path
 
 Invoke Pi in JSON print mode with the slash-command itself as one argv element:
@@ -66,9 +109,8 @@ Prefer a process API with an argv array:
 
 When model selection is part of the request, place `--model
 <provider/model>` and `--thinking <level>` before `prompt`. These flags select
-the main Pi model and its reasoning level. They do not override assigned
-workflow child roles; configure those with `/model-roles` or
-`.pi/model-roles/config.json`. An unassigned child role inherits the main model.
+the main Pi model and its reasoning level for that process. They do not override
+assigned workflow child roles.
 
 Build `prompt` as `/workflows run <target> [options] [--] [input]`. Format every
 command value token—`target`, `runName`, `outputDir`, and `resumeFromRunId`—the same way:

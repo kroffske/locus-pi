@@ -33,4 +33,17 @@ describe("shipped workflow run skill", () => {
     expect(authoringSkill).toContain("Do not use merely to run an existing workflow");
     expect(authoringSkill).toContain("`locus-pi-workflow-run` skill");
   });
+
+  it("keeps provider, model, and role selection operator-owned", () => {
+    const runSkill = readFileSync(path.join(root, "skills/locus-pi-workflow-run/SKILL.md"), "utf8");
+
+    expect(runSkill).toContain("Model choice belongs to the operator");
+    expect(runSkill).toContain("pi --list-models");
+    expect(runSkill).toContain("pi --list-models <provider>");
+    expect(runSkill).toContain("defaultProvider, defaultModel, defaultThinkingLevel, enabledModels, modelRoles");
+    expect(runSkill).toContain("must be permitted by `enabledModels`");
+    expect(runSkill).toMatch(/preserve the current Pi\s+session and its configured defaults/);
+    expect(runSkill).not.toContain("openai-codex");
+    expect(runSkill).not.toContain("gpt-5.6");
+  });
 });
