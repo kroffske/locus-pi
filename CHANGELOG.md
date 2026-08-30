@@ -4,6 +4,8 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-31
+
 ### Changed
 
 - The workflow-run skill now explains how to inspect Pi's available models, persistent settings, hard allowlist, one-process CLI overrides, and project or user child-role assignments. Provider, model, effort, and role choices remain operator-owned; the skill does not prescribe concrete defaults.
