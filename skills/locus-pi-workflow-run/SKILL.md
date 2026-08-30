@@ -49,6 +49,53 @@ artifacts from the tool result.
 For any workflow, `runName: "<name>"` selects `.locus-pi/plans/<name>`. Do not
 combine `runName` with `outputDir`.
 
+The native tool uses the current Pi session model. It has no per-run model
+field. When the operator requests another main model, select it with Pi's
+`/model` command and set reasoning with `/effort` before calling `workflow`.
+
+## Configure main and child models
+
+Pi's persistent main-model defaults live in `~/.pi/agent/settings.json`. Keep
+the provider and model in separate fields, and keep every permitted concrete
+selector in `enabledModels`. For example, this setup makes Sol at high effort
+the main default and keeps Luna available for a child role:
+
+```json
+{
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.6-sol",
+  "defaultThinkingLevel": "high",
+  "enabledModels": ["openai-codex/gpt-5.6-sol", "openai-codex/gpt-5.6-luna"]
+}
+```
+
+Do not keep a removed model as the default or in `enabledModels`. Confirm exact
+available selectors with `pi --list-models <provider>` before writing them.
+
+Workflow child roles are a separate layer. Assign project roles in
+`.pi/model-roles/config.json`, or user fallbacks in
+`~/.pi/agent/model-roles/config.json`. A role assignment uses
+`provider/model[:thinking]`:
+
+```json
+{
+  "version": 1,
+  "roles": {
+    "default": "openai-codex/gpt-5.6-sol:high",
+    "smol": "openai-codex/gpt-5.6-luna"
+  }
+}
+```
+
+`modelRole: "smol"` now selects Luna in that project. A model-less child with
+no assigned `agent` role inherits the live main session model; assigning
+`default` does not replace that inheritance. Project role assignments override
+user fallbacks. Session assignments override both.
+
+For an external launch, omitting `--model` and `--thinking` uses the persistent
+main defaults. Supplying those flags overrides the main model for that Pi
+process only. Neither path overrides an explicit workflow child role.
+
 ## External Pi path
 
 Invoke Pi in JSON print mode with the slash-command itself as one argv element:
@@ -66,9 +113,8 @@ Prefer a process API with an argv array:
 
 When model selection is part of the request, place `--model
 <provider/model>` and `--thinking <level>` before `prompt`. These flags select
-the main Pi model and its reasoning level. They do not override assigned
-workflow child roles; configure those with `/model-roles` or
-`.pi/model-roles/config.json`. An unassigned child role inherits the main model.
+the main Pi model and its reasoning level for that process. They do not override
+assigned workflow child roles.
 
 Build `prompt` as `/workflows run <target> [options] [--] [input]`. Format every
 command value token—`target`, `runName`, `outputDir`, and `resumeFromRunId`—the same way:

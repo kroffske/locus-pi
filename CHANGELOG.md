@@ -4,6 +4,10 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- The workflow-run skill now explains how Pi's persistent main model, one-process CLI overrides, and project or user child-role assignments interact. It includes a valid example with a `gpt-5.6-sol` high-effort default and `gpt-5.6-luna` assigned to `smol`, and it warns operators to remove unavailable models from the allowlist.
+
 ## [0.6.1] - 2026-08-30
 
 ### Changed
