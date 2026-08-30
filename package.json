@@ -1,6 +1,6 @@
 {
   "name": "@kroffske/locus-pi",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "type": "module",
   "description": "Audited Locus Pi extension package for agentic development tools.",
   "license": "MIT",
