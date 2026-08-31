@@ -117,7 +117,8 @@ describe("design-first readable workflow authoring", () => {
     expect(text).toContain("`task/draft` to translate a raw request");
     expect(text).toContain("`task/plan` to prepare an accepted task");
     expect(text).toContain("`task/implement-plan-template` to render the approved plan");
-    expect(text).toContain("`task/substep` only when one named step must run by");
+    expect(text).toContain("`task/implement-plan-v2-template` to render the opt-in");
+    expect(text).toMatch(/`task\/substep` only when one named step must run\s+by/u);
     expect(text).toMatch(/The author writes Design,\s+reviews it, and Builds matching source in the same turn/u);
     expect(text).toContain("only the user may separately request a pause");
     expect(text).toContain("`task/substep` is intentionally different from the separate `implement`");
@@ -786,6 +787,7 @@ ${skill[1] ?? ""}
       "live-smoke": "standard",
       "task/draft": "standard",
       "task/implement-plan-template": "standard",
+      "task/implement-plan-v2-template": "standard",
       "task/plan": "standard",
       "task/substep": "standard",
       "post-code-review": "standard",
@@ -801,12 +803,13 @@ ${skill[1] ?? ""}
       "workflow-creator/design": "standard",
       "workflow-creator/svg": "standard",
     });
-    expect(packagedWorkflowNames()).toHaveLength(18);
+    expect(packagedWorkflowNames()).toHaveLength(19);
     for (const name of [
       "implement",
       "live-smoke",
       "task/draft",
       "task/implement-plan-template",
+      "task/implement-plan-v2-template",
       "task/plan",
       "task/substep",
       "post-code-review",

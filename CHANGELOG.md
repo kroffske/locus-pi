@@ -4,6 +4,15 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Added
+
+- Added the opt-in Package workflow `task/implement-plan-v2-template`. It renders a separate `implement-plan-v2.workflow.mjs` that gives each blocked step one agent-owned recovery, one independent recovery review, and one retry while preserving the existing V1 renderer and generated file for direct comparison.
+- Added a side-by-side SVG of the V1 and V2 implementation graphs. Editable Excalidraw and PNG review evidence remain task-local rather than widening the installed package.
+
+### Changed
+
+- `task/plan` agents now reject a mandatory verification result when no step can produce its success path under the declared goal and ownership. Diagnostic blocked markers remain honest failure evidence but no longer make a plan-controlled dead end ready.
+
 ## [0.6.2] - 2026-08-31
 
 ### Changed

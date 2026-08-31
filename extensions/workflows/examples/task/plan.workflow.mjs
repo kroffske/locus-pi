@@ -308,7 +308,12 @@ never write an 'or at minimum re-read' fallback. Give every hard failure
 criterion the request itself names at least one agent-executable check in some
 step — the implementing agent can build one with its own tools (\`node -e\`, a
 scratch script outside the repository) even when the project has no test
-harness. \`Verification:\` and \`Done when:\` bind only what their own step
+harness. Every mandatory success marker must have one reachable producer under
+the catalog's declared Goals and Allowed ownership. A diagnostic \`*_BLOCKED\`
+fallback may describe an external or environment gap, but it never makes a plan
+ready when the plan itself withholds the artifact, observable, seam, command, or
+permission required for success. \`Done when:\` contains success conditions,
+never a failed or blocked alternative. \`Verification:\` and \`Done when:\` bind only what their own step
 produces or preserves: never freeze another step's implementation detail (a
 section count, an internal name) as an acceptance criterion. State an
 invariant every step shares — an ownership boundary, a clean-tree rule — once
@@ -441,7 +446,10 @@ constraint in disguise, and no step action that requires an operator, an
 interactive display, or a model other than the executing agent. Check the
 steps against each other: a \`Verification:\` or \`Done when:\` item that
 contradicts another step's Goal or freezes another step's implementation
-detail is a finding, a verification item hidden behind an 'or at minimum'
+detail is a finding. Trace every mandatory success marker to the step whose
+Goal and Allowed ownership make it reachable; a plan-controlled \`*_BLOCKED\`
+fallback or a blocked alternative inside \`Done when:\` is a finding. A
+verification item hidden behind an 'or at minimum'
 fallback is a finding, and an invariant repeated in every step instead of
 stated once in \`plan.md\` is a finding. Fully replace
 \`reviews/step-usability.md\` with two sections: '## Checks performed' — each
@@ -471,7 +479,9 @@ name, apply each supported finding with the smallest edit that resolves it
 (rewrite a file fully only when the findings make most of it stale), and delete
 stale step files the corrected plan no longer references. Do not expand scope,
 do not modify project source, configuration, documentation, or tests, do not
-invent evidence, and do not hide a blocker. Preserve valid manual owner edits.
+invent evidence, and do not hide a blocker. A correction must not resolve an
+underspecified check by requiring a success path no step is allowed to produce.
+Preserve valid manual owner edits.
 Keep the step-catalog contract and the next-action choices intact. Return the
 exact list of findings applied and findings declined, each with file and line.
 Do not retype the plan.
@@ -518,7 +528,10 @@ recorded as an exact assumption or pre-implementation prerequisite and no value
 is guessed; a plan made mostly of constraints instead of actions, an invented
 path or command, a missing field, a step whose \`Verification:\` or
 \`Done when:\` contradicts another step's Goal, or a contradictory step order
-is a blocker.
+is a blocker. Also block a catalog whose mandatory success marker has no
+reachable producer under the declared Goals and Allowed ownership. An honest
+diagnostic fallback does not make that plan-controlled dead end ready, and a
+failed or blocked alternative inside \`Done when:\` is never completion.
 
 Fully replace \`verification.md\` with evidence for every claim and end it with
 exactly one line 'Conclusion: ready' or 'Conclusion: blocked'.
@@ -544,7 +557,9 @@ whether the evidence supports that claim.
 Return blocked when the conclusion line says blocked — and also when the body
 defeats a ready conclusion: a labeled field reported missing, a verification
 command reported absent or invented, a contradiction between steps left
-unresolved, an ambiguous execution order, or a readiness claim asserted
+unresolved, a mandatory success path reported unreachable under declared
+ownership, a failed or blocked marker reported as a done condition, an
+ambiguous execution order, or a readiness claim asserted
 without evidence. Return ready only when the body's evidence supports every
 readiness claim and the conclusion line says ready. Do not write files and do
 not explain the choice. Decide from the verification text below alone: do not

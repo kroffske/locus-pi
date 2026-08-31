@@ -3,10 +3,11 @@
 `task` is a group-only Package namespace. It is not runnable by itself. Use
 `task/draft` to translate a raw request, `task/plan` to prepare an accepted task,
 `task/implement-plan-template` to render the approved plan into one reviewable
-sequential workflow, and `task/substep` only when one named step must run by
-itself. The generated `implement-plan.workflow.mjs` is the sole complete-plan
-executor. Planning, rendering, generated-source approval, and execution remain
-separate operator actions.
+V1 sequential workflow, `task/implement-plan-v2-template` to render the opt-in
+agent-recovery comparison, and `task/substep` only when one named step must run
+by itself. V1 generates `implement-plan.workflow.mjs`; V2 generates
+`implement-plan-v2.workflow.mjs`. Planning, rendering, generated-source
+approval, and execution remain separate operator actions.
 
 ## `task/draft`
 
@@ -73,7 +74,7 @@ files.
 ## Workspace files
 
 Every stage receives the same project-local workflow workspace. A fresh
-`task/draft`, `task/plan`, `task/implement-plan-template`, or `task/substep` run
+`task/draft`, `task/plan`, either implementation renderer, or `task/substep` run
 receives a unique default beneath `.locus-pi/plans/`, for example
 `.locus-pi/plans/20260819-142530-a1b2-task-draft/`. The prefix is the run id:
 a sortable UTC timestamp plus a random suffix. The workflow slug keeps the
@@ -83,8 +84,9 @@ select `.locus-pi/plans/<name>` with `--run-name <name>`.
 The manual route reuses one directory deliberately. After `task/draft`, copy
 the exact `task/plan --run-name ...` command from the completion card. After
 planning approval, copy the `task/implement-plan-template --run-name ...`
-command. The generated workflow and every optional `task/substep` recovery run
-use that same workspace.
+command for V1 or substitute `task/implement-plan-v2-template` for V2. The
+generated workflow and every optional `task/substep` recovery run use that same
+workspace.
 
 - `draft-context.md` — the bounded reconnaissance behind an interactive draft.
 - `draft.md` — the accepted intent that `task/plan` reads when present.
@@ -108,6 +110,11 @@ use that same workspace.
   literal implementation node per step, each carrying a single bounded
   blocked-repair branch (repair the named defect once, retry the same step
   once, otherwise fail), followed by one summary node.
+- `implement-plan-v2.workflow.mjs` — opt-in V2 comparison; each blocked step
+  gets one recovery agent, one independent recovery review, and one retry before
+  failure. V2 never overwrites the V1 generated file.
+- `recovery/S<n>.md` — V2-only diagnosis and recovery evidence for one blocked
+  step.
 - `history/S<n>.md` — idempotent result of one executed step.
 - `result.md` — summary published by the generated complete-plan workflow.
 
@@ -165,6 +172,14 @@ fixed template to `plan.md` and the ordered step catalog, then publishes
 `implement-plan.workflow.mjs` without running it. The owner reads that generated
 file and starts it by explicit path with the same workspace.
 
+For the opt-in comparison, run `task/implement-plan-v2-template` on the same
+approved workspace. Its generated child keeps the same normal literal step
+path. Only after a step returns blocked does one recovery agent inspect the live
+failure. It may repair an artifact inside existing ownership or revise only the
+current step's verification method. A separate read-only agent decides whether
+one retry is safe. JavaScript reads no blocker prose and performs no semantic
+check. A rejected recovery or blocked retry stops before later steps.
+
 The generated file contains one literal `agent()` node per `step-<n>.md` file
 in order. A failed step stops the workflow before the next node. Each node reads
 its existing `history/S<n>.md` and skips only credible completed work, so the
@@ -197,6 +212,8 @@ Direct command use keeps the default workspace:
 /workflows run task/plan --run-name airflow-builder
 /workflows run task/implement-plan-template --run-name airflow-builder
 /workflows run .locus-pi/plans/airflow-builder/implement-plan.workflow.mjs --output-dir .locus-pi/plans/airflow-builder
+/workflows run task/implement-plan-v2-template --run-name airflow-builder
+/workflows run .locus-pi/plans/airflow-builder/implement-plan-v2.workflow.mjs --output-dir .locus-pi/plans/airflow-builder
 /workflows run task/substep --run-name airflow-builder -- S1
 /workflows run task/plan Move the cron job into a DAG
 /workflows run task/plan --resume <runId> Move the cron job into a DAG
@@ -226,6 +243,21 @@ publication fails closed.
 The renderer never invokes `task/plan`, never changes project source, and never
 runs the file it writes. The generated file resolves only by explicit path.
 Rendering is not approval to execute trusted JavaScript.
+
+## `task/implement-plan-v2-template`
+
+`task/implement-plan-v2-template` is a separate renderer for controlled
+comparison. It reads the same approved plan and catalog, applies its own fixed
+resource, and fully replaces only `implement-plan-v2.workflow.mjs`. It never
+deletes or rewrites the V1 generated source.
+
+The generated V2 graph adds no runtime feature or hidden manager. Existing
+`agent({ choice })` calls route one visible recovery branch per blocked step.
+The branch is bounded to one recovery, one independent recovery review, and one
+retry. Multi-round reflection remains outside V2 until separate evaluation
+justifies a concrete bound.
+
+[Compare the V1 and V2 agent graphs](./task-implement-plan-v1-v2.svg).
 
 ## `task/substep`
 
