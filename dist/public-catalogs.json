@@ -92,7 +92,6 @@
     }
   ],
   "workflows": [
-    { "name": "implement", "namespace": "implement" },
     { "name": "live-smoke", "namespace": "live-smoke" },
     { "name": "post-code-review", "namespace": "post-code-review" },
     { "name": "post-code-review/boundaries", "namespace": "post-code-review" },
@@ -103,13 +102,6 @@
     { "name": "post-code-review/style", "namespace": "post-code-review" },
     { "name": "post-code-review/synthesis", "namespace": "post-code-review" },
     { "name": "task/draft", "namespace": "task" },
-    { "name": "task/implement-plan-template", "namespace": "task" },
-    { "name": "task/implement-plan-v2-template", "namespace": "task" },
-    { "name": "task/plan", "namespace": "task" },
-    { "name": "task/substep", "namespace": "task" },
-    { "name": "workflow-creator", "namespace": "workflow-creator" },
-    { "name": "workflow-creator/build", "namespace": "workflow-creator" },
-    { "name": "workflow-creator/design", "namespace": "workflow-creator" },
-    { "name": "workflow-creator/svg", "namespace": "workflow-creator" }
+    { "name": "task/plan", "namespace": "task" }
   ]
 }

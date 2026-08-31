@@ -47,13 +47,9 @@ function recursiveTypeScriptFiles(directory: string): string[] {
  * is cheap, but it is still a public-surface change somebody has to look at.
  */
 const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
-  "implement",
   "live-smoke",
   "task/draft",
-  "task/implement-plan-template",
-  "task/implement-plan-v2-template",
   "task/plan",
-  "task/substep",
   "post-code-review",
   "post-code-review/boundaries",
   "post-code-review/contracts",
@@ -62,10 +58,6 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review/simplicity",
   "post-code-review/style",
   "post-code-review/synthesis",
-  "workflow-creator",
-  "workflow-creator/build",
-  "workflow-creator/design",
-  "workflow-creator/svg",
 ] as const;
 
 const PI_PACKAGES = [
@@ -75,13 +67,9 @@ const PI_PACKAGES = [
   "@earendil-works/pi-tui",
 ] as const;
 const PACKAGE_WORKFLOW_PATHS = {
-  implement: "extensions/workflows/examples/implement/implement.workflow.mjs",
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
   "task/draft": "extensions/workflows/examples/task/draft.workflow.mjs",
-  "task/implement-plan-template": "extensions/workflows/examples/task/implement-plan-template.workflow.mjs",
-  "task/implement-plan-v2-template": "extensions/workflows/examples/task/implement-plan-v2-template.workflow.mjs",
   "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
-  "task/substep": "extensions/workflows/examples/task/substep.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
   "post-code-review/boundaries": "extensions/workflows/examples/post-code-review/boundaries.workflow.mjs",
   "post-code-review/contracts": "extensions/workflows/examples/post-code-review/contracts.workflow.mjs",
@@ -90,10 +78,6 @@ const PACKAGE_WORKFLOW_PATHS = {
   "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
   "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
   "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
-  "workflow-creator": "extensions/workflows/examples/workflow-creator/workflow-creator.workflow.mjs",
-  "workflow-creator/build": "extensions/workflows/examples/workflow-creator/build.workflow.mjs",
-  "workflow-creator/design": "extensions/workflows/examples/workflow-creator/design.workflow.mjs",
-  "workflow-creator/svg": "extensions/workflows/examples/workflow-creator/svg.workflow.mjs",
 } as const;
 
 function installedStandardSource(run: string, declarations = ""): string {
@@ -363,7 +347,7 @@ describe("npm public package boundary", () => {
     ]);
     // Directory-owned means the dotfiles inside a listed directory ship with it:
     // `skills/.ignore` rides along under `skills/` and is counted here.
-    expect(dryRun.files).toHaveLength(250);
+    expect(dryRun.files).toHaveLength(235);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -456,7 +440,7 @@ describe("npm public package boundary", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `skills/${entry.name}/SKILL.md`)
       .sort();
-    expect(skillEntries).toHaveLength(3);
+    expect(skillEntries).toHaveLength(2);
 
     for (const skillPath of skillEntries) {
       expect(existsSync(path.join(root, skillPath)), `declared skill is missing: ${skillPath}`).toBe(true);
@@ -481,57 +465,21 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships the thin task workflow protocol without moving orchestration into workflow JavaScript", () => {
-    const skillPath = "skills/locus-pi-workflow-implement-task/SKILL.md";
+  it("ships the editable draft to concrete workflow.mjs protocol", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
-    const source = readFileSync(path.join(root, skillPath), "utf8");
+    const draftPath = "extensions/workflows/examples/task/draft.workflow.mjs";
+    const planPath = "extensions/workflows/examples/task/plan.workflow.mjs";
+    const draft = readFileSync(path.join(root, draftPath), "utf8");
+    const plan = readFileSync(path.join(root, planPath), "utf8");
 
-    expect(packedPaths.has(skillPath)).toBe(true);
-    for (const contract of [
-      'name: "task/draft"',
-      'name: "task/plan"',
-      'name: "task/implement-plan-template"',
-      'name: "task/substep"',
-      ".locus-pi/plans/<run-name>",
-      "<planning-workspace>",
-      "resumeFromRunId",
-      'runName: "<run-name>"',
-      'scriptPath: "<planning-workspace>/implement-plan.workflow.mjs"',
-      "history/S<n>.md",
-      "Status: blocked",
-    ]) {
-      expect(source, contract).toContain(contract);
-    }
-    expect(source).toContain("The main Pi agent owns every review and launch boundary");
-    expect(source).not.toContain("todo_write");
-    expect(source).not.toContain('"op": "append"');
-    expect(source).toContain('input: "<step id, such as S1>"');
-    expect(source).toContain("one literal implementation node per approved step");
-    expect(source).toContain("The renderer does not invoke `task/plan`");
-    expect(source).toContain("Read `plan.md` and every `step-<n>.md`");
-    expect(source).toContain("Do not invent a combined\n   `tasks.md` catalog");
-    expect(source).toMatch(/complete flat\s+`## S<n> — <title>` heading/u);
-    expect(source).toContain("A material catalog change needs\n   fresh review before rendering");
-    expect(source).toMatch(
-      /hand the approved plan and complete step catalog to the\s+`locus-pi-workflow-create` skill as a normal authoring request/u,
-    );
-    expect(source).toMatch(/writes Design, reviews it, and Builds matching\s+source in the same turn/u);
-    expect(source).toContain("Do not inject `Design only`; only the user may request");
-    expect(source).not.toContain("`Design only:`");
-    expect(source).not.toContain("`Build approved design: <exact path>`");
-    expect(source).toContain("For a graph that needs review between steps, concurrency, or a bounded revision");
-
-    // Planning must not roll into execution. Without these, one confident
-    // paraphrase turns "here is the plan" back into an unattended run.
-    expect(source).toContain("Planning, rendering, and execution are separate user turns");
-    expect(source).toContain("## Stop and hand the plan to the user");
-    expect(source).toContain("Do not render `implement-plan.workflow.mjs`, execute project changes, create");
-    expect(source).toContain("Approval must arrive in a later user turn");
-    expect(source).toContain("Only after the user approves the saved plan");
-    expect(source).toContain("Resuming is execution");
-    expect(source).toContain("implement-plan.workflow.mjs");
-    expect(source).not.toContain('name: "task/implement"');
-    expect(source).not.toContain("task-via-script");
+    expect(packedPaths.has(draftPath)).toBe(true);
+    expect(packedPaths.has(planPath)).toBe(true);
+    expect(draft).toContain("Workflow direction:");
+    expect(draft).toContain("Reflection/review:");
+    expect(plan).toContain('publishPrimaryArtifact("workflow.mjs"');
+    expect(plan).toContain('mode: "orchestration-only"');
+    expect(plan).not.toContain("implement-plan.workflow.mjs");
+    expect(packedPaths.has("skills/locus-pi-workflow-implement-task/SKILL.md")).toBe(false);
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

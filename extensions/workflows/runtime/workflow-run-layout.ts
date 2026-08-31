@@ -56,12 +56,7 @@ export const WORKFLOW_RUN_STORAGE_PATTERN = ".locus-pi/runs/<runId>/";
 export const WORKFLOW_PLANS_STORAGE_PREFIX = ".locus-pi/plans/";
 
 const WORKFLOW_RUN_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
-const TASK_WORKSPACE_TARGET_NAMES = new Set([
-  "task/draft",
-  "task/plan",
-  "task/implement-plan-template",
-  "task/substep",
-]);
+const TASK_WORKSPACE_TARGET_NAMES = new Set(["task/draft", "task/plan"]);
 
 /** One owner for the Package task workflows that create or reuse planning evidence. */
 export function isTaskWorkspaceName(workflowName: string): boolean {

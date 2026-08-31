@@ -77,6 +77,43 @@ describe("workflow_check_source", () => {
     expect(existsSync(marker)).toBe(false);
   });
 
+  it("machine-enforces the orchestration-only workflow-create subset", async () => {
+    const root = temporaryRoot();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      standardSource("const root = projectRoot(); return agent(`Inspect the project at ${root}`);").replace(
+        "run({ agent })",
+        "run({ agent, projectRoot })",
+      ),
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+
+    const compatibility = await runTool(harness, "workflow_check_source", {
+      path: ".pi/workflows/sample.workflow.mjs",
+    });
+    const strict = await runTool(harness, "workflow_check_source", {
+      path: ".pi/workflows/sample.workflow.mjs",
+      mode: "orchestration-only",
+    });
+
+    expect(compatibility.isError).not.toBe(true);
+    expect(strict.isError).toBe(true);
+    expect(strict.details?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "WF_AUTHORING_SUBSET",
+          severity: "error",
+          message:
+            "orchestration-only authoring does not call projectRoot(); put source or file work in an agent prompt",
+        }),
+      ]),
+    );
+    expect(String((strict.content[0] as { text: string }).text)).toContain(
+      "orchestration-only workflow source shape failed",
+    );
+  });
+
   it("keeps errorCount as the unique legacy-message count when structured occurrences repeat", async () => {
     const root = temporaryRoot();
     writeFileSync(

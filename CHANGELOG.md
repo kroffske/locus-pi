@@ -4,15 +4,16 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
-### Added
-
-- Added the opt-in Package workflow `task/implement-plan-v2-template`. It renders a separate `implement-plan-v2.workflow.mjs` that gives each blocked step one agent-owned recovery, one independent recovery review, and one retry while preserving the existing V1 renderer and generated file for direct comparison.
-- Added a side-by-side SVG of the V1 and V2 implementation graphs. Editable Excalidraw and PNG review evidence remain task-local rather than widening the installed package.
-
 ### Changed
 
 - Model roles now have one persistent authority: `~/.pi/agent/model-roles/config.json`. `/model-roles` reads and writes that global user file. Project `.pi/model-roles/config.json`, `settings.json#modelRoles`, and session evidence no longer override it.
-- `task/plan` agents now reject a mandatory verification result when no step can produce its success path under the declared goal and ownership. Diagnostic blocked markers remain honest failure evidence but no longer make a plan-controlled dead end ready.
+- The Package `task` namespace now has one explicit handoff: `task/draft` publishes an editable brief with the graph pattern, agents, handoffs, review bounds, concurrency, failure exits, and primary output; `task/plan` consumes the accepted text and directly publishes a checked `workflow.mjs`.
+- The workflow-create skill now authors orchestration-only JavaScript. New workflows may contain visible prompts, agent calls, DSL control flow, and text publication, while project inspection and file work belong to child agents instead of workflow-side file, path, or artifact-reading primitives. Its Build step uses a strict `workflow_check_source` mode; the default compatibility mode still validates existing reviewed workflows.
+
+### Removed
+
+- Removed the generic `implement`, plan-template renderers, `task/substep`, and `workflow-creator` Package workflows. The concrete result of the authoring path is now the generated `workflow.mjs`, not another universal execution stage.
+- Removed the obsolete `locus-pi-workflow-implement-task` skill; workflow skill sync now owns only create and run.
 
 ## [0.6.2] - 2026-08-31
 

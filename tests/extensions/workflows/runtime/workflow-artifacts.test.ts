@@ -322,8 +322,8 @@ describe("workflow run artifact store", () => {
     });
     const present = parseWorkflowPersistedBinding(
       {
-        target: { kind: "name", ref: "task/substep", source: "package" },
-        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/substep.workflow.mjs")),
+        target: { kind: "name", ref: "task/plan", source: "package" },
+        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/plan.workflow.mjs")),
       },
       root,
       runId,

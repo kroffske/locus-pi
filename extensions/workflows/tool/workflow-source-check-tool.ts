@@ -8,7 +8,11 @@ import { errorResult, getProjectRoot, textResult } from "../../_shared/host/pi-a
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { safeToolText } from "../../_shared/host/safe-output.js";
 import { validateParams } from "../../_shared/host/validation.js";
-import { standardWorkflowSourceShapeDiagnostics, type WorkflowSourceDiagnostic } from "./workflow-source-shape.js";
+import {
+  orchestrationOnlyWorkflowSourceShapeDiagnostics,
+  standardWorkflowSourceShapeDiagnostics,
+  type WorkflowSourceDiagnostic,
+} from "./workflow-source-shape.js";
 
 const WorkflowSourceCheckParams = Type.Object(
   {
@@ -17,6 +21,12 @@ const WorkflowSourceCheckParams = Type.Object(
       minLength: 1,
       maxLength: 4096,
     }),
+    mode: Type.Optional(
+      Type.Union([Type.Literal("compatibility"), Type.Literal("orchestration-only")], {
+        description:
+          "Use orchestration-only for newly authored workflows; compatibility preserves the broader validator for existing reviewed source.",
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -27,12 +37,20 @@ export function registerWorkflowSourceCheckTool(pi: ExtensionAPI): void {
     name: "workflow_check_source",
     label: "workflow source check",
     description:
-      "Validate one project workflow source up to 512 KiB against the machine-enforced standard authoring grammar without importing or executing it. The path must stay inside the current project.",
+      "Validate one project workflow source up to 512 KiB without importing or executing it. The default compatibility mode accepts the full standard grammar; orchestration-only mode restricts newly authored source to prompts, agent edges, DSL control flow, and in-memory text publication. The path must stay inside the current project.",
     parameters: WorkflowSourceCheckParams,
     approval: "read",
     formatApprovalDetails: (args) => {
       const value = args !== null && typeof args === "object" ? String((args as { path?: unknown }).path ?? "") : "";
-      return [`Workflow source: ${value}`, "Action: static validation only; the workflow is not imported or run"];
+      const mode =
+        args !== null && typeof args === "object"
+          ? String((args as { mode?: unknown }).mode ?? "compatibility")
+          : "compatibility";
+      return [
+        `Workflow source: ${value}`,
+        `Validation mode: ${mode}`,
+        "Action: static validation only; the workflow is not imported or run",
+      ];
     },
     execute(_toolCallId, params, _signal, _update, ctx) {
       const valid = validateParams(WorkflowSourceCheckParams, params);
@@ -41,14 +59,21 @@ export function registerWorkflowSourceCheckTool(pi: ExtensionAPI): void {
         const projectRoot = getProjectRoot(ctx);
         const sourcePath = confinedProjectFile(projectRoot, valid.value.path);
         const displayPath = path.relative(projectRoot, sourcePath).split(path.sep).join("/");
-        const diagnostics = standardWorkflowSourceShapeDiagnostics(readFileSync(sourcePath, "utf8"));
+        const mode = valid.value.mode ?? "compatibility";
+        const source = readFileSync(sourcePath, "utf8");
+        const diagnostics =
+          mode === "orchestration-only"
+            ? orchestrationOnlyWorkflowSourceShapeDiagnostics(source)
+            : standardWorkflowSourceShapeDiagnostics(source);
+        const shapeLabel =
+          mode === "orchestration-only" ? "orchestration-only workflow source" : "standard workflow source";
         const errorDiagnostics = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
         const errorCount = new Set(errorDiagnostics.map((diagnostic) => diagnostic.message)).size;
         const warningCount = diagnostics.length - errorDiagnostics.length;
         const details = { owner: "workflows", path: displayPath, errorCount, warningCount, diagnostics };
         if (errorDiagnostics.length > 0) {
           const output = safeToolText(
-            `${displayPath}: standard workflow source shape failed:
+            `${displayPath}: ${shapeLabel} shape failed:
 ${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, diagnostic)).join("\n")}`,
           );
           return errorResult(output.text, {
@@ -59,7 +84,7 @@ ${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, di
         }
         if (warningCount > 0) {
           const output = safeToolText(
-            `${displayPath}: standard workflow source shape passed with ${warningCount} warning(s):
+            `${displayPath}: ${shapeLabel} shape passed with ${warningCount} warning(s):
 ${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, diagnostic)).join("\n")}`,
           );
           return textResult(output.text, {
@@ -68,7 +93,7 @@ ${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, di
             outputRedacted: output.redacted,
           });
         }
-        return textResult(`${displayPath}: standard workflow source shape passed`, details);
+        return textResult(`${displayPath}: ${shapeLabel} shape passed`, details);
       } catch (error) {
         return errorResult(`workflow_check_source: ${errorMessage(error)}`, { owner: "workflows" });
       }

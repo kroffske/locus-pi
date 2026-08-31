@@ -1,7 +1,7 @@
 # Dynamic discovery and workers
 
 Use this card when the set of independent worker units is unknown until one
-discovery agent reads the live project.
+discovery agent inspects the live project itself.
 
 Graph: `discovery agent({ handoffs }) -> explicit inline workers -> composer`.
 Worker count is runtime-selected but bounded in the discovery declaration.
@@ -20,12 +20,10 @@ gate remain authoritative.
 Handoff: each `handoffs` array member is one complete non-blank unique text unit.
 Workers receive that string unchanged and return complete text to the composer.
 
-Location: use `projectRoot()` only as source context; require discovered paths
-to remain project-relative and preserve leading dots. Every child already gets
-the one absolute workflow workspace, defaulting to
-`.locus-pi/plans/<generated-run-name>/`. Give write workers the exact relative output name
-and require idempotent replacement. Do not let a weak model substitute the
-user's home directory, the project root, or the system temporary directory.
+Source boundary: put the inspection request in the discovery prompt. Workflow
+JavaScript does not obtain a project path, enumerate directories, or read a
+discovery file. If units contain paths, the discovery agent returns complete
+project-relative units and each worker interprets its own unit.
 
 Required primitives: `agent({ handoffs })`, `parallel()` or `pipeline()`, and an
 exact-text composer.
@@ -33,16 +31,15 @@ exact-text composer.
 Primitive:
 
 ```js
-const pwd = dsl.projectRoot();
 const MAX_DAGS_IN_SCOPE = 12;
-const units = await agent("Return one complete handoff per discovered unit.", {
+const units = await agent("Inspect the live project. Return one complete handoff per discovered unit.", {
   handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE, maxItemChars: 4000 },
 });
 
 const findings = await parallel(
   units.map(
     (unit, index) => () =>
-      agent(`Your pwd is ${pwd}. Process this exact project-relative unit:\n${unit}`, {
+      agent(`Process this exact project-relative unit:\n${unit}`, {
         label: `worker-${index + 1}`,
       }),
   ),
