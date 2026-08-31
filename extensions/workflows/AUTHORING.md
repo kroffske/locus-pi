@@ -48,16 +48,12 @@ Use the packaged `locus-pi-workflow-create` skill. A raw request is Author:
 Design first, review, then Build. The exact design template and standard source
 profile live in that skill and this extension documentation.
 
-An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
-supplied as Design input for an optional sequential project-local workflow. Each
-complete `## S<n>` block remains one exact task prompt. The preferred
-operator-facing Build renders those blocks as literal author-known prompts in
-generated source; a programmatic embedder may instead transport the same frozen
-list through caller `items`.
-Neither path parses Plan prose at runtime, adds a Package example, or skips the
-ordinary Design -> review -> Build sequence. Plan approval alone does not start
-workflow authoring. The selected card
-is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
+The Package `task/draft` workflow can turn a raw request into an editable
+`draft.md` that already names the graph pattern, agents, handoffs, review bounds,
+concurrency, failure exits, and primary output. Copy or edit that complete text,
+then pass it as semantic input to `task/plan`. That second workflow designs,
+reviews, builds, checks, and publishes one concrete `workflow.mjs`; it does not
+run the generated source.
 
 ## What the design must expose
 
@@ -88,6 +84,16 @@ Pattern cards are progressive-disclosure references under
 They describe algorithms and truthful small snippets, not full scripts to copy.
 
 ## Standard primitive profile
+
+The packaged `locus-pi-workflow-create` skill emits an orchestration-only subset
+of this profile. New generated source contains author-known prompts, direct
+`agent()` edges, visible DSL control flow, and in-memory text publication. It
+does not call `consumeTextArtifact`, `continuationArtifacts`, `outputDir`,
+`projectRoot`, `promptFile`, `publishPrimaryFile`, `workspace`, `now`, or
+`random`. Those methods remain documented below only because the standard
+checker must validate existing reviewed workflows. The skill calls
+`workflow_check_source` with `mode: "orchestration-only"`, which machine-checks
+the narrower Build contract.
 
 `agent()` is the only model-calling primitive. Narrative output is exact text.
 When JavaScript must route, use the runtime-owned exact choice:
@@ -229,9 +235,11 @@ The workflow orchestrates but does not interpret or format agent results:
 Every child receives the full tool surface through `tools: ["*"]`. Standard
 source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
-work by default.
+work by default. If repository evidence is needed, the child reads it because
+its prompt asks for that work. Workflow JavaScript does not obtain paths or load
+file contents on the child's behalf.
 
-The runtime prepends one exact absolute workflow workspace to every child
+The runtime still prepends one exact absolute workflow workspace to every child
 prompt. Fresh runs default to a unique
 `.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
 qualified child keeps both name components in its generated leaf. Source may call
@@ -241,6 +249,11 @@ rule. Package task drafting and planning use the same workspace contract;
 saved children and later manual stages share the selected named path. Use
 `projectRoot()` for source context. Do not add permission/tool fields,
 another default writable root, a path parser, or an information-gathering script.
+
+That path-oriented shape is compatibility guidance for existing hand-authored
+workflows. The packaged authoring skill does not generate it. New source puts
+source-inspection instructions in an `agent()` prompt and leaves filesystem work
+inside that child session.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
 not split, regex-match, or parse input into branch units. Lists come from one of
@@ -252,7 +265,7 @@ policy; a workflow
 checks only domain rules it truly needs. Model handoffs retain their separate
 declared bounds, corrective re-ask, blank rejection, and duplicate rejection.
 
-For durable item work, start from a caller-frozen approved list. The root then
+Compatibility-only durable item workflows may start from a caller-frozen approved list. The root then
 invokes one reviewed sibling child per key and passes that same full list on
 every call, allowing the host to reject duplicate or unsafe keys before the
 first child starts:
@@ -364,7 +377,10 @@ engine. Inside Pi, call the read-only `workflow_check_source` tool with the
 project-relative path of the exact file Build produced:
 
 ```json
-{ "path": ".pi/workflows/<name>/<name>.workflow.mjs" }
+{
+  "path": ".pi/workflows/<name>/<name>.workflow.mjs",
+  "mode": "orchestration-only"
+}
 ```
 
 Run the same check for every declared direct child file. Build succeeds only
@@ -373,7 +389,9 @@ source checks all agree.
 
 The tool is owned by the installed `workflows` extension and resolves the path
 inside the current project. It behaves the same for a source checkout and an
-installed package. Repository maintainers use `npm run check:workflow-source`
+installed package. Omitting `mode` keeps compatibility validation for existing
+reviewed workflows; the workflow-create skill never omits it. Repository
+maintainers use `npm run check:workflow-source`
 with no path to check every `standard` entry
 already present in the Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that

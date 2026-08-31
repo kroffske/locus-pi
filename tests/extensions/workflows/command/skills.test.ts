@@ -58,7 +58,7 @@ describe("workflow skill host command", () => {
       userHome: f.userHome,
     });
     expect(first.rows.filter((row) => !row.legacy).map((row) => row.changed)).toEqual(
-      Array.from({ length: 6 }, () => "created"),
+      Array.from({ length: 4 }, () => "created"),
     );
     for (const hostRoot of [path.join(f.userHome, ".agents", "skills"), path.join(f.userHome, ".claude", "skills")]) {
       for (const skill of WORKFLOW_SKILL_NAMES) {
