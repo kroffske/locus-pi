@@ -249,15 +249,11 @@ describe("stable workflow output paths", () => {
   it.each([
     ["task/draft", "task-draft"],
     ["task/plan", "task-plan"],
-    ["task/implement-plan-template", "task-implement-plan-template"],
-    ["task/substep", "task-substep"],
   ])("gives every fresh %s run a distinct timestamped task workspace", async (name, slug) => {
     const root = project();
     writeWorkflowTree(root, "task", {
       draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
-      "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
       plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
-      substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
     });
 
     const firstHarness = createHarness(root);
@@ -287,12 +283,10 @@ describe("stable workflow output paths", () => {
     writeWorkflow(root, "ordinary", `export default (dsl) => dsl.outputDir();\n`);
     writeWorkflowTree(root, "task", {
       draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
-      "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
       plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
-      substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
     });
 
-    for (const name of ["ordinary", "task/draft", "task/plan", "task/implement-plan-template", "task/substep"]) {
+    for (const name of ["ordinary", "task/draft", "task/plan"]) {
       const harness = createHarness(root);
       const result = await runWorkflowScript({
         pi: harness.pi,
@@ -358,13 +352,13 @@ describe("stable workflow output paths", () => {
     expect(relative.workspaceDirRelative).toBe("packages/docs/workspace");
   });
 
-  it.each(["task/plan", "task/substep"])(
+  it.each(["task/draft", "task/plan"])(
     "lets %s resume reuse an explicit source workspace without repeating outputDir",
     async (name) => {
       const root = project();
       writeWorkflowTree(root, "task", {
+        draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
         plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
-        substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
       });
       const selectedWorkspace = ".locus-pi/plans/20260819-120000-a1b2-airflow-dag-builder";
       const firstHarness = createHarness(root);
@@ -403,10 +397,10 @@ describe("stable workflow output paths", () => {
     },
   );
 
-  it("runs a generated implementation script in its selected task workspace", async () => {
+  it("runs a generated workflow script in its selected task workspace", async () => {
     const root = project();
-    const workspace = ".locus-pi/plans/20260819-120000-a1b2-task-implement-plan-template";
-    const scriptPath = path.join(root, workspace, "implement-plan.workflow.mjs");
+    const workspace = ".locus-pi/plans/20260819-120000-a1b2-task-plan";
+    const scriptPath = path.join(root, workspace, "workflow.mjs");
     mkdirSync(path.dirname(scriptPath), { recursive: true });
     writeFileSync(scriptPath, `export default (dsl) => dsl.outputDir();\n`, "utf8");
 

@@ -53,24 +53,6 @@ re-review the design before
 building; never hide the change in source. Ask the user only when resolving the
 mismatch would change the requested result, not for routine authoring choices.
 
-An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
-authoring input for an optional sequential project-local workflow. Read
-[`references/plan-to-sequential-workflow.md`](./references/plan-to-sequential-workflow.md).
-Preserve every complete task block: Build renders those blocks as literal
-author-known prompts in generated source, or uses caller `items` only when a
-programmatic embedder owns the frozen list. Plan approval alone does not start
-workflow authoring; once the user requests that workflow, the ordinary continuous
-design -> review -> build sequence applies unless they explicitly request design only.
-
-The Package child `task/implement-plan-template` owns the fixed sequential
-renderer. After the owner approves `task/plan`, it reads that same workspace and
-renders `implement-plan.workflow.mjs` — one literal implementation node per
-`step-<n>.md` file, then a summary node. It never plans or replans. That file is
-an unregistered draft that resolves only by explicit path, and the owner reviews
-it before running it. `task/substep` is the separate manual one-step worker. Use
-Design and Build for a graph the fixed template cannot express, such as a
-reviewer between steps, a bounded revision loop, or concurrency.
-
 ## Design contract
 
 The design is short Markdown a reader can approve without opening JavaScript:

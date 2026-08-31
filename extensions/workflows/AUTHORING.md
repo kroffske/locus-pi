@@ -48,16 +48,12 @@ Use the packaged `locus-pi-workflow-create` skill. A raw request is Author:
 Design first, review, then Build. The exact design template and standard source
 profile live in that skill and this extension documentation.
 
-An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
-supplied as Design input for an optional sequential project-local workflow. Each
-complete `## S<n>` block remains one exact task prompt. The preferred
-operator-facing Build renders those blocks as literal author-known prompts in
-generated source; a programmatic embedder may instead transport the same frozen
-list through caller `items`.
-Neither path parses Plan prose at runtime, adds a Package example, or skips the
-ordinary Design -> review -> Build sequence. Plan approval alone does not start
-workflow authoring. The selected card
-is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
+The Package `task/draft` workflow can turn a raw request into an editable
+`draft.md` that already names the graph pattern, agents, handoffs, review bounds,
+concurrency, failure exits, and primary output. Copy or edit that complete text,
+then pass it as semantic input to `task/plan`. That second workflow designs,
+reviews, builds, checks, and publishes one concrete `workflow.mjs`; it does not
+run the generated source.
 
 ## What the design must expose
 

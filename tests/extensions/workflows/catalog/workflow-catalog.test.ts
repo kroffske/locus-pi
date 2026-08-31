@@ -351,7 +351,6 @@ describe("workflow operator catalog", () => {
 
     // Folder names sort top-level workflows; each root precedes its children.
     expect(descriptions.map(({ name }) => name)).toEqual([
-      "implement",
       "live-smoke",
       "post-code-review",
       "post-code-review/boundaries",
@@ -362,14 +361,7 @@ describe("workflow operator catalog", () => {
       "post-code-review/style",
       "post-code-review/synthesis",
       "task/draft",
-      "task/implement-plan-template",
-      "task/implement-plan-v2-template",
       "task/plan",
-      "task/substep",
-      "workflow-creator",
-      "workflow-creator/build",
-      "workflow-creator/design",
-      "workflow-creator/svg",
     ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
@@ -387,7 +379,6 @@ describe("workflow operator catalog", () => {
 
       // Package rows are ordered as top-level folders with root before children.
       expect(packageNames).toEqual([
-        "implement",
         "live-smoke",
         "post-code-review",
         "post-code-review/boundaries",
@@ -398,14 +389,7 @@ describe("workflow operator catalog", () => {
         "post-code-review/style",
         "post-code-review/synthesis",
         "task/draft",
-        "task/implement-plan-template",
-        "task/implement-plan-v2-template",
         "task/plan",
-        "task/substep",
-        "workflow-creator",
-        "workflow-creator/build",
-        "workflow-creator/design",
-        "workflow-creator/svg",
       ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
@@ -450,36 +434,6 @@ describe("workflow operator catalog", () => {
         expect(renderOperatorBlockPlain(info, 80, { maxLines: 10 }).join("\n")).toContain(
           "Composition: child of post-code-review",
         );
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it("exposes Workflow Creator as one root with three directly runnable children", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-creator-"));
-    try {
-      const model = buildWorkflowCatalogModel(root, root);
-      const creatorNames = [
-        "workflow-creator",
-        "workflow-creator/build",
-        "workflow-creator/design",
-        "workflow-creator/svg",
-      ];
-      expect(model.current.find((row) => row.name === "workflow-creator")).toMatchObject({
-        role: "root",
-        children: creatorNames.slice(1),
-      });
-      const parentRpc = renderOperatorBlockPlain(buildWorkflowInfoBlock(root, root, "workflow-creator"), 80, {
-        maxLines: 10,
-      }).join("\n");
-      expect(parentRpc).toContain("Composition: root");
-      expect(parentRpc).toContain("3 child workflow");
-      for (const name of creatorNames.slice(1)) {
-        expect(model.current.find((row) => row.name === name)).toMatchObject({
-          role: "child",
-          rootName: "workflow-creator",
-        });
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -671,7 +625,7 @@ describe("workflow operator catalog", () => {
       expect(rpcCatalog).toContain(
         `${compactModel.totalRoots} top-level workflow(s) · ${compactModel.totalChildren} child workflow(s)`,
       );
-      expect(rpcCatalog).toMatch(/details may\s+be omitted by host line\s+budget/u);
+      expect(rpcCatalog).toMatch(/details\s+may\s+be\s+omitted\s+by\s+host\s+line\s+budget/u);
       expect(rpcCatalog).not.toContain("other workflow row(s)");
       expect(compactRows).toEqual(
         expect.arrayContaining([

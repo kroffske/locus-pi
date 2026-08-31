@@ -1,14 +1,13 @@
 # locus-pi workflow skills
 
-The npm package is the canonical source for three action-named workflow skills.
+The npm package is the canonical source for two action-named workflow skills.
 Pi loads them directly from `package.json#pi.skills`. External agents use managed
 symlinks; they do not receive copied skill text that can drift from the package.
 
-| Skill                              | Owns                                                                    | Native Pi/API route                                                     | External agent route                                                            |
-| ---------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `locus-pi-workflow-create`         | Design, review, Build, source validation; never run                     | Follow the packaged skill directly                                      | Follow the managed packaged skill directly                                      |
-| `locus-pi-workflow-run`            | One existing reviewed workflow run, receipts, evidence, resume          | Call the structured `workflow` tool; the skill is only routing guidance | Invoke literal `/workflows run ...` through `pi --mode json -p`                 |
-| `locus-pi-workflow-implement-task` | Task plan → owner review → render → owner approval → execution/recovery | Call each task workflow stage with the structured `workflow` tool       | Invoke each stage through `/workflows run ...`; use the run skill for transport |
+| Skill                      | Owns                                                           | Native Pi/API route                                                     | External agent route                                            |
+| -------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `locus-pi-workflow-create` | Design, review, Build, source validation; never run            | Follow the packaged skill directly                                      | Follow the managed packaged skill directly                      |
+| `locus-pi-workflow-run`    | One existing reviewed workflow run, receipts, evidence, resume | Call the structured `workflow` tool; the skill is only routing guidance | Invoke literal `/workflows run ...` through `pi --mode json -p` |
 
 ## Install for Codex and Claude Code
 
@@ -25,7 +24,7 @@ project instead of the user home. Codex entries live in `.agents/skills`;
 Claude Code entries live in `.claude/skills`.
 
 `sync` creates or refreshes only locus-pi-managed symlinks. It removes managed
-links under the three retired names. A real directory or foreign symlink is a
+links under the retired names, including `locus-pi-workflow-implement-task`. A real directory or foreign symlink is a
 conflict and is never overwritten. Ownership comes only from the adjacent
 `.locus-pi-workflow-skills.v1.json` provenance file, never from a suggestive
 symlink target. `remove` has the same ownership check. The command snapshots

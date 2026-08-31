@@ -92,36 +92,14 @@ describe("design-first readable workflow authoring", () => {
     expect(text).toMatch(/design[- ]only|pause after design/iu);
   });
 
-  const planAuthoringSurfaces = [
-    "extensions/workflows/examples/task/plan.workflow.mjs",
-    "extensions/workflows/examples/task/README.md",
-    "extensions/workflows/examples/task/resources/implement-plan-template.prompt.md",
-    "skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md",
-    "skills/locus-pi-workflow-implement-task/SKILL.md",
-  ];
-
-  it.each(planAuthoringSurfaces)("keeps the bespoke Plan handoff continuous on %s", (relativePath) => {
-    const text = source(relativePath);
-    expect(text).toMatch(
-      /normal authoring request|ordinary continuous (?:authoring|request)|continuous-authoring route/iu,
-    );
-    expect(text).toMatch(/writes Design[\s\S]{0,80}reviews\s+it[\s\S]{0,80}Builds/iu);
-    expect(text).toMatch(/(?:Do not[\s\S]{0,80}inject|no agent-injected)[\s\S]{0,40}`?Design\s+only/iu);
-    expect(text).not.toContain("Design workflow:");
-    expect(text).not.toContain("Build approved design: <exact design path>");
-  });
-
-  it("documents the task family boundary and continuous bespoke authoring route", () => {
+  it("documents the draft to concrete workflow source contract", () => {
     const text = source("extensions/workflows/examples/task/README.md");
     expect(text).toContain("`task` is a group-only Package namespace");
-    expect(text).toContain("`task/draft` to translate a raw request");
-    expect(text).toContain("`task/plan` to prepare an accepted task");
-    expect(text).toContain("`task/implement-plan-template` to render the approved plan");
-    expect(text).toContain("`task/implement-plan-v2-template` to render the opt-in");
-    expect(text).toMatch(/`task\/substep` only when one named step must run\s+by/u);
-    expect(text).toMatch(/The author writes Design,\s+reviews it, and Builds matching source in the same turn/u);
-    expect(text).toContain("only the user may separately request a pause");
-    expect(text).toContain("`task/substep` is intentionally different from the separate `implement`");
+    expect(text).toContain("`task/draft` turns a raw request into `draft.md`");
+    expect(text).toContain("Copy and edit this text when needed");
+    expect(text).toContain("`task/plan` receives the complete accepted draft as semantic input");
+    expect(text).toContain("one concrete `workflow.mjs`");
+    expect(text).toContain("Nothing executes the generated workflow automatically");
   });
 
   it("keeps CLI syntax target-first on every active manual speaker", () => {
@@ -654,30 +632,6 @@ ${authoring[1] ?? ""}
     }
   });
 
-  it("keeps Plan approval separate from continuous workflow authoring", () => {
-    const card = source("skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md");
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
-      const text = source(relativePath);
-      expect(text).toContain("plan.md");
-      expect(text).toContain("step-<n>.md");
-      expect(text).toMatch(/literal\s+author-known/u);
-      expect(text).toMatch(/caller\s+`items`|caller\s+items/u);
-      expect(text).toMatch(/Plan approval.*(?:does not start|starts neither)/isu);
-    }
-    expect(card).toMatch(/one\s+complete task block/u);
-    expect(card).toMatch(/visibly\s+separate child/u);
-    expect(card).toMatch(/no Locus items count or\s+character policy/u);
-    expect(card).not.toMatch(/\bunbounded\b/iu);
-    expect(card).toMatch(/Each implementer (?:gets|receives) exactly one\s+complete task block/u);
-    expect(card).toContain("matching `history/S<n>.md`");
-    expect(card).toMatch(/reviewer.*visibly separate child/isu);
-    expect(card).toContain("Do not add a Package example");
-  });
-
   it("links canonical agent, authority, event, and human-unit budget semantics", () => {
     const skill = source("skills/locus-pi-workflow-create/SKILL.md");
     const manual = source("extensions/workflows/REFERENCE.md");
@@ -690,7 +644,7 @@ ${authoring[1] ?? ""}
     expect(manual).toContain("full host-exposed tool surface");
     expect(manual).toContain("is not authorization");
     expect(manual).toContain("presentation metadata");
-    expect(manual).toContain("`phase()` is the\ncall that journals actual execution");
+    expect(manual).toMatch(/`phase\(\)` is the\s+call that journals actual execution/u);
     expect(manual).toContain("one readable script event");
     for (const text of [skill, manual]) {
       expect(text).toMatch(/1,000 (?:tool )?calls/u);
@@ -734,7 +688,6 @@ ${authoring[1] ?? ""}
       "dynamic-orchestrator-workers.md",
       "fixed-fan-out.md",
       "human-gate.md",
-      "plan-to-sequential-workflow.md",
       "sequential-text.md",
     ]);
     for (const name of cards) {
@@ -794,13 +747,9 @@ ${authoring[1] ?? ""}
     );
 
     expect(profiles).toEqual({
-      implement: "standard",
       "live-smoke": "standard",
       "task/draft": "standard",
-      "task/implement-plan-template": "standard",
-      "task/implement-plan-v2-template": "standard",
       "task/plan": "standard",
-      "task/substep": "standard",
       "post-code-review": "standard",
       "post-code-review/boundaries": "standard",
       "post-code-review/contracts": "standard",
@@ -809,20 +758,12 @@ ${authoring[1] ?? ""}
       "post-code-review/simplicity": "standard",
       "post-code-review/style": "standard",
       "post-code-review/synthesis": "standard",
-      "workflow-creator": "standard",
-      "workflow-creator/build": "standard",
-      "workflow-creator/design": "standard",
-      "workflow-creator/svg": "standard",
     });
-    expect(packagedWorkflowNames()).toHaveLength(19);
+    expect(packagedWorkflowNames()).toHaveLength(11);
     for (const name of [
-      "implement",
       "live-smoke",
       "task/draft",
-      "task/implement-plan-template",
-      "task/implement-plan-v2-template",
       "task/plan",
-      "task/substep",
       "post-code-review",
       "post-code-review/boundaries",
       "post-code-review/contracts",
@@ -831,10 +772,6 @@ ${authoring[1] ?? ""}
       "post-code-review/simplicity",
       "post-code-review/style",
       "post-code-review/synthesis",
-      "workflow-creator",
-      "workflow-creator/build",
-      "workflow-creator/design",
-      "workflow-creator/svg",
     ]) {
       expect(standardWorkflowSourceShapeErrors(readFileSync(packagedWorkflowPath(name), "utf8")), name).toEqual([]);
     }
@@ -1787,25 +1724,5 @@ ${authoring[1] ?? ""}
     expect(card.indexOf("if (round === MAX_REVIEWS) break;")).toBeLessThan(
       card.indexOf("document = await agent(`Return a complete revision"),
     );
-  });
-
-  it("ships Workflow Creator as three source-bound reviewed children without executing generated source", () => {
-    const root = source("extensions/workflows/examples/workflow-creator/workflow-creator.workflow.mjs");
-    const childNames = [...root.matchAll(/\bchild:\s*"([^"]+)"/gu)].map((match) => match[1]);
-    expect(childNames).toEqual(["design", "svg", "build"]);
-    expect(root).toContain('const CHILD_KEYS = ["design", "svg", "build"]');
-    expect(root).toContain('publishPrimaryFile("workflow-package.md")');
-
-    for (const child of ["design", "svg", "build"] as const) {
-      const childSource = source(`extensions/workflows/examples/workflow-creator/${child}.workflow.mjs`);
-      expect(childSource.match(/choice:\s*\["accept",\s*"revise"\]/gu)).toHaveLength(2);
-      expect(childSource).toContain("review limit reached without acceptance");
-      expect(childSource).not.toMatch(/\bdsl\.invokeWorkflow\(/u);
-    }
-
-    const build = source("extensions/workflows/examples/workflow-creator/build.workflow.mjs");
-    expect(build).toContain("Never execute any generated workflow");
-    expect(build).toContain("workflow_check_source");
-    expect(build).toContain('publishPrimaryFile("workflow-package.md")');
   });
 });
