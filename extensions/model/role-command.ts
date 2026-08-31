@@ -28,7 +28,7 @@ import { applyModelRole } from "./role-apply.js";
 export async function runModelUi(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
   const models = await availableModels(ctx);
   if (models.length === 0) {
-    const state = await loadModelRolesState(ctx);
+    const state = await loadModelRolesState();
     const summaries = roleSummaries(state);
     publishModelRoleStatus(ctx, summaries);
     setOperatorWidget(
@@ -54,7 +54,7 @@ async function availableModels(ctx: ExtensionContext): Promise<ModelLike[]> {
 }
 
 async function showModelRoleSelector(pi: ExtensionAPI, ctx: ExtensionContext, models: ModelLike[]): Promise<void> {
-  const state = await loadModelRolesState(ctx);
+  const state = await loadModelRolesState();
   const summaries = roleSummaries(state);
   if (ctx.mode !== "tui" || ctx.hasUI === false || !ctx.ui.custom) {
     publishModelRoleStatus(ctx, summaries);

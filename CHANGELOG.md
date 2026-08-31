@@ -11,6 +11,7 @@ User-visible changes to the public package.
 
 ### Changed
 
+- Model roles now have one persistent authority: `~/.pi/agent/model-roles/config.json`. `/model-roles` reads and writes that global user file. Project `.pi/model-roles/config.json`, `settings.json#modelRoles`, and session evidence no longer override it.
 - `task/plan` agents now reject a mandatory verification result when no step can produce its success path under the declared goal and ownership. Diagnostic blocked markers remain honest failure evidence but no longer make a plan-controlled dead end ready.
 
 ## [0.6.2] - 2026-08-31

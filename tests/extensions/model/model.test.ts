@@ -17,7 +17,7 @@ import { modelRoleStatusContribution } from "../../../extensions/model/operator-
 import { buildEffortOperatorBlock, type EffortCommandOutcome } from "../../../extensions/model/operator-ui.js";
 import {
   buildModelRolesState,
-  getModelRolesConfigPaths,
+  getModelRolesConfigPath,
   legacyNamespacedRoleToken,
   loadModelRolesState,
   resolveAgentModelPreference,
@@ -103,7 +103,7 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(harness.selectedModel).toMatchObject({ provider: "test", id: "fast" });
     expect(harness.thinkingLevel).toBe("high");
     expect(state.effective.get("default")?.assignment).toEqual({ model: "test/fast", thinking: "high" });
@@ -136,9 +136,11 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const paths = getModelRolesConfigPaths(harness.ctx.session!.projectRoot);
-    expect(JSON.parse(await readFile(paths.project, "utf8"))).toMatchObject({
-      roles: { default: "test/fast:high", agent: "test/strong:low" },
+    expect(JSON.parse(await readFile(getModelRolesConfigPath(), "utf8"))).toMatchObject({
+      roles: {
+        default: "test/fast:high",
+        agent: "test/strong:low",
+      },
     });
     expect(harness.entries).toHaveLength(2);
     expect(harness.customOptions).toHaveLength(1);
@@ -160,7 +162,7 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get(role)?.assignment).toEqual({ model: "test/strong", thinking: "low" });
     expect(harness.selectedModel).toBeUndefined();
     expect(harness.thinkingLevel).toBeUndefined();
@@ -180,16 +182,16 @@ describe("model extension", () => {
     expect(frame).toContain("DEFAULT route: test/fast:off");
   });
 
-  it("persists project config across a fresh harness without session entries", async () => {
+  it("persists the global user config across a fresh harness", async () => {
     harness.customInputQueue.push(DOWN, ENTER, ENTER, ...repeat(DOWN, 3), ENTER, "q");
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     const reloaded = createHarness(harness.ctx.session!.projectRoot, { models: REASONING_MODELS });
     model(reloaded.pi);
-    const state = await loadModelRolesState(reloaded.ctx);
+    const state = await loadModelRolesState();
 
     expect(state.effective.get("default")).toMatchObject({
-      source: "project",
+      source: "user",
       assignment: { model: "test/strong", thinking: "medium" },
     });
   });
@@ -254,7 +256,7 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toBeUndefined();
     expect(joinFrames(harness)).toContain("[ERROR] Pi host did not expose verified thinking-level control");
     expect(joinFrames(harness)).toContain("Effort capability: registry");
@@ -266,7 +268,7 @@ describe("model extension", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toBeUndefined();
     expect(joinFrames(harness)).toContain("[ERROR] Pi host refused the selected model");
     expect(joinFrames(harness)).toContain("Effort capability: registry");
@@ -281,14 +283,14 @@ describe("model extension", () => {
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     expect(harness.selectedModel).toMatchObject({ provider: "test", id: "fast" });
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toBeUndefined();
     expect(joinFrames(harness)).toContain("[ERROR] Pi clamped effort high to off; DEFAULT route was not saved.");
   });
 
   it("reports partial success when Current changes but DEFAULT persistence fails", async () => {
     const projectRoot = join(root, "read-only-project");
-    const roleDir = join(projectRoot, ".pi", "model-roles");
+    const roleDir = dirname(getModelRolesConfigPath());
     await mkdir(roleDir, { recursive: true });
     await chmod(roleDir, 0o555);
     try {
@@ -304,26 +306,27 @@ describe("model extension", () => {
       expect(receiptFrame).toContain("Current session model: test/fast · effort high");
       expect(receiptFrame).toContain("[WARN] Current session changed to test/fast · effort high, but DEFAULT route");
       expect(receiptFrame).toContain("was not saved: EACCES");
-      const state = await loadModelRolesState(harness.ctx);
+      const state = await loadModelRolesState();
       expect(state.effective.get("default")?.assignment).toBeUndefined();
     } finally {
       await chmod(roleDir, 0o755);
     }
   });
 
-  it("persists a non-default route through the real file path when ctx.settings is absent", async () => {
+  it("persists a non-default route through the global file when ctx.settings is absent", async () => {
     delete harness.ctx.settings;
     harness.customInputQueue.push(DOWN, ENTER, DOWN, ENTER, ...repeat(DOWN, 2), ENTER, "q");
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("agent")).toMatchObject({
-      source: "session",
+      source: "user",
       assignment: { model: "test/strong", thinking: "low" },
     });
-    const paths = getModelRolesConfigPaths(harness.ctx.session!.projectRoot);
-    expect(JSON.parse(await readFile(paths.project, "utf8"))).toMatchObject({ roles: { agent: "test/strong:low" } });
+    expect(JSON.parse(await readFile(getModelRolesConfigPath(), "utf8"))).toMatchObject({
+      roles: { agent: "test/strong:low" },
+    });
   });
 
   it("accepts application-cursor sequences and keeps focus on the selected model", async () => {
@@ -414,10 +417,15 @@ describe("model extension", () => {
     });
   });
 
-  it("loads user/project/settings/session precedence and project null inheritance", async () => {
-    const paths = getModelRolesConfigPaths(harness.ctx.session!.projectRoot);
-    await writeJson(paths.user, { version: 1, roles: { smol: "test/fast:low", task: "test/fast" } });
-    await writeJson(paths.project, { version: 1, roles: { smol: null, task: "test/strong:medium" } });
+  it("loads only the global user config and ignores old settings and session mirrors", async () => {
+    await writeJson(getModelRolesConfigPath(), {
+      version: 1,
+      roles: { smol: "test/fast:low", task: "test/fast" },
+    });
+    await writeJson(join(harness.ctx.session!.projectRoot, ".pi", "model-roles", "config.json"), {
+      version: 1,
+      roles: { smol: "test/strong:xhigh", task: "test/strong:medium" },
+    });
     await harness.ctx.settings!.set("modelRoles", { task: "test/fast:high" });
     harness.entries.unshift({
       type: "model-roles",
@@ -425,27 +433,30 @@ describe("model extension", () => {
       timestamp: new Date().toISOString(),
     });
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
 
     expect(state.effective.get("smol")).toMatchObject({
       source: "user",
-      inherited: true,
+      inherited: false,
       assignment: { model: "test/fast", thinking: "low" },
     });
     expect(state.effective.get("task")).toMatchObject({
-      source: "session",
-      assignment: { model: "test/strong", thinking: "xhigh" },
+      source: "user",
+      assignment: { model: "test/fast" },
     });
   });
 
   it("keeps PLAN/SUMMARY dormant while AGENT and explicit TASK routes stay active", async () => {
-    await harness.ctx.settings!.set("modelRoles", {
-      default: "test/fast",
-      smol: "test/fast:low",
-      plan: "test/strong:high",
-      task: "test/strong:medium",
+    await writeJson(getModelRolesConfigPath(), {
+      version: 1,
+      roles: {
+        default: "test/fast",
+        smol: "test/fast:low",
+        plan: "test/strong:high",
+        task: "test/strong:medium",
+      },
     });
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
 
     expect(resolvePromptPlanningModelRole(state)).toMatchObject({ role: "plan", fallback: false });
     expect(resolveSummaryModelRole(state)).toMatchObject({ role: "smol", fallback: true });
@@ -472,8 +483,7 @@ describe("model extension", () => {
    * bounded twice — to a KNOWN role, and to agent frontmatter.
    */
   describe("pre-tier pi/<role> frontmatter tiers", () => {
-    const rolesState = (roles: Record<string, string> = {}) =>
-      buildModelRolesState({ project: "/project/config.json", user: "/user/config.json" }, {}, { roles }, {}, {});
+    const rolesState = (roles: Record<string, string> = {}) => buildModelRolesState("/user/config.json", { roles });
 
     it("reads pi/<role> as the role and keeps the text as written for the evidence", () => {
       const resolution = resolveAgentModelPreference(rolesState(), ["pi/smol"]);
@@ -488,7 +498,7 @@ describe("model extension", () => {
     it("executes the role's assignment, suffix included", () => {
       expect(resolveAgentModelPreference(rolesState({ smol: "test/fast" }), ["pi/smol"])).toMatchObject({
         role: "smol",
-        source: "settings",
+        source: "user",
         assignment: { model: "test/fast" },
       });
       expect(resolveAgentModelPreference(rolesState({ smol: "test/fast" }), ["pi/smol:high"])).toMatchObject({
@@ -527,8 +537,10 @@ describe("model extension", () => {
   });
 
   it("syncs routing status on session_start without registering providers", async () => {
-    const paths = getModelRolesConfigPaths(harness.ctx.session!.projectRoot);
-    await writeJson(paths.project, { version: 1, roles: { default: "test/fast:high", agent: "test/strong:low" } });
+    await writeJson(getModelRolesConfigPath(), {
+      version: 1,
+      roles: { default: "test/fast:high", agent: "test/strong:low" },
+    });
 
     await emit(harness, "session_start");
 
@@ -539,13 +551,9 @@ describe("model extension", () => {
   });
 
   it("uses a routing-only bounded status contribution", () => {
-    const state = buildModelRolesState(
-      { project: "/project/config.json", user: "/user/config.json" },
-      {},
-      {},
-      {},
-      { roles: { default: "openai/gpt-5.6:high", agent: "deepseek/v4:low", task: "openrouter/long-model-name" } },
-    );
+    const state = buildModelRolesState("/user/config.json", {
+      roles: { default: "openai/gpt-5.6:high", agent: "deepseek/v4:low", task: "openrouter/long-model-name" },
+    });
     const contribution = modelRoleStatusContribution(roleSummaries(state));
 
     expect(contribution).toMatchObject({ id: "model.roles", lane: "route", narrow: "routes 3" });
@@ -770,13 +778,9 @@ describe("ModelRoleSelectorComponent", () => {
   });
 
   it("renders assigned routes in success on separate lines and keeps warning for unset ones", () => {
-    const state = buildModelRolesState(
-      { project: "/project/config.json", user: "/user/config.json" },
-      {},
-      {},
-      {},
-      { roles: { summary: "test/strong:low", smol: "test/strong:off" } },
-    );
+    const state = buildModelRolesState("/user/config.json", {
+      roles: { summary: "test/strong:low", smol: "test/strong:off" },
+    });
     const colors: Record<string, string> = {
       accent: "36",
       text: "37",
@@ -897,7 +901,7 @@ describe("ModelRoleSelectorComponent", () => {
       name: `Bulk ${index + 1}`,
       reasoning: false,
     }));
-    const state = buildModelRolesState({ project: "/project/config.json", user: "/user/config.json" }, {}, {}, {}, {});
+    const state = buildModelRolesState("/user/config.json", {});
     const component = new ModelRoleSelectorComponent(
       { requestRender: vi.fn() },
       {},
@@ -1024,13 +1028,9 @@ describe("model effort capability", () => {
 });
 
 function selectorFixture() {
-  const state = buildModelRolesState(
-    { project: "/project/config.json", user: "/user/config.json" },
-    {},
-    {},
-    {},
-    { roles: { default: "test/fast:high", agent: "test/strong:low" } },
-  );
+  const state = buildModelRolesState("/user/config.json", {
+    roles: { default: "test/fast:high", agent: "test/strong:low" },
+  });
   return {
     rows: buildModelRows(REASONING_MODELS, state, "test/fast"),
     summaries: roleSummaries(state),

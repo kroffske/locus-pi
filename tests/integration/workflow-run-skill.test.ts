@@ -40,7 +40,9 @@ describe("shipped workflow run skill", () => {
     expect(runSkill).toContain("Model choice belongs to the operator");
     expect(runSkill).toContain("pi --list-models");
     expect(runSkill).toContain("pi --list-models <provider>");
-    expect(runSkill).toContain("defaultProvider, defaultModel, defaultThinkingLevel, enabledModels, modelRoles");
+    expect(runSkill).toContain("defaultProvider, defaultModel, defaultThinkingLevel, enabledModels");
+    expect(runSkill).toContain("~/.pi/agent/model-roles/config.json");
+    expect(runSkill).not.toContain("settings.json#modelRoles` as an input");
     expect(runSkill).toContain("must be permitted by `enabledModels`");
     expect(runSkill).toMatch(/preserve the current Pi\s+session and its configured defaults/);
     expect(runSkill).not.toContain("openai-codex");

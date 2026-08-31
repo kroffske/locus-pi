@@ -27,7 +27,8 @@ planning run deliberately omits `--run-name`; reuse an accepted draft by adding
 its existing `--run-name <name>`. Use the run skill to construct the exact
 command and interpret typed receipts.
 Select the main Pi model with `--model` and `--thinking`; configure child model
-roles separately with `/model-roles` or `.pi/model-roles/config.json`.
+roles separately with `/model-roles` or
+`~/.pi/agent/model-roles/config.json`.
 Whenever the steps below say to call the `workflow` tool, that is the native Pi
 route. Outside Pi, express the same target and fields through the run skill's
 external command route; stop if a required field is native-only.

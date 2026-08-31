@@ -9,10 +9,9 @@ import type {
 } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, runTool, type Harness } from "../../test-harness.js";
+import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../model-roles-fixture.js";
 
-// T-188 W2: `/agent run` no longer uses a replacement session. It is a client of
-// the shared live-row model (agentLiveStore + AgentLivePanel) exactly like the
-// `task`/`spawn_agent` tool, so both triggers converge on one surface (Q8 parity).
+// T-188 W2: `/agent run` and `task`/`spawn_agent` share the live-row model.
 
 const tempRoots: string[] = [];
 
@@ -48,10 +47,12 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("@earendil-works/pi-coding-agent");
   for (const root of tempRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  restoreGlobalModelRolesHome();
 });
 
 function projectWithReviewer(): string {
   const root = mkdtempSync(path.join(tmpdir(), "locus-pi-agent-command-"));
+  writeGlobalModelRoles(root, {});
   mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
   writeFileSync(
     path.join(root, ".agents", "agents", "reviewer.md"),
@@ -392,13 +393,13 @@ describe("agent command run (unified live surface)", () => {
  * OD2 — an interactive child and a workflow stage naming the same agent resolve
  * their model through the same chain.
  *
- * Without this, `/agent run reviewer` and a workflow `agent("...", {agent:"reviewer"})`
- * run on different models and the operator has nothing in the evidence that explains
- * why. `runAgentLiveTask` is the one call site both interactive triggers share.
+ * `runAgentLiveTask` keeps `/agent run reviewer` and workflow children on the same
+ * model-resolution chain.
  */
 describe("interactive children resolve the same tier as workflow children", () => {
   function projectWithTieredReviewer(): string {
     const root = mkdtempSync(path.join(tmpdir(), "locus-pi-agent-tier-"));
+    writeGlobalModelRoles(root, {});
     mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
     writeFileSync(
       path.join(root, ".agents", "agents", "reviewer.md"),
@@ -458,14 +459,13 @@ describe("interactive children resolve the same tier as workflow children", () =
     const { agents, agentLiveStore } = await loadAgents();
     const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
-    await h.ctx.settings?.set("modelRoles", { smol: "test/fast" });
+    writeGlobalModelRoles(h.ctx.session!.projectRoot!, { smol: "test/fast" });
     agents(h.pi);
 
     await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
 
     expect(reviewerRow(agentLiveStore)).toMatchObject({ status: "done" });
     expect(captured).toHaveLength(1);
-    // By value; the session model is `test/strong`, so inheritance cannot pass this.
     expect(captured[0]?.model).toEqual({ provider: "test", id: "fast", name: "Test Fast" });
   });
 
@@ -475,7 +475,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     const { agents, agentLiveStore } = await loadAgents();
     const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
-    await h.ctx.settings?.set("modelRoles", {
+    writeGlobalModelRoles(h.ctx.session!.projectRoot!, {
       agent: "test/fast",
       task: "test/strong",
       default: "test/strong",
@@ -495,7 +495,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     const { agents } = await loadAgents();
     const h = createHarness(projectWithReviewer(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
-    await h.ctx.settings?.set("modelRoles", { task: "test/fast", default: "test/fast" });
+    writeGlobalModelRoles(h.ctx.session!.projectRoot!, { task: "test/fast", default: "test/fast" });
     agents(h.pi);
 
     const result = await runTool(h, "spawn_agent", { agent: "reviewer", task: "Review this" });
@@ -551,7 +551,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     const { agents } = await loadAgents();
     const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
-    await h.ctx.settings?.set("modelRoles", { task: "test/fast", agent: "test/fast", default: "test/fast" });
+    writeGlobalModelRoles(h.ctx.session!.projectRoot!, { task: "test/fast", agent: "test/fast", default: "test/fast" });
     agents(h.pi);
 
     await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
@@ -566,7 +566,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     const { agents, agentLiveStore } = await loadAgents();
     const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
-    await h.ctx.settings?.set("modelRoles", { smol: "no-such-provider/no-such-model" });
+    writeGlobalModelRoles(h.ctx.session!.projectRoot!, { smol: "no-such-provider/no-such-model" });
     agents(h.pi);
 
     await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
@@ -593,7 +593,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     const h = createHarness(projectWithTieredReviewer(), { sessionId: "parent-session" });
     h.ctx.model = { provider: "test", id: "strong", name: "Test Strong" };
     // Assigned, but missing the `provider/` half — a typo, not an unassigned role.
-    await h.ctx.settings?.set("modelRoles", { smol: "deepseek-v4-flash" });
+    writeGlobalModelRoles(h.ctx.session!.projectRoot!, { smol: "deepseek-v4-flash" });
     agents(h.pi);
 
     await h.commands.get("agent")!.handler("run reviewer Review this", h.ctx as ExtensionCommandContext);
@@ -602,7 +602,7 @@ describe("interactive children resolve the same tier as workflow children", () =
     expect(row?.status).toBe("error");
     const errors = row?.errors.join("\n") ?? "";
     expect(errors).toContain('"deepseek-v4-flash"');
-    expect(errors).not.toContain("is not assigned in any model-roles layer");
+    expect(errors).not.toContain("is not assigned in the global model-roles config");
     expect(captured).toHaveLength(0);
     // The malformed-role refusal takes the same exit as the concrete-selector one, so
     // it owes the same honesty: the row seeded with the session model — which is NOT

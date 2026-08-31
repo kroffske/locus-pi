@@ -32,7 +32,7 @@ export async function currentModelRoleState(
   ctx: ExtensionContext,
   fallbackCurrentSelector: string | undefined,
 ): Promise<CurrentModelRoleState> {
-  const state = await loadModelRolesState(ctx);
+  const state = await loadModelRolesState();
   return {
     currentSelector: ctx.model ? modelSelector(ctx.model) : fallbackCurrentSelector,
     currentThinking: pi?.getThinkingLevel?.(),

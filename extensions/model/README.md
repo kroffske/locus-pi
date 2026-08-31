@@ -17,11 +17,15 @@ It also treats global `enabledModels` as a hard execution allowlist. Pi may show
 
 ## Persistence
 
-Project configuration: `.pi/model-roles/config.json`.
+Global user configuration: `~/.pi/agent/model-roles/config.json`.
 
-User fallback: `~/.pi/agent/model-roles/config.json` or `$PI_MODEL_ROLES_HOME/model-roles/config.json`.
+Tests and isolated installations may replace the user root with
+`$PI_MODEL_ROLES_HOME`; the file remains `$PI_MODEL_ROLES_HOME/model-roles/config.json`.
 
-Effective precedence is session, settings compatibility state, project, then user. Missing or unavailable role routes degrade or fail according to the manifest contract and are recorded in run evidence.
+This file is the only persistent model-role authority. Project
+`.pi/model-roles/config.json`, Pi `settings.json#modelRoles`, and session evidence
+are not configuration inputs. Missing or unavailable role routes degrade or fail
+according to the manifest contract and are recorded in run evidence.
 
 ## Implementation
 

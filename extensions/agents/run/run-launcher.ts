@@ -209,7 +209,7 @@ async function resolveAgentExecutorModel(
     const declared = agent.model?.[0];
     if (declared === undefined) return {};
     return {
-      fallback: unassignedAgentTierNote(agent.name, declared, resolution, await loadModelRolesState(ctx)),
+      fallback: unassignedAgentTierNote(agent.name, declared, resolution, await loadModelRolesState()),
     };
   }
   const resolved = await resolveWorkflowModel(formatAssignment(resolution.assignment), ctx);
@@ -276,7 +276,7 @@ export async function executeAgentRunCommand(
     return;
   }
   const { agent, resolvedAgent } = resolution;
-  const modelRoles = await loadModelRolesState(ctx);
+  const modelRoles = await loadModelRolesState();
   const modelRoleResolution = resolveAgentModelPreference(modelRoles, agent.model ?? []);
   const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution.assignment });
   const hasUI = ctx.hasUI === true;

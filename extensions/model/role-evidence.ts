@@ -27,6 +27,7 @@ export interface ModelRoleRuntimeEvent {
   thinkingApplied: boolean;
   rolePersisted: boolean;
   rolePersistenceError?: string;
+  lockReleaseError?: string;
   customEntryAppended: boolean;
   configPath: string;
 }
@@ -99,6 +100,7 @@ export function recordModelRoleRuntimeEvent(ctx: ExtensionContext, event: ModelR
             diagnostics: report.diagnostics,
           },
           ...(event.rolePersistenceError === undefined ? {} : { rolePersistenceError: event.rolePersistenceError }),
+          ...(event.lockReleaseError === undefined ? {} : { lockReleaseError: event.lockReleaseError }),
         },
       },
     });

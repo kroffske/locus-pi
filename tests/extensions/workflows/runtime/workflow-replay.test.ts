@@ -37,13 +37,11 @@ import workflowsExt from "../../../../extensions/workflows/index.js";
 import type { WorkflowTextComponent } from "../../../../extensions/workflows/operator/progress-widget.js";
 import { createWorkflowTranscript } from "../../../../extensions/workflows/transcript/workflow-transcript.js";
 import { createHarness } from "../../../test-harness.js";
+import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../../model-roles-fixture.js";
 
 /**
- * T-109 — `--resume` replays recorded agent calls.
- *
- * Every case here answers the same question from a different side: can a resumed
- * run report success for work it did not do? The recorded answer must come from a
- * real earlier execution of the identical request, or the call must run again.
+ * T-109 — `--resume` may report success only from an identical recorded call;
+ * otherwise the call runs again.
  */
 
 const roots: string[] = [];
@@ -59,6 +57,7 @@ const REPLAY_REFUSAL_REASONS: Record<WorkflowReplayRefusalReason, true> = {
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  restoreGlobalModelRolesHome();
 });
 
 function temporaryProject(): string {
@@ -125,8 +124,9 @@ async function runWorkflow(
     answer?: (prompt: string) => string;
   } = {},
 ): Promise<RunOutcome> {
+  process.env.PI_MODEL_ROLES_HOME = path.join(root, ".pi-user");
   const harness = createHarness(root, { sessionId: `replay-${name}` });
-  if (options.roles !== undefined) await harness.ctx.settings?.set("modelRoles", options.roles);
+  if (options.roles !== undefined) writeGlobalModelRoles(root, options.roles);
   const executedPrompts: string[] = [];
   const createExecutor = (): AgentExecutor => ({
     async run(request: AgentRunRequest) {
