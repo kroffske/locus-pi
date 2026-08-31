@@ -51,6 +51,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "live-smoke",
   "task/draft",
   "task/implement-plan-template",
+  "task/implement-plan-v2-template",
   "task/plan",
   "task/substep",
   "post-code-review",
@@ -78,6 +79,7 @@ const PACKAGE_WORKFLOW_PATHS = {
   "live-smoke": "extensions/workflows/examples/live-smoke/live-smoke.workflow.mjs",
   "task/draft": "extensions/workflows/examples/task/draft.workflow.mjs",
   "task/implement-plan-template": "extensions/workflows/examples/task/implement-plan-template.workflow.mjs",
+  "task/implement-plan-v2-template": "extensions/workflows/examples/task/implement-plan-v2-template.workflow.mjs",
   "task/plan": "extensions/workflows/examples/task/plan.workflow.mjs",
   "task/substep": "extensions/workflows/examples/task/substep.workflow.mjs",
   "post-code-review": "extensions/workflows/examples/post-code-review/post-code-review.workflow.mjs",
@@ -361,7 +363,7 @@ describe("npm public package boundary", () => {
     ]);
     // Directory-owned means the dotfiles inside a listed directory ship with it:
     // `skills/.ignore` rides along under `skills/` and is counted here.
-    expect(dryRun.files).toHaveLength(247);
+    expect(dryRun.files).toHaveLength(250);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

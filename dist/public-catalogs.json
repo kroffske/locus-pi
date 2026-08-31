@@ -104,6 +104,7 @@
     { "name": "post-code-review/synthesis", "namespace": "post-code-review" },
     { "name": "task/draft", "namespace": "task" },
     { "name": "task/implement-plan-template", "namespace": "task" },
+    { "name": "task/implement-plan-v2-template", "namespace": "task" },
     { "name": "task/plan", "namespace": "task" },
     { "name": "task/substep", "namespace": "task" },
     { "name": "workflow-creator", "namespace": "workflow-creator" },

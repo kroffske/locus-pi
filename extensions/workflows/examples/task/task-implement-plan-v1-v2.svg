@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1740" role="img" aria-labelledby="title desc">
+  <title id="title">Task implementation workflow V1 and V2 comparison</title>
+  <desc id="desc">V1 repairs one owned artifact and retries the original literal step. V2 adds one agent-owned recovery, one independent recovery review, and one retry of the current step before terminal blocked.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .panel { fill: #ffffff; stroke: #64748b; stroke-width: 2; }
+      .agent { fill: #eff6ff; stroke: #2563eb; stroke-width: 2; }
+      .workflow { fill: #faf5ff; stroke: #7c3aed; stroke-width: 2; }
+      .artifact { fill: #ecfdf5; stroke: #059669; stroke-width: 2; }
+      .blocked { fill: #fef2f2; stroke: #dc2626; stroke-width: 2; }
+      .title { font: 700 34px ui-sans-serif, system-ui, sans-serif; fill: #0f172a; }
+      .subtitle { font: 18px ui-sans-serif, system-ui, sans-serif; fill: #475569; }
+      .panel-title { font: 700 25px ui-sans-serif, system-ui, sans-serif; fill: #0f172a; }
+      .node-title { font: 700 17px ui-sans-serif, system-ui, sans-serif; fill: #0f172a; }
+      .node-body { font: 14px ui-sans-serif, system-ui, sans-serif; fill: #334155; }
+      .edge { fill: none; stroke: #334155; stroke-width: 2.2; marker-end: url(#arrow); }
+      .edge-label { font: 700 13px ui-sans-serif, system-ui, sans-serif; fill: #334155; paint-order: stroke; stroke: #ffffff; stroke-width: 5px; stroke-linejoin: round; }
+      .legend { font: 14px ui-sans-serif, system-ui, sans-serif; fill: #334155; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1600" height="1740"/>
+  <text class="title" x="800" y="54" text-anchor="middle">Task implementation workflows: V1 and V2</text>
+  <text class="subtitle" x="800" y="86" text-anchor="middle">Same approved steps. V2 adds bounded agent recovery and review before terminal blocked.</text>
+
+  <rect class="agent" x="330" y="105" width="28" height="20" rx="5"/><text class="legend" x="370" y="121">Agent session</text>
+  <rect class="workflow" x="610" y="105" width="28" height="20" rx="5"/><text class="legend" x="650" y="121">Workflow route over exact choice</text>
+  <rect class="artifact" x="1015" y="105" width="28" height="20" rx="5"/><text class="legend" x="1055" y="121">Persisted artifact</text>
+
+  <rect class="panel" x="40" y="150" width="730" height="1545" rx="24"/>
+  <rect class="panel" x="830" y="150" width="730" height="1545" rx="24"/>
+  <text class="panel-title" x="70" y="193">V1 — current renderer</text>
+  <text class="subtitle" x="70" y="222">One artifact repair, then original literal-step retry.</text>
+  <text class="panel-title" x="860" y="193">V2 — agent recovery</text>
+  <text class="subtitle" x="860" y="222">One recovery, one independent review, then current-step retry.</text>
+
+  <!-- V1 -->
+  <rect class="artifact" x="120" y="260" width="570" height="82" rx="15"/>
+  <text class="node-title" x="145" y="290">Artifact: approved plan + literal step</text>
+  <text class="node-body" x="145" y="316">Frozen normal-path contract.</text>
+
+  <path class="edge" d="M405 342 V386"/><text class="edge-label" x="420" y="370">literal step</text>
+  <rect class="agent" x="120" y="386" width="570" height="88" rx="15"/>
+  <text class="node-title" x="145" y="417">Agent: implement exact step</text>
+  <text class="node-body" x="145" y="444">Executes one approved block and writes history/S&lt;n&gt;.md.</text>
+
+  <path class="edge" d="M405 474 V514"/><text class="edge-label" x="420" y="501">completed | blocked</text>
+  <rect class="workflow" x="120" y="514" width="570" height="82" rx="15"/>
+  <text class="node-title" x="145" y="545">Workflow: route step-agent choice</text>
+  <text class="node-body" x="145" y="571">completed → summary · blocked → repair agent</text>
+
+  <path class="edge" d="M405 596 V640"/><text class="edge-label" x="420" y="624">blocked</text>
+  <rect class="agent" x="120" y="640" width="570" height="98" rx="15"/>
+  <text class="node-title" x="145" y="671">Agent: repair named artifact defect</text>
+  <text class="node-body" x="145" y="698">May edit one artifact inside existing ownership.</text>
+  <text class="node-body" x="145" y="720">Plan contradictions remain unrepairable.</text>
+
+  <path class="edge" d="M405 738 V782"/><text class="edge-label" x="420" y="766">repaired | unrepairable</text>
+  <rect class="workflow" x="120" y="782" width="570" height="82" rx="15"/>
+  <text class="node-title" x="145" y="813">Workflow: route repair-agent choice</text>
+  <text class="node-body" x="145" y="839">repaired → retry · unrepairable → terminal blocked</text>
+
+  <path class="edge" d="M405 864 V908"/><text class="edge-label" x="420" y="892">repaired</text>
+  <rect class="agent" x="120" y="908" width="570" height="88" rx="15"/>
+  <text class="node-title" x="145" y="939">Agent: retry original literal step</text>
+  <text class="node-body" x="145" y="966">Runs the unchanged original prompt once.</text>
+
+  <path class="edge" d="M405 996 V1040"/><text class="edge-label" x="420" y="1024">completed | blocked</text>
+  <rect class="workflow" x="120" y="1040" width="570" height="82" rx="15"/>
+  <text class="node-title" x="145" y="1071">Workflow: route retry-agent choice</text>
+  <text class="node-body" x="145" y="1097">completed → next step/summary · blocked → terminal blocked</text>
+
+  <path class="edge" d="M405 1122 V1170"/><text class="edge-label" x="420" y="1152">completed</text>
+  <rect class="agent" x="120" y="1170" width="570" height="82" rx="15"/>
+  <text class="node-title" x="145" y="1201">Agent: write result.md</text>
+  <text class="node-body" x="145" y="1227">Runs only after every step completes.</text>
+
+  <path class="edge" d="M405 1252 V1296"/><text class="edge-label" x="420" y="1280">publishes</text>
+  <rect class="artifact" x="120" y="1296" width="570" height="82" rx="15"/>
+  <text class="node-title" x="145" y="1327">Artifact: result.md</text>
+  <text class="node-body" x="145" y="1353">Complete-plan summary.</text>
+
+  <rect class="blocked" x="120" y="1450" width="570" height="96" rx="15"/>
+  <text class="node-title" x="145" y="1482">Artifact: terminal blocked result</text>
+  <text class="node-body" x="145" y="1508">Reached on unrepairable recovery or blocked retry.</text>
+  <text class="node-body" x="145" y="1530">Later steps never start.</text>
+  <path class="edge" d="M690 823 H735 V1498 H690"/><text class="edge-label" x="606" y="1430">unrepairable</text>
+  <path class="edge" d="M690 1081 H720 V1498 H690"/><text class="edge-label" x="662" y="1410">blocked</text>
+  <path class="edge" d="M120 555 H82 V1211 H120"/><text class="edge-label" x="54" y="1185">completed</text>
+
+  <!-- V2 -->
+  <rect class="artifact" x="910" y="260" width="570" height="82" rx="15"/>
+  <text class="node-title" x="935" y="290">Artifact: approved plan + literal step</text>
+  <text class="node-body" x="935" y="316">Frozen normal-path contract.</text>
+
+  <path class="edge" d="M1195 342 V378"/><text class="edge-label" x="1210" y="368">literal step</text>
+  <rect class="agent" x="910" y="378" width="570" height="82" rx="15"/>
+  <text class="node-title" x="935" y="409">Agent: implement exact step</text>
+  <text class="node-body" x="935" y="435">Executes one approved block and writes history/S&lt;n&gt;.md.</text>
+
+  <path class="edge" d="M1195 460 V496"/><text class="edge-label" x="1210" y="486">completed | blocked</text>
+  <rect class="workflow" x="910" y="496" width="570" height="76" rx="15"/>
+  <text class="node-title" x="935" y="526">Workflow: route step-agent choice</text>
+  <text class="node-body" x="935" y="551">completed → summary · blocked → recovery agent</text>
+
+  <path class="edge" d="M1195 572 V608"/><text class="edge-label" x="1210" y="598">blocked</text>
+  <rect class="agent" x="910" y="608" width="570" height="94" rx="15"/>
+  <text class="node-title" x="935" y="638">Agent: recover blocker</text>
+  <text class="node-body" x="935" y="664">Repairs an owned artifact or revises only current verification.</text>
+  <text class="node-body" x="935" y="686">Writes recovery/S&lt;n&gt;.md with evidence.</text>
+
+  <path class="edge" d="M1195 702 V738"/><text class="edge-label" x="1210" y="728">recovered | blocked</text>
+  <rect class="workflow" x="910" y="738" width="570" height="76" rx="15"/>
+  <text class="node-title" x="935" y="768">Workflow: route recovery-agent choice</text>
+  <text class="node-body" x="935" y="793">recovered → review · blocked → terminal blocked</text>
+
+  <path class="edge" d="M1195 814 V850"/><text class="edge-label" x="1210" y="840">recovered</text>
+  <rect class="artifact" x="910" y="850" width="570" height="76" rx="15"/>
+  <text class="node-title" x="935" y="880">Artifact: recovery/S&lt;n&gt;.md</text>
+  <text class="node-body" x="935" y="905">Diagnosis, changes, checks, and preserved boundaries.</text>
+
+  <path class="edge" d="M1195 926 V962"/><text class="edge-label" x="1210" y="952">review evidence</text>
+  <rect class="agent" x="910" y="962" width="570" height="88" rx="15"/>
+  <text class="node-title" x="935" y="992">Agent: review recovery</text>
+  <text class="node-body" x="935" y="1018">Rejects scope drift, weaker requirements, or repeated failure.</text>
+
+  <path class="edge" d="M1195 1050 V1086"/><text class="edge-label" x="1210" y="1076">retry | blocked</text>
+  <rect class="workflow" x="910" y="1086" width="570" height="76" rx="15"/>
+  <text class="node-title" x="935" y="1116">Workflow: route reviewer choice</text>
+  <text class="node-body" x="935" y="1141">retry → one fresh attempt · blocked → terminal blocked</text>
+
+  <path class="edge" d="M1195 1162 V1198"/><text class="edge-label" x="1210" y="1188">retry</text>
+  <rect class="agent" x="910" y="1198" width="570" height="82" rx="15"/>
+  <text class="node-title" x="935" y="1228">Agent: retry current step file</text>
+  <text class="node-body" x="935" y="1254">Rereads only the recovered step and runs once.</text>
+
+  <path class="edge" d="M1195 1280 V1316"/><text class="edge-label" x="1210" y="1306">completed | blocked</text>
+  <rect class="workflow" x="910" y="1316" width="570" height="76" rx="15"/>
+  <text class="node-title" x="935" y="1346">Workflow: route retry-agent choice</text>
+  <text class="node-body" x="935" y="1371">completed → next step/summary · blocked → terminal blocked</text>
+
+  <path class="edge" d="M1195 1392 V1428"/><text class="edge-label" x="1210" y="1418">completed</text>
+  <rect class="agent" x="910" y="1428" width="570" height="76" rx="15"/>
+  <text class="node-title" x="935" y="1458">Agent: write result.md</text>
+  <text class="node-body" x="935" y="1483">Runs only after every step completes.</text>
+
+  <path class="edge" d="M1195 1504 V1540"/><text class="edge-label" x="1210" y="1530">publishes</text>
+  <rect class="artifact" x="910" y="1540" width="270" height="86" rx="15"/>
+  <text class="node-title" x="935" y="1571">Artifact: result.md</text>
+  <text class="node-body" x="935" y="1597">Complete-plan summary.</text>
+  <rect class="blocked" x="1210" y="1540" width="270" height="86" rx="15"/>
+  <text class="node-title" x="1235" y="1571">Artifact: terminal blocked</text>
+  <text class="node-body" x="1235" y="1597">Bounded recovery exhausted.</text>
+
+  <path class="edge" d="M1480 776 H1520 V1583 H1480"/><text class="edge-label" x="1462" y="1508">blocked</text>
+  <path class="edge" d="M1480 1124 H1505 V1583 H1480"/><text class="edge-label" x="1448" y="1490">blocked</text>
+  <path class="edge" d="M1480 1354 H1490 V1583 H1480"/><text class="edge-label" x="1436" y="1472">blocked</text>
+  <path class="edge" d="M910 534 H865 V1466 H910"/><text class="edge-label" x="838" y="1442">completed</text>
+
+  <text class="subtitle" x="800" y="1690" text-anchor="middle">Both versions use existing agent({ choice }) routing. Neither script parses blocker prose or changes workflow runtime.</text>
+</svg>

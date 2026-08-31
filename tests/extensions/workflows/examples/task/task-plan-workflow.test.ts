@@ -98,7 +98,13 @@ describe("Package workflow: task/plan", () => {
       expect.objectContaining({
         name: "task",
         source: "package",
-        children: ["task/draft", "task/implement-plan-template", "task/plan", "task/substep"],
+        children: [
+          "task/draft",
+          "task/implement-plan-template",
+          "task/implement-plan-v2-template",
+          "task/plan",
+          "task/substep",
+        ],
       }),
     );
     expect(() => resolveWorkflowTarget({ name: "task" }, root, root)).toThrow(
@@ -227,14 +233,22 @@ describe("Package workflow: task/plan", () => {
     expect(prompts.compose).toMatch(/files on disk stay the contract every later run reads/u);
     expect(prompts.compose).toMatch(/plan approval starts neither\s+implementation nor workflow authoring/u);
     expect(prompts.compose).toMatch(/renders no script/u);
+    expect(prompts.compose).toContain("Every mandatory success marker must have one reachable producer");
+    expect(prompts.compose).toContain("`Done when:` contains success conditions");
+    expect(prompts["step-usability"]).toContain("Trace every mandatory success marker");
+    expect(prompts["step-usability"]).toContain("plan-controlled `*_BLOCKED`");
 
     expect(prompts.correct).toContain("ANSWER:plan-correctness");
     expect(prompts.correct).toContain("ANSWER:integration-review");
     expect(prompts.correct).toContain("ANSWER:step-usability");
     expect(prompts.correct).toContain("single bounded correction");
+    expect(prompts.correct).toContain("success path no step is allowed to produce");
     expect(prompts.verify).toContain("ANSWER:correct");
     expect(prompts.verify).toContain("'Conclusion: ready' or 'Conclusion: blocked'");
+    expect(prompts.verify).toContain("mandatory success marker has no");
+    expect(prompts.verify).toContain("failed or blocked alternative inside `Done when:`");
     expect(prompts.route).toContain("ANSWER:verify");
+    expect(prompts.route).toContain("mandatory success path reported unreachable");
 
     expect(record.published).toEqual(["plan.md"]);
     expect(result).toContain("Planning is complete and nothing has been implemented");
