@@ -1146,12 +1146,17 @@ Inside Pi, Build checks an authored file by calling `workflow_check_source`
 with:
 
 ```json
-{ "path": ".pi/workflows/<name>/<name>.workflow.mjs" }
+{
+  "path": ".pi/workflows/<name>/<name>.workflow.mjs",
+  "mode": "orchestration-only"
+}
 ```
 
 Run the same check for every declared direct child. The tool comes from the
 installed workflows extension and resolves the workflow path inside the
-current project. Build is not successful until the checker passes, the module imports, and
+current project. The omitted or explicit `compatibility` mode keeps the broader
+standard grammar for existing reviewed scripts; workflow-create Build uses the
+strict mode above. Build is not successful until the checker passes, the module imports, and
 the source still matches its reviewed design. Diagnostic text uses
 `path:line:column [CODE] message`; structured tool details include the same
 stable code, `error`/`warning` severity, one-based source span, and optional

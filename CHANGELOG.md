@@ -11,6 +11,7 @@ User-visible changes to the public package.
 
 ### Changed
 
+- The workflow-create skill now authors orchestration-only JavaScript. New workflows may contain visible prompts, agent calls, DSL control flow, and text publication, while project inspection and file work belong to child agents instead of workflow-side file, path, or artifact-reading primitives. Its Build step uses a strict `workflow_check_source` mode; the default compatibility mode still validates existing reviewed workflows.
 - `task/plan` agents now reject a mandatory verification result when no step can produce its success path under the declared goal and ownership. Diagnostic blocked markers remain honest failure evidence but no longer make a plan-controlled dead end ready.
 
 ## [0.6.2] - 2026-08-31

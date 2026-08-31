@@ -197,15 +197,12 @@ describe("design-first readable workflow authoring", () => {
   });
 
   it("teaches one project-local workflow workspace separate from two-zone run evidence", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "docs/workflows.md",
-    ]) {
+    for (const relativePath of ["extensions/workflows/AUTHORING.md", "docs/workflows.md"]) {
       const text = source(relativePath);
       expect(text).toContain(".locus-pi/plans/<generated-run-name>");
       expect(text).not.toContain("outputs/<workflow-name>");
     }
+    expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain(".locus-pi/plans/<generated-run-name>");
     const storage = source("docs/workflows.md");
     expect(storage).toContain("runs/<runId>/");
     expect(storage).toContain("outputs/    human-readable host projection");
@@ -217,7 +214,7 @@ describe("design-first readable workflow authoring", () => {
     const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
     expect(authoring).toHaveLength(5);
-    expect(skill).toHaveLength(2);
+    expect(skill).toHaveLength(1);
 
     const fragments = [
       {
@@ -239,12 +236,6 @@ ${authoring[1] ?? ""}
         source: snippet,
       })),
       { label: "SKILL standard harness", source: standardSource(skill[0] ?? "") },
-      {
-        label: "SKILL durable fragment",
-        source: standardSource(`export default async function runWorkflow(dsl) {
-${skill[1] ?? ""}
-}`),
-      },
     ];
     for (const fragment of fragments) {
       expect(standardWorkflowSourceShapeErrors(fragment.source), fragment.label).toEqual([]);
@@ -513,7 +504,7 @@ ${skill[1] ?? ""}
 
   it("makes a raw request design-review-build and reserves design-only for explicit pauses", () => {
     const author = source("skills/locus-pi-workflow-create/SKILL.md");
-    expect(author).toContain("This packaged workflow-extension skill owns the authoring protocol directly.");
+    expect(author).toContain("This skill owns authoring only.");
     expect(author).toContain("no package-provided catalog agent is required");
     expect(author).toContain("A plain request to create, design, write, or author a workflow runs one visible");
     expect(author).toContain("before any source");
@@ -567,6 +558,28 @@ ${skill[1] ?? ""}
     expect(author).toContain("hand-written retries");
     expect(author).toContain("broad `try/catch`");
     expect(author).toMatch(/wrappers or registries around `agent\(\)`/u);
+  });
+
+  it("keeps workflow-create examples orchestration-only", () => {
+    const authoredDocs = [
+      "skills/locus-pi-workflow-create/SKILL.md",
+      ...readdirSync(path.join(root, "skills/locus-pi-workflow-create/references"))
+        .filter((name) => name.endsWith(".md"))
+        .map((name) => `skills/locus-pi-workflow-create/references/${name}`),
+    ];
+    const forbiddenFileDslCalls =
+      /\b(?:consumeTextArtifact|continuationArtifacts|outputDir|projectRoot|promptFile|publishPrimaryFile|workspace|now|random)\s*\(/u;
+
+    for (const relativePath of authoredDocs) {
+      for (const snippet of javascriptDocSnippets(relativePath)) {
+        expect(snippet, relativePath).not.toMatch(forbiddenFileDslCalls);
+      }
+    }
+
+    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
+    expect(skill).toContain("Workflow source is orchestration only");
+    expect(skill).toContain('mode: "orchestration-only"');
+    expect(skill).toMatch(/Agents own interpretation, any source inspection requested by their prompt/u);
   });
 
   it("keeps semantic input out of hidden branch protocols", () => {
@@ -746,23 +759,21 @@ ${skill[1] ?? ""}
     expect(card).toContain("Never derive resumable positional");
   });
 
-  it("teaches durable saved children, stable primary files, and explicit standard profiles", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
+  it("keeps file-oriented compatibility documented outside generated workflow examples", () => {
+    for (const relativePath of ["extensions/workflows/AUTHORING.md", "extensions/workflows/REFERENCE.md"]) {
       const text = source(relativePath);
       expect(text).toContain("invokeWorkflow");
       expect(text).toContain("publishPrimaryFile");
       expect(text).toContain("outputDir");
       expect(text).toContain('profile: "standard"');
     }
+    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
+    expect(skill).toContain("orchestration-only subset");
+    expect(skill).toMatch(/Do not generate `consumeTextArtifact`/u);
   });
 
   it("keeps fresh model discovery outside resumable positional checkpointing", () => {
     for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
       "skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md",
       "extensions/workflows/AUTHORING.md",
       "extensions/workflows/REFERENCE.md",

@@ -1,13 +1,16 @@
 ---
 name: locus-pi-workflow-create
-description: Create or revise a locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Never run the workflow. This packaged workflow-extension skill owns the authoring protocol directly.
+description: Create or revise an orchestration-only locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Generated source contains prompts and agent/DSL edges, not file-reading logic. Never run the workflow.
 ---
 
 # Create a locus-pi workflow
 
 A workflow is reviewed trusted JavaScript that makes a visible graph of child
-`agent()` calls. JavaScript owns order, branches, bounded loops, exact handoffs,
-and publication. Agents own interpretation and complete reader-facing text.
+`agent()` calls. Workflow source is orchestration only: author-known prompts,
+direct agent/DSL calls, visible control flow, exact handoffs, and text
+publication. It never reads project files, prompt files, or prior artifacts.
+Agents own interpretation, any source inspection requested by their prompt, and
+complete reader-facing text.
 
 This skill owns authoring only. For running, starting, resuming, or monitoring
 the current run of an existing workflow, use the shipped
@@ -78,7 +81,7 @@ The design is short Markdown a reader can approve without opening JavaScript:
 Purpose: <one sentence>
 Input: <semantic text or none>
 Primary output: `<name>.md`
-Workflow workspace: `<pwd>/tmp/<name>` by default, or <explicit project-relative directory>
+Evidence boundary: <semantic input, caller items, author-known prompt material, or child inspection>
 Pattern: <catalog pattern, or why none fits>
 
 Namespace: `runnable root` (include the `<name>` entry below) or `group-only`
@@ -102,9 +105,7 @@ that Build must create; do not declare grandchildren or an implicit root.
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
-Durable items: <complete key source, or none>
-Idempotence: <how each assigned file is replaced safely>
-Project source: <live-read drift policy>
+File boundary: workflow source performs no file reads; name any child-owned source inspection
 Worst-case calls: <exact formula including saved children>
 Failure exits: <fail-closed exits>
 Mechanisms: <parallel barriers, choices, loops, human gates; no agent-count penalty>
@@ -128,6 +129,18 @@ Declare `meta.profile: "standard"` in every newly generated workflow.
 unique literal `phase("...")` id exactly once and in first-source order. Case
 drift, duplicate declarations, and missing ids fail source checking; unused
 declarations and order drift are warnings.
+
+New source from this skill uses the orchestration-only subset of the standard
+profile. It may call `agent`, `parallel`, `pipeline`, `workflow`,
+`invokeWorkflow`, `items`, `phase`, `log`, `awaitOperator`, `publishArtifact`,
+and `publishPrimaryArtifact`. It may use the runtime-owned `choice` and
+`handoffs` agent options. Do not generate `consumeTextArtifact`,
+`continuationArtifacts`, `outputDir`, `projectRoot`, `promptFile`,
+`publishPrimaryFile`, `workspace`, `now`, or `random`. Those compatibility
+primitives turn the workflow script into a file, host-state, or policy engine.
+Build calls `workflow_check_source` with `mode: "orchestration-only"`. The
+strict mode rejects any source outside this authoring subset. Never use the
+default compatibility mode for a newly generated workflow.
 
 Omit `maxToolCalls` and `timeoutMs` from standard generated `agent()` options.
 The package already applies emergency defaults to every child attempt. Emit a
@@ -175,26 +188,18 @@ Standard agent answers have three forms:
 
 `agent()` is the only model-calling primitive. `parallel()` is the fail-closed
 barrier for independent known calls; `pipeline()` handles fixed ordered stages
-per known item; `awaitOperator()` declares a human gate; `promptFile()` may hold
-a long charter but never hide routing.
+per known item; `awaitOperator()` declares a human gate. Long charters remain
+literal prompts in reviewed source instead of hidden prompt-file reads.
 
 Every workflow child receives the full tool surface through `tools: ["*"]`.
 Standard source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
-work by default.
-
-The runtime injects one exact absolute workflow workspace into every child
-prompt. Fresh runs receive a unique
-`.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
-directly launched qualified child keeps both components in its generated leaf;
-an invoked child shares its parent's selected workspace. `runName` selects
-`.locus-pi/plans/<runName>` for any workflow. Name the assigned
-relative file and tell writers to replace it idempotently. Use `projectRoot()`
-only when an agent needs source context. Do not add JavaScript path parsers,
-directory collectors, permission fields, or alternate writable roots.
+work by default. When the task needs repository evidence, tell the child to
+inspect it in the prompt. The workflow JavaScript never obtains project paths or
+artifact contents and never performs that inspection itself.
 
 Workflow `input` remains semantic text. A main agent that already knows exact
-work units passes them separately as `workflow({ name, input, items, outputDir })`; workflow
+work units passes them separately as `workflow({ name, input, items })`; workflow
 source reads the immutable list with `dsl.items()`. Values, order, whitespace,
 empty strings, and duplicates are preserved with no Locus items count or
 character policy,
@@ -205,63 +210,24 @@ Standard source does not encode a hidden line/CSV/JSON protocol. It does not
 the same visible `pipeline(items, ...)`; model handoffs alone retain runtime
 repair, blank/duplicate rejection, and declared bounds.
 
-For durable work inside one composed workflow, declare a short child entry in
-the same folder and invoke it with `child`. Pass the complete key list so the
-runtime validates every key before the first child starts:
+Use `invokeWorkflow({ child: "<declared-sibling>", ... })` only when the reviewed
+graph genuinely needs a separate saved child run. The call is still an
+orchestration edge. Do not add workspace paths, artifact reads, checkpoint
+parsers, or synthetic success documents around it. Prefer direct `agent()`
+handoffs when the parent must consume the child's text.
 
-```js
-const items = dsl.items();
-const keys = items.map((_, keyIndex) => `item-${keyIndex + 1}`);
-for (let index = 0; index < items.length; index += 1) {
-  const item = items[index];
-  await dsl.invokeWorkflow({
-    child: "worker",
-    key: keys[index],
-    keys,
-    input: item,
-    items: [item],
-    outputDir: dsl.outputDir(),
-  });
-}
-return dsl.publishPrimaryFile("report.md");
-```
+Fresh model discovery stays in the visible non-resumable
+`agent({ handoffs }) -> parallel()/pipeline()` pattern. Never turn discovered
+text into file-backed transport or workflow-side checkpoint logic.
 
-Keys are stable compact identities, not semantic payload. Prefer caller-owned
-semantic keys. Position keys are safe only when the caller intentionally reuses
-the exact same approved item list and ordering for the same output namespace;
-pass item text unchanged as child input.
-
-Fresh model discovery stays in the non-resumable inline
-`agent({ handoffs }) -> parallel()/pipeline()` pattern. To make discovered work
-durable, finish that discovery run, expose the list for human approval, then let
-a separate caller pass the frozen list and stable keys to the durable parent.
-Never derive resumable positional keys from fresh model output.
-
-`invokeWorkflow()` starts a real depth-one saved run with its own evidence and
-lineage. It shares root cancellation, concurrency, workflow workspace, and
-the 10,000 physical-agent-call fuse. Matching completed-item checkpoints skip
-work on retry; parent or child source changes invalidate them. Saved children
-cannot nest, and source cycles fail before model work.
-
-Use `child` for a declared sibling: the runtime binds it to the exact source and
-folder namespace of the running root. `name` remains the explicit cross-tree
-selector and accepts `<root>` or `<root>/<child>` with normal Project → User →
-Package precedence. `scriptPath` remains an exact project-relative selector;
-`packageName` remains legacy compatibility for an exact Package entry.
-
-Run evidence remains under `.locus-pi/runs/<runId>/` and contains only
-`outputs/` plus `runtime/`. Durable user files belong under the project-local
-workspace returned by `dsl.outputDir()`, defaulting to
-`.locus-pi/plans/<generated-run-name>/`. Tell writers to replace their assigned relative
-file idempotently and never create workflow artifacts in the project root.
-`publishPrimaryFile()` returns a host-validated path, byte count, and digest for
-one regular non-empty file. Workspace files survive failed runs. Project source is
-read live; record a drift policy in the approved design instead of building a
-workflow-side snapshot, ledger, parser, or recovery layer.
+Run evidence remains runtime-owned. Workflow source passes text and control
+values only. If a child reads or writes files because its prompt requires that
+work, the child owns the operation and returns a complete textual handoff; the
+orchestrator does not collect, parse, verify, or publish those files.
 
 ## Forbidden in standard generated source
 
-The exhaustive machine-enforced grammar is
+The machine-enforced compatibility grammar is
 [`../../extensions/workflows/AUTHORING.md`](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape).
 It closes the module to literal metadata/constants plus one visible run export,
 forbids every import, permits only direct bound DSL calls plus visible collection
@@ -283,15 +249,9 @@ including literal-only sequences. Construct `Error` only from author-known or
 literal arguments; nesting a semantic/runtime value inside its message, options,
 cause, arrays, objects, spreads, or member access remains forbidden.
 
-Return provenance is exhaustive: exact `agent({ choice })` identity, list results
-(`agent({ handoffs })`, `continuationArtifacts`, `items`, `parallel`, `pipeline`),
-and `invokeWorkflow().status` are the only control categories. Ordinary `agent`,
-`consumeTextArtifact`, `promptFile`, `workflow`, and `workspace` are opaque.
-`now`, `random`, both host path calls, and all three publication calls are
-runtime/host values. `awaitOperator`, `log`, and `phase` are void effects and may
-not be used as values. Opaque/runtime-host values flow only whole through the
-documented sinks; only `outputDir()` may flow unchanged to
-`invokeWorkflow.outputDir`.
+The compatibility grammar is broader because it still validates existing
+reviewed scripts. Do not copy that broader method list into new source. For this
+skill, Build applies the orchestration-only subset above after the machine check.
 
 - raw `schema` or `validate`;
 - input splitting, JSON/prose parsers, regex gates, coverage assertions, or
@@ -300,6 +260,8 @@ documented sinks; only `outputDir()` may flow unchanged to
 - hand-written retries, broad `try/catch`, partial-result envelopes, or custom
   failure recovery;
 - wrappers or registries around `agent()` that hide prompts and edges;
+- file or host-state DSL calls, file reads, imports, path discovery, artifact
+  consumption, or workflow-side file verification;
 - domain-specific runtime helpers;
 - a large structured plan used to fake manager-agent delegation.
 
@@ -350,8 +312,11 @@ namespace has no root source and never receives a fake one. It then checks:
 - the module loads and exports `meta` plus a default function;
 - source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits;
 - no design-absent node or standard-profile bad smell appeared.
-- the exact built file passes the Pi-native `workflow_check_source` tool for
-  every built `.pi/workflows/<name>/*.workflow.mjs` path.
+- the exact built file passes the Pi-native `workflow_check_source` tool with
+  `mode: "orchestration-only"` for every built
+  `.pi/workflows/<name>/*.workflow.mjs` path.
+- every built source uses only the orchestration-only DSL subset and contains no
+  file, path, artifact-consumption, clock, or randomness primitive.
 
 Read checker diagnostics as `path:line:column [CODE] message`. Any error fails
 Build. Warning-only output remains a successful check, but Build must report the

@@ -14,6 +14,7 @@ export interface WorkflowSourceDiagnosticRelated extends WorkflowSourceSpan {
 }
 
 const WORKFLOW_SOURCE_DIAGNOSTIC_CODES = {
+  authoringSubset: "WF_AUTHORING_SUBSET",
   binding: "WF_BINDING",
   call: "WF_CALL",
   dataFlow: "WF_DATA_FLOW",
@@ -201,6 +202,55 @@ export function standardWorkflowSourceShapeDiagnostics(source: string): Workflow
     diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.dataFlow, runEntry ?? root),
   );
   return diagnostics.values();
+}
+
+const ORCHESTRATION_ONLY_FORBIDDEN_DSL_METHODS = new Set([
+  "consumeTextArtifact",
+  "continuationArtifacts",
+  "now",
+  "outputDir",
+  "projectRoot",
+  "promptFile",
+  "publishPrimaryFile",
+  "random",
+  "workspace",
+]);
+
+/** The workflow-create subset: prompts and orchestration edges, never workflow-side file or host reads. */
+export function orchestrationOnlyWorkflowSourceShapeDiagnostics(source: string): WorkflowSourceDiagnostic[] {
+  const standardDiagnostics = standardWorkflowSourceShapeDiagnostics(source);
+  if (standardDiagnostics.some((diagnostic) => diagnostic.code === WORKFLOW_SOURCE_DIAGNOSTIC_CODES.sourceParse)) {
+    return standardDiagnostics;
+  }
+
+  const diagnostics = new WorkflowSourceDiagnosticBag();
+  const root = parse(Lang.JavaScript, source).root();
+  for (const call of root.findAll({ rule: { kind: "call_expression" } })) {
+    const callee = unwrapStandardParentheses(callCallee(call));
+    const method =
+      callee?.kind() === "identifier"
+        ? callee.text()
+        : callee?.kind() === "member_expression" && callee.field("object")?.text() === "dsl"
+          ? callee.field("property")?.text()
+          : undefined;
+    if (method === undefined || !ORCHESTRATION_ONLY_FORBIDDEN_DSL_METHODS.has(method)) continue;
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.authoringSubset,
+      "error",
+      `orchestration-only authoring does not call ${method}(); put source or file work in an agent prompt`,
+      call,
+    );
+  }
+  return [...standardDiagnostics, ...diagnostics.values()].sort(
+    (left, right) =>
+      left.line - right.line ||
+      left.column - right.column ||
+      left.endLine - right.endLine ||
+      left.endColumn - right.endColumn ||
+      severityRank(left.severity) - severityRank(right.severity) ||
+      compareCodeUnits(left.code, right.code) ||
+      compareCodeUnits(left.message, right.message),
+  );
 }
 
 /** Legacy message-only projection retained for existing tests and automation. */

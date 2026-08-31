@@ -126,6 +126,10 @@ Inside Pi, validate a standard-profile workflow source with the
 { "path": "path/to/example.workflow.mjs" }
 ```
 
+Use `"mode": "orchestration-only"` for new source produced by
+`locus-pi-workflow-create`. The default compatibility mode remains available
+for existing reviewed workflows that use the broader standard DSL surface.
+
 The tool prints compiler-style diagnostics as
 `path:line:column [CODE] message` and returns structured one-based spans in
 `details.diagnostics`. Errors fail the check. Warning-only results remain
