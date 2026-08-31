@@ -334,9 +334,9 @@ export interface WorkflowAgentResult {
    */
   executedModel?: string;
   /**
-   * Set when a declared tier had no assignment in any layer and the child therefore
-   * inherited the parent session model. One sentence naming the role and the layers
-   * that were read. Quiet fallback, loud record.
+   * Set when a declared tier had no assignment in the global config and the child therefore
+   * inherited the parent session model. One sentence names the role and global
+   * config that was read. Quiet fallback, loud record.
    */
   modelRoleFallback?: string;
   /** Workflow loop slot descriptor (phase,label); set by the bridge for slotted agents (REQ-009). */
@@ -512,16 +512,16 @@ export interface WorkflowAgentOptions {
   model?: string;
   /**
    * Tier for this call: a name in the roles table (`smol`, `slow`, `task`, …), never
-   * a provider selector. The package ships no assignments, so an operator layer
-   * (session / project `.pi/model-roles/config.json` / user config) has to say what
-   * the name means; a role nothing assigns degrades to the parent session model and
-   * the degradation is recorded on `agent_end`, in the run-result artifact and in the
+   * a provider selector. The package ships no assignments, so the global user
+   * `~/.pi/agent/model-roles/config.json` has to say what the name means. A role the
+   * global config does not assign degrades to the parent session model, and the
+   * degradation is recorded on `agent_end`, in the run-result artifact and in the
    * run report. `model` and `modelRole` each have exactly one meaning — the option
    * chosen at the call site says which one the author meant.
    */
   modelRole?: string;
   /**
-   * Require this call's explicit `modelRole` to resolve from a model-roles layer.
+   * Require this call's explicit `modelRole` to resolve from the global model-roles config.
    * Normal calls retain the portable recorded fallback. Evidence-critical stages
    * can opt into fail-closed routing without pinning a provider-specific model.
    */

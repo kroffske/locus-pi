@@ -72,7 +72,7 @@ Pi's persistent main-model settings and hard allowlist live in
 values without changing them:
 
 ```bash
-jq '{defaultProvider, defaultModel, defaultThinkingLevel, enabledModels, modelRoles}' \
+jq '{defaultProvider, defaultModel, defaultThinkingLevel, enabledModels}' \
   ~/.pi/agent/settings.json
 ```
 
@@ -81,11 +81,10 @@ must be permitted by `enabledModels` when that allowlist is configured. Never
 remove, add, or replace an allowlist entry unless the operator requested that
 exact configuration change.
 
-Workflow child roles are a separate layer. Inspect project roles in
-`.pi/model-roles/config.json`, the `modelRoles` object in Pi settings, and user
-fallbacks in `~/.pi/agent/model-roles/config.json`. A role assignment uses
-`provider/model[:thinking]`. Project assignments override user fallbacks;
-session assignments override both.
+Workflow child roles have one persistent source:
+`~/.pi/agent/model-roles/config.json`. A role assignment uses
+`provider/model[:thinking]`. Project `.pi/model-roles/config.json`, Pi
+`settings.json#modelRoles`, and session evidence do not override this file.
 
 A model-less child with no assigned `agent` role inherits the live main session
 model; assigning `default` does not replace that inheritance. Supplying

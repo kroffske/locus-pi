@@ -43,5 +43,6 @@ pi --mode json -p --no-session --approve \
 ```
 
 Child model routing is separate. Configure roles through `/model-roles` or
-`.pi/model-roles/config.json`. An unassigned role inherits the main Pi model.
+`~/.pi/agent/model-roles/config.json`. An unassigned role inherits the main Pi
+model.
 `--approve` is broad project trust, not workflow-only approval.

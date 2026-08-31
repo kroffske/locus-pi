@@ -2490,10 +2490,10 @@ the point:
 - A **concrete** `provider/id` selector that does not resolve — a typo, a provider
   that is not configured, a model this host does not have — ends the call with a
   named failed result and zero child sessions. It never silently inherits.
-- A **role** that no model-roles layer assigns degrades to `ctx.model` and records
+- A **role** that the global model-roles config does not assign degrades to `ctx.model` and records
   `modelRoleFallback` on `agent_end`, in the `locus.agent.run-result.v2` body and
   in the run report. The package deliberately ships no role assignments, so this
-  is what a user sees until they assign that named project/user profile's role;
+  is what a user sees until they assign that named profile's role;
   an unassigned role must not fail closed merely because no tier is configured.
 - A call with `requireModelRole: true` is the opt-in exception. It must also
   declare `modelRole`, may not declare `model`, and that role must have an
@@ -2502,15 +2502,16 @@ the point:
   described below and does not create a child to resolve.
 - A role whose assignment EXISTS but does not parse as `provider/id[:level]` is a
   configuration error and fails the call by name, quoting the value as written and
-  the layer holding it. It is deliberately not treated as unassigned: degrading a
+  the global config holding it. It is deliberately not treated as unassigned: degrading a
   typo would run the session model under the requested tier's name and report the
   role as unassigned, which the operator's own config contradicts.
 
-The frontmatter tier still resolves through the effective role order `session` →
-Pi settings → project config → user config, falling back across `agent`, `task`,
-then `default`; a per-call `modelRole` does **not** use that purpose fallback,
-because an author who named a tier asked about that tier. `modelRoleResolution`
-continues to be recorded in the request capsule, artifacts, and live display.
+A frontmatter tier resolves its named role directly from the global user config
+at `~/.pi/agent/model-roles/config.json`. A model-less child checks only the
+`agent` role, then inherits the current session model when that role is unset.
+A per-call `modelRole` also resolves only the role it names.
+`modelRoleResolution` continues to be recorded in the request capsule,
+artifacts, and live display.
 
 **The pre-tier `pi/<role>` namespace.** Before tiers were executed the shipped
 agents wrote their tier as `pi/<role>`; `pi` was never a provider and nothing
@@ -2571,7 +2572,7 @@ line — its absence always means "no child ran", never "the record was lost".
 or with different fallback policy occupy different records. The key is built in
 the runtime before the bridge consults the roles table, so it identifies the tier
 a stage **declared**, not the model that produced the answer: remapping a role in
-`.pi/model-roles/config.json`, or editing an agent's frontmatter, reuses the
+`~/.pi/agent/model-roles/config.json`, or editing an agent's frontmatter, reuses the
 existing record. **A roles-table change invalidates recorded runs by hand.**
 
 `meta.description` has no effect on any of these choices. `/workflows info`

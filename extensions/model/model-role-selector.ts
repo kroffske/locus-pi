@@ -403,7 +403,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const label = semanticText(this.#theme, "success", "DEFAULT", true);
     const inherited = summary.inherited ? " · inherited" : "";
     const assignment = semanticText(this.#theme, "success", formatAssignment(summary.assignment), true);
-    return `${label} route: ${assignment} · ${routeSourceLabel(summary.source)}${inherited}`;
+    return `${label} route: ${assignment} · ${summary.source}${inherited}`;
   }
 
   #routingLines(width: number): string[] {
@@ -690,10 +690,6 @@ function preferredEffortIndex(
 function receiptLine(receipt: ModelRoleReceipt): string {
   const marker = receipt.kind === "success" ? "OK" : receipt.kind === "warning" ? "WARN" : "ERROR";
   return `[${marker}] ${receipt.text}`;
-}
-
-function routeSourceLabel(source: ModelRoleSource): string {
-  return source === "session" ? "project + session evidence" : source;
 }
 
 function formatProvider(provider: string): string {

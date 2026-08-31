@@ -207,7 +207,7 @@ export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions
     const projectRoot = getProjectRoot(options.ctx);
     const discovered = discoverAgentDefinitions(projectRoot);
     const agentMap = new Map(discovered.definitions.map((agent) => [agent.name, agent]));
-    const modelRoles = await loadModelRolesState(options.ctx);
+    const modelRoles = await loadModelRolesState();
 
     for (const request of requests) {
       const agentName = request.agent?.trim();
@@ -326,7 +326,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     //    runs on, and it decides it BEFORE any child is spawned so a refusal costs
     //    nothing. `modelRoleResolution` continues to travel into the request capsule
     //    and the run-result artifact exactly as it did before.
-    const modelRoles = await loadModelRolesState(ctx);
+    const modelRoles = await loadModelRolesState();
     const tier = await resolveWorkflowTier({ req, agent, modelRoles, resolveModelFn });
     if (tier.kind === "refused") {
       return {
@@ -842,8 +842,8 @@ function workflowAskContextText(input: {
  * feature:
  *
  *  - `resolved` — a concrete model came out of the registry and reaches the child.
- *  - `inherit`  — nothing was declared, or a declared ROLE has no assignment in any
- *    layer. The child runs on the parent session model and, when a role was named,
+ *  - `inherit`  — nothing was declared, or a declared ROLE has no assignment in the
+ *    global config. The child runs on the parent session model and, when a role was named,
  *    `fallback` records that in one sentence. Quiet fallback, loud record.
  *  - `refused`  — a CONCRETE `provider/id` selector did not resolve. A typo, a
  *    provider that is not configured, a model the host does not have. The call ends
@@ -925,15 +925,15 @@ async function resolveWorkflowTier(input: {
     if (declared.malformed !== undefined) {
       // Assigned but unparseable — a config typo, not an unassigned role. Degrading
       // it would run the parent's model under the requested tier's name and tell the
-      // operator their role was "not assigned in any layer", which their own file
+      // operator their role was "not assigned in the global config", which their own file
       // contradicts.
       return refusal(malformedRoleAssignmentNote(req.modelRole, "modelRole", declared.malformed), req.modelRole);
     }
     if (declared.assignment === undefined) {
       if (req.requireModelRole === true) {
         return refusal(
-          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but no model-roles layer ` +
-            "assigns it. Assign the role with /model-roles before running this workflow.",
+          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but the global ` +
+            "model-roles config does not assign it. Assign the role with /model-roles before running this workflow.",
           req.modelRole,
         );
       }

@@ -131,7 +131,7 @@ export function modelRoleFallbackBlock(
       `Current session effort: ${session.thinking ?? "unknown"}`,
       `DEFAULT route: ${defaultRoute?.assignment === undefined ? "unset" : formatAssignment(defaultRoute.assignment)}`,
       `Other routes: ${assigned.length === 0 ? "none" : assigned.map((summary) => `${summary.tag}=${formatAssignment(summary.assignment!)}`).join(" · ")}`,
-      "storage: .pi/model-roles/config.json",
+      "storage: ~/.pi/agent/model-roles/config.json",
     ],
     hint: ["This fallback is read-only; routing state remains unchanged."],
     controls: ["Open /model-roles in an interactive Pi TUI to assign roles."],

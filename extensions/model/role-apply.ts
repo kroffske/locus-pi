@@ -8,12 +8,11 @@
 
 import {
   formatAssignment,
-  getModelRolesConfigPaths,
+  getModelRolesConfigPath,
   setModelRoleSetting,
   type ModelRoleAssignment,
 } from "../_shared/model/model-settings.js";
 import type { ExtensionAPI, ExtensionContext, ModelLike, ThinkingLevel } from "../_shared/host/pi-api.js";
-import { getProjectRoot } from "../_shared/host/pi-api.js";
 import { errorMessage } from "../_shared/host/error-text.js";
 import {
   effortLevelsForModel,
@@ -56,6 +55,7 @@ export async function applyModelRole(
   let thinkingApplied = false;
   let rolePersisted = false;
   let rolePersistenceError: string | undefined;
+  let lockReleaseError: string | undefined;
   let applyError: string | undefined;
   if (!shouldApplyModel) {
     modelApplied = false;
@@ -92,7 +92,9 @@ export async function applyModelRole(
   const hostApplySucceeded = !shouldApplyModel || (modelApplied && thinkingApplied);
   if (hostApplySucceeded) {
     try {
-      rolePersisted = await setModelRoleSetting(ctx, selection.action.role, assignment);
+      const persistence = await setModelRoleSetting(selection.action.role, assignment);
+      rolePersisted = persistence.rolePersisted;
+      lockReleaseError = persistence.lockReleaseError;
     } catch (error) {
       rolePersistenceError = errorMessage(error);
       rolePersisted = false;
@@ -129,13 +131,15 @@ export async function applyModelRole(
     thinkingApplied,
     rolePersisted,
     ...(rolePersistenceError === undefined ? {} : { rolePersistenceError }),
+    ...(lockReleaseError === undefined ? {} : { lockReleaseError }),
     customEntryAppended,
-    configPath: getModelRolesConfigPaths(getProjectRoot(ctx)).project,
+    configPath: getModelRolesConfigPath(),
   });
 
   const succeeded = rolePersisted && hostApplySucceeded;
   const appliedState = await updateModelRoleStatus(ctx, currentSelector, pi);
   const evidenceWarnings = [
+    ...(lockReleaseError === undefined ? [] : [lockReleaseError]),
     ...(!customEntryAppended ? ["session evidence unavailable"] : []),
     ...(!runtimeEventRecorded ? ["runtime event unavailable"] : []),
   ];
