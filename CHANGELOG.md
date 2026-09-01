@@ -17,6 +17,7 @@ User-visible changes to the public package.
 
 ### Fixed
 
+- At normal interactive heights, `/workflows list` now keeps its Project, User, Package, and History tabs at one stable position below the heading instead of moving them with source content height. The existing few-line compact projection is unchanged. Wherever tabs are shown, the active tab has a high-contrast purple background, and parent descriptions no longer share the same indentation as child workflow rows.
 - A failed run's diagnostic now points at the failing stage's answer file with a path that opens. It was built by joining the artifact's own relative path onto the run directory, which dropped the `runtime/artifacts` segment and produced a pointer to a file that does not exist.
 
 ### Removed
