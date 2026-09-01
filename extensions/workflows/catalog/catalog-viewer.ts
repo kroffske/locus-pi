@@ -673,8 +673,8 @@ function rowLines(
     return [selected ? bold(theme, style(theme, "accent", summary)) : style(theme, "text", summary)];
   }
   const isChild = row.kind === "current" && row.role === "child";
-  const pathPrefix = isChild ? "      · " : "  · ";
-  const continuationPrefix = isChild ? "        " : "    ";
+  const pathPrefix = isChild ? "      · " : "   · ";
+  const continuationPrefix = isChild ? "        " : "     ";
   const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
   const details = wrapPlain(row.description, Math.max(1, detailWidth));
   return [
@@ -696,7 +696,7 @@ function rowLines(
 function styledCatalogRowIdentity(row: SelectableWorkflowRow, selected: boolean, theme: WorkflowCatalogTheme): string {
   const marker = selected ? bold(theme, style(theme, "accent", ">")) : " ";
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const treeName = row.kind === "current" && row.role === "child" ? `└ ${row.label}` : row.name;
   const composition =
     row.kind !== "current" || row.role === "child" || row.children.length === 0
       ? ""
@@ -710,7 +710,7 @@ function styledCatalogRowIdentity(row: SelectableWorkflowRow, selected: boolean,
 
 function catalogRowIdentity(row: SelectableWorkflowRow): string {
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const treeName = row.kind === "current" && row.role === "child" ? `└ ${row.label}` : row.name;
   const composition =
     row.kind !== "current" || row.role === "child" || row.children.length === 0
       ? ""

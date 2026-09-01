@@ -86,7 +86,7 @@ describe("focused workflow catalog", () => {
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toContain(model.current[0]!.originPath);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("  · Alpha workflow");
+    expect(lines[row + 1]).toContain("   · Alpha workflow");
     expect(lines.join("\n")).not.toContain("profile=");
     expect(lines.join("\n")).not.toContain(model.current[0]!.originPath);
     expect(lines.join("\n")).toContain(`Catalog: ${path.join(root, ".locus-pi", "workflows")}`);
@@ -95,14 +95,14 @@ describe("focused workflow catalog", () => {
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> beta · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
-    expect(lines[row + 1]).toContain("  · Beta workflow");
+    expect(lines[row + 1]).toContain("   · Beta workflow");
 
     viewer.handleInput("left");
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> alpha · run 20260101-000001-alpha · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("  · historical run snapshot");
+    expect(lines[row + 1]).toContain("   · historical run snapshot");
   });
 
   it("keeps source sections and folder hierarchy readable at narrow widths", () => {
@@ -118,12 +118,12 @@ describe("focused workflow catalog", () => {
       expect(narrow).toContain(width < 64 ? "U 0" : "User 0");
       expect(narrow).toContain(width < 64 ? "[PKG 11]" : "[Package 11]");
       expect(narrow).toContain("necessity");
-      expect(narrow).toContain("  └ necessity");
+      expect(lines.some((line) => /^ {2}└ necessity/u.test(line))).toBe(true);
       expect(narrow).toContain("7 children");
     }
     const rendered = viewer.render(80).join("\n");
     expect(rendered).toContain("post-code-review · [PKG] · 7 children");
-    expect(rendered).toContain("  └ necessity · [PKG]");
+    expect(rendered).toMatch(/^ {2}└ necessity · \[PKG\]$/mu);
     expect(rendered).toContain("      · Challenge behavioral and code-shape fixes");
     expect(rendered).not.toContain("    └ Challenge behavioral and code-shape fixes");
   });
@@ -143,7 +143,7 @@ describe("focused workflow catalog", () => {
     expect(initial.match(/└ plan · \[P\]/gu)).toHaveLength(1);
 
     viewer.handleInput("down");
-    expect(viewer.render(100).join("\n")).toContain(">   └ plan · [P]");
+    expect(viewer.render(100).join("\n")).toContain("> └ plan · [P]");
     viewer.handleInput("enter");
     expect(viewer.render(100).join("\n")).toContain("[VIEW] [P] airflow-dag-builder/plan");
   });
@@ -156,8 +156,8 @@ describe("focused workflow catalog", () => {
     focusProject(viewer);
 
     const rendered = viewer.render(48).join("\n");
-    expect(rendered).toContain("  · Alpha workflow description uses complete");
-    expect(rendered).toContain("    words across the available terminal width");
+    expect(rendered).toContain("   · Alpha workflow description uses complete");
+    expect(rendered).toContain("     words across the available terminal width");
     expect(rendered).not.toContain("profile=");
     expect(rendered).not.toContain(model.current[0]!.originPath);
   });

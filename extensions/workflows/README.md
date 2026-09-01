@@ -19,7 +19,7 @@
 
 Tools: `workflow`, read-only `workflow_check_source`, and opt-in `fusion`. Compatibility command: `/workflow-stop`.
 
-At normal interactive heights, `/workflows list` keeps the Project, User, Package, and History tabs directly below the catalog heading. The existing compact projection may omit the heading or put the selected row first when only a few lines fit. Wherever tabs are shown, the active tab uses a high-contrast purple background. A workflow description sits one level below its owner, while child workflows and their descriptions remain progressively deeper.
+At normal interactive heights, `/workflows list` keeps the Project, User, Package, and History tabs directly below the catalog heading. The existing compact projection may omit the heading or put the selected row first when only a few lines fit. Wherever tabs are shown, the active tab uses a high-contrast purple background. A parent description starts one column to the right of its child's `└` branch, so the description remains attached to the parent instead of reading like a heading for the child.
 
 `/workflows skills` exposes the package's action-named workflow skills to
 external agents. Pi already loads the packaged skills. The command manages
