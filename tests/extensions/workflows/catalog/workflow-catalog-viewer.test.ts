@@ -334,26 +334,26 @@ describe("focused workflow catalog", () => {
     expect(last).toContain("const line40 = 40;");
   });
 
-  it("uses semantic colors and a caret to distinguish focus, actions, and metadata", () => {
+  it("uses the shared purple fill for horizontal actions and semantic colors for settled metadata", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
     const fg = vi.fn((_color: string, text: string) => text);
     const { viewer } = createViewer(model, root, 18, { fg });
 
     viewer.handleInput("enter");
-    expect(viewer.render(80).join("\n")).toContain("› [Back] Start Edit Review");
+    expect(viewer.render(80).join("\n")).toContain("\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m› [Back]\u001b[0m");
     expect(fg).toHaveBeenCalledWith("success", "[VIEW]");
     expect(fg).toHaveBeenCalledWith("success", "Source:");
     expect(fg).toHaveBeenCalledWith("success", "Catalog:");
     expect(fg).toHaveBeenCalledWith("success", "Path:");
-    expect(fg).toHaveBeenCalledWith("warning", "› [Back]");
-    expect(fg).toHaveBeenCalledWith("success", "Start");
+    expect(fg).toHaveBeenCalledWith("text", "Start");
+    expect(fg).not.toHaveBeenCalledWith("success", "Start");
 
     fg.mockClear();
     viewer.handleInput("tab");
-    expect(viewer.render(80).join("\n")).toContain("Back › [Start] Edit Review");
-    expect(fg).toHaveBeenCalledWith("warning", "› [Start]");
-    expect(fg).toHaveBeenCalledWith("success", "Back");
+    expect(viewer.render(80).join("\n")).toContain("\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m› [Start]\u001b[0m");
+    expect(fg).toHaveBeenCalledWith("text", "Back");
+    expect(fg).not.toHaveBeenCalledWith("success", "Back");
   });
 
   it("keeps catalog and source lines bounded at wide and narrow widths", () => {

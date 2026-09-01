@@ -11,7 +11,12 @@ import {
   isUp,
 } from "../_shared/operator/operator-keys.js";
 import type { CustomUiComponent, CustomUiTui, ModelLike, ThinkingLevel } from "../_shared/host/pi-api.js";
-import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../_shared/operator/operator-ui.js";
+import {
+  renderOperatorBlock,
+  styleActiveSelection,
+  type OperatorBlock,
+  type OperatorThemeLike,
+} from "../_shared/operator/operator-ui.js";
 import {
   formatAssignment,
   type ModelRoleAssignment,
@@ -303,9 +308,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     if (isEnter(data)) await this.#advance();
   }
 
-  invalidate(): void {
-    // Projection is rebuilt from semantic state on every render.
-  }
+  invalidate(): void {}
 
   #operatorBlock(width: number): OperatorBlock {
     const current = this.#currentSelector ?? "unset";
@@ -320,8 +323,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       ...(this.#receipt === undefined ? [] : [receiptLine(this.#receipt)]),
       ...(this.#applying ? ["[WORKING] Applying model route…"] : []),
     ];
-    // Success while a model is actually pinned, warning while it is not: the
-    // tone tracks whether the route is settled, not how important the label is.
+    // Tone tracks whether the route is settled, not how important the label is.
     const currentTone = this.#currentSelector === undefined ? "warning" : "success";
     return {
       type: "SELECT",
@@ -349,7 +351,9 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
       `Models ${rows.length === 0 ? "0" : `${start + 1}-${end}`} of ${rows.length}`,
       ...rows
         .slice(start, end)
-        .map((row, offset) => this.#modelRow(row, start + offset === this.#selectedIndex, width)),
+        .map((row, offset) =>
+          this.#modelRow(row, start + offset === this.#selectedIndex, this.#stage === "models", width),
+        ),
     ];
   }
 
@@ -364,9 +368,13 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
         const selected = index === this.#roleIndex;
         const marker = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
         const capability = width < 60 ? action.narrowCapability : action.capability;
-        const label = semanticText(this.#theme, selected ? "accent" : roleTone(action.tag), action.label, selected);
+        const warning = selected && roleTone(action.tag) === "warning";
+        const status = warning ? `${semanticText(this.#theme, "warning", `[${action.tag}]`, true)} ` : "";
+        const label = selected
+          ? styleActiveSelection(this.#theme, action.label)
+          : semanticText(this.#theme, roleTone(action.tag), action.label);
         return truncateToWidth(
-          `${marker} ${label} · ${semanticText(this.#theme, "dim", capability)}`,
+          `${marker} ${status}${label} · ${semanticText(this.#theme, "dim", capability)}`,
           Math.max(1, width - 4),
         );
       }),
@@ -378,28 +386,28 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
     const action = this.#selectedAction;
     if (row === undefined || action === undefined) return ["Selected route: none"];
     const capability = modelEffortCapability(row.model);
-    const capabilityLabel = capability.known ? capability.source : "unknown; off only";
     return [
       `Action for ${semanticText(this.#theme, "accent", row.selector, true)}:`,
       `${semanticText(this.#theme, roleTone(action.tag), action.label, true)} · ${width < 60 ? action.narrowCapability : action.capability}`,
-      `Effort capability: ${capabilityLabel}`,
+      `Effort capability: ${capability.known ? capability.source : "unknown; off only"}`,
       ...(capability.levels.length === 0
         ? ["[ERROR] Model advertises no supported effort levels."]
         : capability.levels.map((level, index) => {
             const selected = index === this.#effortIndex;
             const marker = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
-            return `${marker} ${semanticText(this.#theme, selected ? "accent" : "text", level, selected)}`;
+            const label = selected
+              ? styleActiveSelection(this.#theme, level)
+              : semanticText(this.#theme, "text", level);
+            return `${marker} ${label}`;
           })),
     ];
   }
 
   #defaultRouteLine(): string {
     const summary = this.#roleSummaries.find((item) => item.role === "default");
-    // An unset DEFAULT route is the one thing on this line that still wants
-    // attention, so it keeps warning while an assigned one reads as settled.
-    if (summary?.assignment === undefined) {
+    // Only an unset DEFAULT route still needs attention on this line.
+    if (summary?.assignment === undefined)
       return `${semanticText(this.#theme, "warning", "DEFAULT", true)} route: unset`;
-    }
     const label = semanticText(this.#theme, "success", "DEFAULT", true);
     const inherited = summary.inherited ? " · inherited" : "";
     const assignment = semanticText(this.#theme, "success", formatAssignment(summary.assignment), true);
@@ -409,8 +417,7 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
   #routingLines(width: number): string[] {
     const assigned = this.#roleSummaries.filter((item) => item.role !== "default" && item.assignment !== undefined);
     if (assigned.length === 0) return ["Routing roles: none"];
-    // Every row here is filtered down to roles that already have an assignment,
-    // so the whole line is settled state — the same success the model rows use.
+    // Every row here is an existing assignment, so the whole line is settled.
     return [
       "Routing roles:",
       ...assigned.map((item) =>
@@ -424,35 +431,38 @@ export class ModelRoleSelectorComponent implements CustomUiComponent {
 
   #filterLine(width: number): string {
     const active = this.#providers[this.#activeProviderIndex] ?? ALL_PROVIDER_FILTER;
-    // Accent, not success: every other surface spends green on "finished
-    // successfully", and the active tab of the workflow catalog already marks
-    // "what you are looking at" with accent.
+    // Active provider is a horizontal choice, so it uses the shared selection
+    // fill. Green remains reserved for assignments that are already settled.
     if (width < 60) {
-      const selected = semanticText(this.#theme, "accent", `[${formatProvider(active)}]`, true);
+      const selected = styleActiveSelection(this.#theme, `[${formatProvider(active)}]`);
       return `Models: ${selected} (${this.#activeProviderIndex + 1}/${this.#providers.length}, Tab)`;
     }
     const filters = this.#providers.map((provider, index) =>
       index === this.#activeProviderIndex
-        ? semanticText(this.#theme, "accent", `[${formatProvider(provider)}]`, true)
+        ? styleActiveSelection(this.#theme, `[${formatProvider(provider)}]`)
         : semanticText(this.#theme, "dim", formatProvider(provider)),
     );
     return truncateToWidth(`Models: ${filters.join("  ")}  (Tab to cycle)`, Math.max(1, width - 4));
   }
 
-  #modelRow(row: ModelRow, selected: boolean, width: number): string {
+  #modelRow(row: ModelRow, selected: boolean, focused: boolean, width: number): string {
     const markers = [row.current ? "CURRENT" : "", ...row.roleTags].filter(Boolean);
-    // Success, not warning: a role that is already pinned to this model is a
-    // settled fact, and warning means "error or needs attention" everywhere else.
+    const name = modelNameSuffix(row.model);
     const markerText =
       markers.length === 0
         ? ""
         : `${markers.map((marker) => semanticText(this.#theme, "success", `[${marker}]`, true)).join(" ")} `;
-    const pointer = selected ? semanticText(this.#theme, "accent", ">", true) : " ";
+    if (selected && focused) {
+      return truncateToWidth(
+        `${semanticText(this.#theme, "accent", ">", true)} ${markerText}${styleActiveSelection(this.#theme, `${row.selector}${name}`)}`,
+        Math.max(1, width - 4),
+      );
+    }
+    // A role already pinned to this model is settled, never a warning.
     const assigned = row.current || row.roleTags.length > 0;
     const selector = semanticText(this.#theme, assigned ? "success" : "accent", row.selector, selected || assigned);
-    const name = modelNameSuffix(row.model);
     return truncateToWidth(
-      `${pointer} ${markerText}${selector}${name === "" ? "" : semanticText(this.#theme, "dim", name)}`,
+      `  ${markerText}${selector}${name === "" ? "" : semanticText(this.#theme, "dim", name)}`,
       Math.max(1, width - 4),
     );
   }
@@ -602,33 +612,22 @@ export function createModelRoleSelectorTheme(theme: unknown): OperatorThemeLike 
   const candidate = theme as Record<string, unknown>;
   const fg = typeof candidate.fg === "function" ? candidate.fg : undefined;
   const bold = typeof candidate.bold === "function" ? candidate.bold : undefined;
-  return {
-    ...(fg === undefined
-      ? {}
-      : {
-          fg: (color: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0], text: string) =>
-            String(fg.call(candidate, color, text)),
-        }),
-    ...(bold === undefined ? {} : { bold: (text: string) => String(bold.call(candidate, text)) }),
-  };
+  const adapted: OperatorThemeLike = {};
+  if (fg !== undefined)
+    adapted.fg = (color: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0], text: string) =>
+      String(fg.call(candidate, color, text));
+  if (bold !== undefined) adapted.bold = (text: string) => String(bold.call(candidate, text));
+  return adapted;
 }
 
-function semanticText(
-  theme: OperatorThemeLike,
-  tone: Parameters<NonNullable<OperatorThemeLike["fg"]>>[0],
-  text: string,
-  bold = false,
-): string {
+type ModelSelectorTone = Parameters<NonNullable<OperatorThemeLike["fg"]>>[0];
+
+function semanticText(theme: OperatorThemeLike, tone: ModelSelectorTone, text: string, bold = false): string {
   const colored = typeof theme.fg === "function" ? theme.fg(tone, text) : text;
   return bold && typeof theme.bold === "function" ? theme.bold(colored) : colored;
 }
 
-/**
- * Tone for an *action label* ("Set as DEFAULT"), never for an assignment. These
- * are commands the operator has not run yet, so they must not borrow the success
- * green that marks a settled route: DEFAULT also rewrites the live session model
- * and SMOL is reachable only as a fallback, and warning is what flags both.
- */
+// Action tone only; assignments use success after they are saved.
 function roleTone(tag: string): "warning" | "accent" {
   return tag === "CURRENT" || tag === "DEFAULT" || tag === "SMOL" ? "warning" : "accent";
 }

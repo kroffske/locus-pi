@@ -3,7 +3,12 @@ import { sliceByColumn, visibleWidth, wrapTextWithAnsi } from "@earendil-works/p
 import { homedir } from "node:os";
 import path from "node:path";
 import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
-import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../../_shared/operator/operator-ui.js";
+import {
+  renderOperatorBlock,
+  styleActiveSelection,
+  type OperatorBlock,
+  type OperatorThemeLike,
+} from "../../_shared/operator/operator-ui.js";
 import { clamp, clipLines, fitLine, viewerRows as sharedViewerRows } from "../../_shared/operator/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
@@ -32,12 +37,6 @@ const SOURCE_FRAME_ROWS = 2;
 // Same `keys action · keys action` shape every other footer in this browser uses,
 // so scroll hints read as a list instead of one run-on key sequence.
 const SCROLL_CONTROLS = "↑/↓ scroll · PgUp/PgDn page · Home/End jump";
-// Fixed contrast keeps the requested workflow-purple selection visible even
-// when a custom Pi theme maps its generic selected backgrounds to neutral gray.
-const ACTIVE_TAB_BACKGROUND = "\u001b[48;2;88;61;121m";
-const ACTIVE_TAB_FOREGROUND = "\u001b[38;2;248;241;255m";
-const ACTIVE_TAB_RESET = "\u001b[0m";
-
 interface WorkflowCatalogTheme {
   fg?(color: string, text: string): string;
   bold?(text: string): string;
@@ -476,9 +475,7 @@ function catalogTabBar(
     const label = `${compact ? tab.compactLabel : tab.label} ${selectableRows(model, tab.id).length}`;
     if (tab.id !== active) return label;
     const selected = `[${label}]`;
-    return typeof theme.fg === "function"
-      ? `${ACTIVE_TAB_BACKGROUND}${ACTIVE_TAB_FOREGROUND}${selected}${ACTIVE_TAB_RESET}`
-      : selected;
+    return styleActiveSelection(theme, selected);
   }).join("  ");
 }
 
@@ -571,7 +568,7 @@ function actionBar(
   return actions
     .map((action, index) => {
       const label = action === "review" && screen.state.kind !== "ready" ? "Diagnose" : title(action);
-      return index === selected ? style(theme, "warning", `› [${label}]`) : style(theme, "success", label);
+      return index === selected ? styleActiveSelection(theme, `› [${label}]`) : style(theme, "text", label);
     })
     .join(" ");
 }

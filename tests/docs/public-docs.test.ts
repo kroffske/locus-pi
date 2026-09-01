@@ -8,6 +8,7 @@ const expectedDocs = [
   "extensions.md",
   "getting-started.md",
   "third-party-notices.md",
+  "tui-design.md",
   "workflows.md",
 ];
 
@@ -47,6 +48,7 @@ describe("public documentation topology", () => {
       "docs/getting-started.md",
       "docs/extensions.md",
       "docs/workflows.md",
+      "docs/tui-design.md",
       "docs/architecture.md",
       "docs/third-party-notices.md",
     ]) {
