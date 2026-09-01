@@ -28,18 +28,18 @@ trigger = "Any growth above 629 lines requires a responsibility split."
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-run-report.test.ts"
 rule = "code-lines"
-ceiling = 1416
+ceiling = 1474
 owner = "workflow run report tests"
-reason = "The six-line growth is Prettier wrapping after the test moves to its production owner."
-trigger = "Any growth above 1416 lines requires a responsibility split."
+reason = "The existing formatting allowance plus T-188 finalization tests keep bounded failure evidence and removed journal duplication at the run-report boundary."
+trigger = "Any growth above 1474 lines requires a responsibility split."
 
 [[exceptions]]
 path = "extensions/workflows/runtime/workflow-journal.ts"
 rule = "code-lines"
-ceiling = 2052
+ceiling = 2055
 owner = "workflow journal runtime"
-reason = "Four lines keep journal presence inside the journal parser while replacing raw-record access outside the workflow owner."
-trigger = "Any growth above 2052 lines or another cross-feature read projection requires an owner-preserving split review."
+reason = "The existing journal projection allowance plus T-188 keep the writer's additive agent display identity readable by the strict journal parser."
+trigger = "Any growth above 2055 lines or another persisted agent identity field requires an owner-preserving split review."
 
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-replay.test.ts"
@@ -48,3 +48,123 @@ ceiling = 1260
 owner = "workflow replay tests"
 reason = "The existing end-to-end replay contract grew before this responsibility-only relayout; splitting it here would mix behavioral test redesign into a path migration."
 trigger = "Any growth above 1260 lines or a stable replay sub-responsibility gaining four tests requires a responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/run/run-viewer.ts"
+rule = "code-lines"
+ceiling = 730
+owner = "workflow run viewer"
+reason = "T-188 adds one four-line projection for the existing artifact-index reader; a separate viewer module would duplicate the run-view boundary."
+trigger = "Any growth above 730 lines requires a run-view responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-agent-bridge.ts"
+rule = "code-lines"
+ceiling = 1053
+owner = "workflow child-agent bridge"
+reason = "T-188 keeps operator-answer evidence failure translation at the existing child-agent transport boundary."
+trigger = "Any growth above 1053 lines or another child-evidence policy requires a bridge responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-artifacts.ts"
+rule = "code-lines"
+ceiling = 980
+owner = "workflow artifact store"
+reason = "T-188 makes operator answers a typed indexed artifact and keeps validation, digest readback, and index ownership in the existing artifact store."
+trigger = "Any growth above 980 lines or another artifact family requiring kind-specific identity fields and validation requires an artifact-store responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-output.ts"
+rule = "code-lines"
+ceiling = 1037
+owner = "workflow workspace and output resolution"
+reason = "T-188 adds fail-closed current-versus-legacy workspace resolution to the existing output confinement owner."
+trigger = "Any growth above 1037 lines or another workspace root requires a workspace-resolution responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-runner.ts"
+rule = "code-lines"
+ceiling = 2545
+owner = "workflow runner lifecycle"
+reason = "T-188 removes persisted journal duplication, retains bounded finalization failures, and validates resume names against the recorded workspace at the existing runner lifecycle boundary."
+trigger = "Any growth above 2545 lines or another runner-owned lifecycle evidence family requires a responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/tool/workflow-tool.ts"
+rule = "code-lines"
+ceiling = 629
+owner = "workflow tool schema, approval, and launch boundary"
+reason = "T-188 makes fresh and resumed exec-approval receipts report the same recorded current-or-legacy workspace as the runtime without adding another public surface."
+trigger = "Any growth above 629 lines or another approval-time policy requiring session-bound filesystem state requires a tool-boundary split."
+
+[[exceptions]]
+path = "tests/extensions/plan/mode/plan-behavioral-mode.test.ts"
+rule = "code-lines"
+ceiling = 565
+owner = "plan behavioral mode tests"
+reason = "T-188 proves legacy migration rebinds active state before exit and that migration conflicts or symlinked libraries keep plan mode fail-closed through both exit commands."
+trigger = "Any growth above 565 lines or another persisted plan-storage migration requires a behavioral-test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/launch/workflows-launch-gate.test.ts"
+rule = "code-lines"
+ceiling = 943
+owner = "workflow launch and approval gate tests"
+reason = "T-188 proves exec approval reports fresh, resumed, unreadable-source, missing-binding, and explicit-output workspace choices through the runtime's resume authority at the existing launch gate."
+trigger = "Any growth above 943 lines or another storage-migration approval contract requires a launch-gate test split."
+
+[[exceptions]]
+path = "tests/extensions/plan/prompt-shelf/plan-prompt-commands.test.ts"
+rule = "code-lines"
+ceiling = 981
+owner = "plan prompt command tests"
+reason = "One T-188 assertion keeps the public plan-storage wording with its existing prompt command contract."
+trigger = "Any growth above 981 lines requires a prompt-command test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/authoring/workflow-authoring-contract.test.ts"
+rule = "code-lines"
+ceiling = 1730
+owner = "workflow authoring contract tests"
+reason = "Two T-188 assertions update the canonical workspace-root wording in the existing authoring contract."
+trigger = "Any growth above 1730 lines requires an authoring-contract test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/run/workflow-run-viewer.test.ts"
+rule = "code-lines"
+ceiling = 530
+owner = "workflow run viewer tests"
+reason = "T-188 verifies indexed operator answers through the existing run-viewer behavior contract."
+trigger = "Any growth above 530 lines requires a run-viewer test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-agent-transport.test.ts"
+rule = "code-lines"
+ceiling = 1492
+owner = "workflow agent transport tests"
+reason = "T-188 verifies typed answer-evidence failure and round-trips the real writer-generated display identity through the strict journal reader at the existing transport boundary."
+trigger = "Any growth above 1492 lines or another persisted journal identity scenario requires an agent-transport test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-artifacts.test.ts"
+rule = "code-lines"
+ceiling = 1061
+owner = "workflow artifact store tests"
+reason = "T-188 verifies operator-answer identity, index validation, and digest readback in the artifact store's existing contract suite."
+trigger = "Any growth above 1061 lines requires an artifact-store test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-durable-execution.test.ts"
+rule = "code-lines"
+ceiling = 2912
+owner = "workflow durable execution tests"
+reason = "T-188 keeps current, legacy, conflict, and strict resume-name workspace identity scenarios together in the existing durable execution contract."
+trigger = "Any growth above 2912 lines or another workspace migration requires a durable-execution test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-input.test.ts"
+rule = "code-lines"
+ceiling = 690
+owner = "workflow input tests"
+reason = "Two T-188 lines update the canonical generated-workspace prefix in the existing input contract."
+trigger = "Any growth above 690 lines requires a workflow-input test responsibility split."

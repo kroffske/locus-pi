@@ -511,6 +511,8 @@ function artifactKindOrder(kind: WorkflowArtifactRecord["kind"]): number {
       return 4;
     case "input":
       return 5;
+    case "operator-ask":
+      return 6;
   }
 }
 
@@ -570,6 +572,8 @@ function sameArtifactRecord(left: WorkflowArtifactRecord, right: WorkflowArtifac
     left.provenance === right.provenance &&
     left.createdAt === right.createdAt &&
     left.callId === right.callId &&
+    left.toolCallId === right.toolCallId &&
+    left.sequence === right.sequence &&
     left.stage === right.stage &&
     left.childSessionId === right.childSessionId &&
     sameArtifactRef(left.source, right.source) &&

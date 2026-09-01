@@ -130,6 +130,43 @@ describe("workflow persisted evidence viewer", () => {
     expect(rendered).not.toContain("changed after indexing");
   });
 
+  it("renders indexed operator answers through the digest-verifying JSON reader", () => {
+    const root = makeRoot();
+    const runId = "20260722-010109-ab12";
+    const runDir = writeJournal(root, runId, []);
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
+    store.recordOperatorAskEvidence("call-0001", "tool-call-7", 1, {
+      tool: "workflow_ask",
+      toolCallId: "tool-call-7",
+      declined: false,
+      entries: [
+        {
+          id: "storage",
+          question: "Which storage?",
+          status: "answered",
+          answer: "sqlite",
+          kind: "option",
+        },
+      ],
+    });
+    const viewer = new WorkflowRunViewer(
+      { requestRender: vi.fn(), terminal: { rows: 20, columns: 100 } },
+      {},
+      {},
+      root,
+      vi.fn(),
+      runId,
+    );
+
+    expect(viewer.render(100).join("\n")).toContain("run · 1 evidence item(s)");
+    viewer.handleInput("enter");
+    expect(viewer.render(100).join("\n")).toContain("operator-ask · call-0001 · operator-ask-0001.json");
+    viewer.handleInput("enter");
+    const rendered = viewer.render(100).join("\n");
+    expect(rendered).toContain('"question": "Which storage?"');
+    expect(rendered).toContain('"answer": "sqlite"');
+  });
+
   it.each([
     { label: "identity-only", metadata: { workspacePhysicalIdentity: "workspace" } },
     { label: "schema-only", metadata: { workspacePhysicalIdentitySchemaVersion: 1 } },

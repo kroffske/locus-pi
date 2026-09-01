@@ -153,6 +153,7 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-input-reasons-"));
     try {
       const runId = "20260617-120000-abcd";
+      const focus = `recheck-${"evidence".repeat(16)}`;
       await writeCompletedWorkflowRun(projectRoot, runId);
       const h = createHarness(projectRoot);
       h.ctx.hasUI = true;
@@ -162,7 +163,7 @@ describe("loop command surfaces", () => {
         .fn()
         .mockResolvedValueOnce("   ")
         .mockResolvedValueOnce("workflow")
-        .mockResolvedValueOnce(`workflow ${runId} recheck the verify phase`);
+        .mockResolvedValueOnce(`workflow ${runId} ${focus}`);
       h.ctx.ui.editor = editor as never;
 
       await h.commands.get("loop")!.handler("", h.ctx);
@@ -171,12 +172,15 @@ describe("loop command surfaces", () => {
       expect(editor).toHaveBeenNthCalledWith(2, "[WARN] Loop continuation — enter goal or workflow source", "   ");
       expect(editor).toHaveBeenNthCalledWith(3, "[WARN] Loop continuation — workflow requires a run id", "workflow");
 
-      const artifact = JSON.parse(
-        await readFile(path.join(projectRoot, ".locus", "runtime", "loop", "workflow", `${runId}.json`), "utf8"),
-      ) as Record<string, unknown>;
-      expect(artifact).toMatchObject({ source: "workflow", runId, autoDispatch: false, maxSteps: 1 });
-      expect(String(artifact.prompt ?? "")).toContain("recheck the verify phase");
-      expect(h.widgets.get("loop") ?? "").toContain("[RESULT]");
+      const widget = h.widgets.get("loop") ?? "";
+      expect(widget).toContain("[RESULT] Loop continuation [WORKFLOW]");
+      expect(widget).toContain("sourceSummary:\nstatus: completed");
+      expect(widget).toContain("prompt:\nTask:");
+      expect(widget.replace(/\r?\n/gu, "")).toContain(focus);
+      expect(widget).toContain("Final result:\nChoose one bounded workflow follow-up and stop.");
+      expect(widget).not.toContain("path:");
+      expect(widget).not.toContain("...");
+      expect(existsSync(path.join(projectRoot, ".locus", "runtime", "loop", "workflow"))).toBe(false);
       expect(h.statuses.get("locus")).toBe("LOOP: workflow");
       expect(h.sentMessages).toEqual([]);
       expect(h.sentUserMessages).toEqual([]);

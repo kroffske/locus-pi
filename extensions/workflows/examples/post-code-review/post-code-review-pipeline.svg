@@ -18,7 +18,7 @@
 
   <rect x="60" y="105" width="1480" height="92" rx="16" fill="#fef3c7" stroke="#b45309" stroke-width="2"/>
   <text x="86" y="132" class="sans tag">OPERATOR: REQUEST WORKSPACE</text>
-  <text x="86" y="158" class="mono title">.locus-pi/plans/&lt;run-name&gt;/style.md</text>
+  <text x="86" y="158" class="mono title">.locus-pi/workspaces/&lt;run-name&gt;/style.md</text>
   <text x="86" y="181" class="sans body">Workflow: runtime preserves a regular file or creates it empty before any Agent starts.</text>
 
   <path d="M800 197 V230" class="edge"/>

@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE,
+  WORKFLOW_FINALIZATION_ERROR_MAX_CHARS,
   WORKFLOW_RESULT_NOT_JSON_SAFE,
   WORKFLOW_RESULT_WRITE_FAILED,
   classifyWorkflowReturnedFailure,
@@ -14,6 +15,7 @@ import {
   prepareWorkflowResult,
   projectWorkflowDisposition,
   workflowDispositionForCompletion,
+  workflowFinalizationError,
   workflowResultFile,
   writeWorkflowResultJson,
 } from "../../../../extensions/workflows/runtime/workflow-result.js";
@@ -23,6 +25,16 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 
 describe("workflow result JSON boundary", () => {
+  it("bounds typed finalization errors without changing their stage", () => {
+    const exact = workflowFinalizationError("report", "report failed");
+    expect(exact).toEqual({ stage: "report", message: "report failed" });
+
+    const bounded = workflowFinalizationError("lease-release", "x".repeat(2000));
+    expect(bounded.stage).toBe("lease-release");
+    expect(bounded.message).toHaveLength(WORKFLOW_FINALIZATION_ERROR_MAX_CHARS);
+    expect(bounded.message).toMatch(/truncated/u);
+  });
+
   it("projects new dispositions strictly while preserving only absent legacy envelopes", () => {
     expect(projectWorkflowDisposition({ ok: true, result: { summary: "legacy" } })).toEqual({
       status: "completed",

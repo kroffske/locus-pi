@@ -1359,18 +1359,76 @@ describe("workflow run report budget section", () => {
     const persisted = readFileSync(workflowJournalFile(result.runDir), "utf8");
     assert.match(persisted, /Workflow run report was not written/u);
     assert.match(persisted, /Workflow terminal output was not persisted/u);
-    // And so does result.json, which is the point of writing the report BEFORE it.
-    // journal.ndjson alone would not carry the guarantee — its sink swallows its own
-    // write failures so it can never throw into a running workflow — whereas
-    // result.json reports its own persistence outcome, so losing the line everywhere
-    // takes a second, separately reported, failure.
+    // result.json keeps only the bounded independent finalization projection.
+    // The complete chronological journal has one owner: journal.ndjson.
     assert.equal(result.resultPersistence.ok, true);
     const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
-      journal?: { message?: string }[];
+      journal?: unknown;
+      finalizationErrors?: Array<{ stage?: string; message?: string }>;
     };
-    assert.ok(
-      (envelope.journal ?? []).some((line) => (line.message ?? "").includes("Workflow run report was not written")),
-      "result.json must carry the failure line independently of the best-effort journal sink",
+    assert.equal(envelope.journal, undefined);
+    assert.deepEqual(
+      envelope.finalizationErrors?.map((entry) => entry.stage),
+      ["terminal-output", "report"],
+    );
+    assert.match(envelope.finalizationErrors?.[1]?.message ?? "", /Workflow run report was not written/u);
+  });
+
+  it("persists finalization errors when the best-effort journal append also fails", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-finalization-fallback-"));
+    roots.push(root);
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
+      "utf8",
+    );
+    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "finalization-fallback.workflow.mjs"),
+      'export default async function runWorkflow(dsl) { return await dsl.agent("answer"); }\n',
+      "utf8",
+    );
+    const harness = createHarness(root, { sessionId: "finalization-fallback" });
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "finalization-fallback",
+      onRunStart: ({ runDir }) => {
+        rmSync(path.join(runDir, "outputs"), { recursive: true });
+        writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
+        const journalPath = workflowJournalFile(runDir);
+        rmSync(journalPath);
+        mkdirSync(journalPath);
+      },
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          return {
+            status: "completed",
+            agentName: request.agent?.name ?? "sub-agent",
+            reason: "answered",
+            text: "answer",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(
+      result.finalizationErrors?.map((entry) => entry.stage),
+      ["terminal-output", "report"],
+    );
+    const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
+      journal?: unknown;
+      finalizationErrors?: Array<{ stage: string; message: string }>;
+    };
+    assert.equal(envelope.journal, undefined);
+    assert.deepEqual(
+      envelope.finalizationErrors?.map((entry) => entry.stage),
+      ["terminal-output", "report"],
     );
   });
 

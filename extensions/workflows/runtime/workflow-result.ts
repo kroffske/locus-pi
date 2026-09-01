@@ -17,6 +17,15 @@ import {
 export const WORKFLOW_RESULT_NOT_JSON_SAFE = "WORKFLOW_RESULT_NOT_JSON_SAFE";
 export const WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE = "WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE";
 export const WORKFLOW_RESULT_WRITE_FAILED = "WORKFLOW_RESULT_WRITE_FAILED";
+export const WORKFLOW_FINALIZATION_ERROR_MAX_CHARS = 1000;
+
+export type WorkflowFinalizationStage = "terminal-output" | "lease-release" | "report";
+
+/** Independent bounded fallback for late errors whose journal append is best-effort. */
+export interface WorkflowFinalizationError {
+  stage: WorkflowFinalizationStage;
+  message: string;
+}
 
 export type WorkflowDispositionStatus = "completed" | "awaiting_operator" | "cancelled" | "failed";
 export type WorkflowCancellationReason = "operator_stop" | "session_shutdown" | "aborted";
@@ -54,6 +63,18 @@ export type WorkflowResultPersistence =
     };
 
 type JsonSerialization = { ok: true; json: string } | { ok: false; message: string };
+
+export function workflowFinalizationError(
+  stage: WorkflowFinalizationStage,
+  message: string,
+): WorkflowFinalizationError {
+  const suffix = "… [truncated]";
+  const bounded =
+    message.length <= WORKFLOW_FINALIZATION_ERROR_MAX_CHARS
+      ? message
+      : `${message.slice(0, WORKFLOW_FINALIZATION_ERROR_MAX_CHARS - suffix.length)}${suffix}`;
+  return { stage, message: bounded };
+}
 
 /**
  * The run's terminal text, kept verbatim in its own file.

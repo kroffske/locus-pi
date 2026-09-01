@@ -10,10 +10,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "../../_shared/host/pi-api.js";
 import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
-import { clearModeState, loadModeState } from "./mode-state.js";
+import { clearModeState, loadModeState, writeModeState } from "./mode-state.js";
 import { setModeStatus } from "../operator/operator-surface.js";
+import { preparePlanLibrary, rebindPreparedPlanArtifactPath } from "./plan-storage.js";
+import { errorMessage } from "../../_shared/host/error-text.js";
 
-export type PlanExitAction = "plain-exit" | "kept" | "execute" | "execute-fresh" | "tweak-execute";
+export interface PlanExitPreparationError {
+  kind: "preparation-error";
+  reason: string;
+}
+
+export type PlanExitAction =
+  "plain-exit" | "kept" | "execute" | "execute-fresh" | "tweak-execute" | PlanExitPreparationError;
 
 const PLAN_EXIT_TITLE = "Plan ready — what next?";
 const PLAN_EXIT_EXECUTE = "Execute the plan (this context)";
@@ -47,7 +55,19 @@ export async function runPlanExitDecision(
   pi: ExtensionAPI,
   projectRoot: string,
 ): Promise<PlanExitAction> {
-  const state = loadModeState(projectRoot);
+  let state = loadModeState(projectRoot);
+  try {
+    preparePlanLibrary(projectRoot);
+    if (state !== null && state.activeArtifactPath !== "") {
+      const activeArtifactPath = rebindPreparedPlanArtifactPath(projectRoot, state.activeArtifactPath);
+      if (activeArtifactPath !== state.activeArtifactPath) {
+        state = { ...state, activeArtifactPath };
+        writeModeState(projectRoot, state);
+      }
+    }
+  } catch (error) {
+    return { kind: "preparation-error", reason: errorMessage(error) };
+  }
   const artifactPath = state?.activeArtifactPath;
   const hasArtifact = typeof artifactPath === "string" && existsSync(artifactPath);
 

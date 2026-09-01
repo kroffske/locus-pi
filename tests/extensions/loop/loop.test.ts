@@ -311,7 +311,7 @@ describe("loop bounded continuation runtime", () => {
     }
   });
 
-  it("creates workflow continuations from persisted run metadata", async () => {
+  it("returns workflow continuations inline without creating a side file", async () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-workflow-"));
     try {
       const h = createHarness(projectRoot);
@@ -337,9 +337,14 @@ describe("loop bounded continuation runtime", () => {
       const result = await runTool(h, "loop", { action: "once", source: "workflow", runId });
       expect(result.isError).not.toBe(true);
       expect(result.content[0]).toMatchObject({ type: "text" });
-      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("source: workflow");
-      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain(`runId: ${runId}`);
-      expect(result.content[0]?.type === "text" ? result.content[0].text : "").toContain("autoDispatch: false");
+      const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
+      expect(resultText).toContain("Loop continuation ready.");
+      expect(resultText).toContain("source: workflow");
+      expect(resultText).toContain(`runId: ${runId}`);
+      expect(resultText).toContain("autoDispatch: false");
+      expect(resultText).toContain("sourceSummary:\nstatus: completed");
+      const [metadataAndSummary = ""] = resultText.split("\nprompt:\n", 1);
+      expect(metadataAndSummary.split(/\r?\n/u).every((line) => line.length <= 80)).toBe(true);
       expect(result.details).toMatchObject({
         owner: "loop",
         source: "workflow",
@@ -355,23 +360,13 @@ describe("loop bounded continuation runtime", () => {
         },
       });
       expect(String(result.details?.sourceSummary ?? "")).toContain("status: completed");
-      expect(String(result.details?.prompt ?? "")).toContain("Task:");
-      expect(String(result.details?.prompt ?? "")).toContain("Final result:");
-
-      const artifact = JSON.parse(
-        await readFile(path.join(projectRoot, ".locus", "runtime", "loop", "workflow", `${runId}.json`), "utf8"),
-      ) as Record<string, unknown>;
-      expect(artifact).toMatchObject({
-        version: 1,
-        source: "workflow",
-        runId,
-        autoDispatch: false,
-        status: "manual",
-        maxSteps: 1,
-      });
-      expect(String(artifact.sourceSummary ?? "")).toContain("status: completed");
-      expect(String(artifact.prompt ?? "")).toContain("Task:");
-      expect(String(artifact.prompt ?? "")).toContain("Final result:");
+      const prompt = String(result.details?.prompt ?? "");
+      expect(prompt).toContain("Task:");
+      expect(prompt).toContain("Final result:");
+      expect(resultText.endsWith(prompt)).toBe(true);
+      expect(result.details).not.toHaveProperty("path");
+      expect(result.details?.workflowContinuation).not.toHaveProperty("path");
+      expect(existsSync(path.join(projectRoot, ".locus", "runtime", "loop", "workflow"))).toBe(false);
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
