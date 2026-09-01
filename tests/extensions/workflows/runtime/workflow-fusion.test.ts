@@ -530,6 +530,93 @@ describe("dsl.fusion", () => {
     expect(divergentCalls).toBe(0);
   });
 
+  /**
+   * A `fusion()` group standing after the divergence point is a NAMED BOUNDARY of
+   * repair-and-continue, not a defect. Every member and the judge are marked
+   * "replay required" for the whole of any resume, so once the latch is set the
+   * group ends the run with one error instead of running a fresh panel. Both
+   * tests below assert that error rather than a fresh execution.
+   */
+  it("ends a repaired resume at the fusion group instead of running a fresh panel", async () => {
+    const sourceDir = temporaryRunDir("workflow-fusion-repair-source-", "fusion-repair-source");
+    const source = createWorkflowRuntime({
+      runId: "fusion-repair-source",
+      replay: createWorkflowReplayController({ runDir: sourceDir }),
+      agentRunner: async (request) =>
+        success(request, request.model === "test/judge" ? "recorded verdict" : `candidate ${request.model}`),
+    });
+    await source.dsl.agent("stage-a", { label: "node-a" });
+    await expect(source.dsl.fusion("question", BASE)).resolves.toBe("recorded verdict");
+
+    const sourceEntries = readFileSync(workflowReplayFile(sourceDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    let freshCalls = 0;
+    const repaired = createWorkflowRuntime({
+      runId: "fusion-repair-resumed",
+      replay: createWorkflowReplayController({
+        runDir: temporaryRunDir("workflow-fusion-repair-resumed-", "fusion-repair-resumed"),
+        recorded: sourceEntries,
+        sourceScriptChanged: true,
+      }),
+      replaySourceRunId: "fusion-repair-source",
+      agentRunner: async (request) => {
+        freshCalls += 1;
+        return success(request, "fresh answer");
+      },
+    });
+    // The repair edits the node before the group, so the latch is set by the time
+    // the panel is reached.
+    await expect(repaired.dsl.agent("stage-a repaired", { label: "node-a" })).resolves.toBe("fresh answer");
+    await expect(repaired.dsl.fusion("question", BASE)).rejects.toThrow(
+      /fusion resume cannot mix recorded and fresh agent calls/u,
+    );
+    expect(freshCalls).toBe(1);
+  });
+
+  it("ends a byte-identical resume at the fusion group after a recorded failure", async () => {
+    const sourceDir = temporaryRunDir("workflow-fusion-failure-source-", "fusion-failure-source");
+    const sourceController = createWorkflowReplayController({ runDir: sourceDir });
+    // A recorded `ok:false` followed by a recorded panel. Before divergence
+    // latched on every miss, this exact resume replayed the whole fusion tail.
+    // Losing that is a deliberate tightening: the tail's answers were produced
+    // after the failed node behaved differently.
+    sourceController.recordAgentAttempt({ canonicalRequest: "stage-a" }, { ok: false });
+    const source = createWorkflowRuntime({
+      runId: "fusion-failure-source",
+      replay: sourceController,
+      agentRunner: async (request) =>
+        success(request, request.model === "test/judge" ? "recorded verdict" : `candidate ${request.model}`),
+    });
+    await expect(source.dsl.fusion("question", BASE)).resolves.toBe("recorded verdict");
+
+    const sourceEntries = readFileSync(workflowReplayFile(sourceDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+
+    let freshCalls = 0;
+    const resumed = createWorkflowRuntime({
+      runId: "fusion-failure-resumed",
+      replay: createWorkflowReplayController({
+        runDir: temporaryRunDir("workflow-fusion-failure-resumed-", "fusion-failure-resumed"),
+        recorded: sourceEntries,
+      }),
+      replaySourceRunId: "fusion-failure-source",
+      agentRunner: async (request) => {
+        freshCalls += 1;
+        return success(request, "fresh answer");
+      },
+    });
+    await expect(resumed.dsl.agent("stage-a")).resolves.toBe("fresh answer");
+    await expect(resumed.dsl.fusion("question", BASE)).rejects.toThrow(
+      /fusion resume cannot mix recorded and fresh agent calls/u,
+    );
+    expect(freshCalls).toBe(1);
+  });
+
   it("marks a replayed judge validator throw as replayed terminal evidence", async () => {
     const schema = {
       type: "object",

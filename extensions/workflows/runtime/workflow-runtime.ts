@@ -2494,6 +2494,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * fields would attribute one call's discarded attempt to the other.
    */
   let totalLogicalAgentCalls = 0;
+  /** Per-run `(phase,label)` -> how many calls that slot has already opened. */
+  const agentNodeOccurrences = new Map<string, number>();
   let totalFusionCalls = 0;
   const journal = options.journal;
   const nowFn = options.now ?? (() => new Date().toISOString());
@@ -2552,7 +2554,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * to do to get an answer.
    *
    * The replay record is POSITIONAL (`workflow-replay.ts` advances a read cursor per
-   * `beginAgentAttempt` and latches divergence on a key mismatch), and a transport retry
+   * `beginAgentAttempt` and latches divergence on any miss), and a transport retry
    * re-sends the identical prompt. So a discarded attempt recorded at its own ordinal would
    * write two entries with the same key at consecutive positions; on resume the first
    * re-executes, succeeds, and every later call reads an ordinal off by one — a key
@@ -2644,9 +2646,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // the physical attempts below share, and the only field a report can group them by.
     totalLogicalAgentCalls += 1;
     const logicalCallId = `logical-${String(totalLogicalAgentCalls).padStart(4, "0")}`;
-    const lookup = options.replay?.beginAgentAttempt(canonicalRequest, replayable);
+    // Claimed on the same synchronous stretch that opens the record's ordinal
+    // below, so the occurrence counter and the position always describe the same
+    // call. One object serves the lookup and all three record sites, so the name
+    // written can never drift from the name compared.
+    const node = workflowNodeName(req, agentNodeOccurrences);
+    const replayCall = { ...(node === undefined ? {} : { node }), canonicalRequest };
+    const lookup = options.replay?.beginAgentAttempt({ ...replayCall, replayable });
     if (opts?.[FUSION_REPLAY_REQUIRED] === true && lookup?.replayed !== true) {
-      options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+      options.replay?.recordAgentAttempt(replayCall, { ok: false });
       throw new Error(
         `fusion resume cannot mix recorded and fresh agent calls; replay missed with ${lookup?.reason ?? "no replay controller"}`,
       );
@@ -2673,13 +2681,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         // A THROWN failure carries no classified cause, so it is never retried. Record it so
         // the recorded sequence keeps the same ordinals as the live one: a later resume then
         // replays the prefix and re-runs the call that failed, which is the point of resuming.
-        options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+        options.replay?.recordAgentAttempt(replayCall, { ok: false });
         throw err;
       }
       if (physical.ok) {
         // This run writes its OWN complete record, replayed entries included, so a
         // resume of a resume still has an unbroken prefix to work from.
-        options.replay?.recordAgentAttempt(canonicalRequest, { ok: true, text: physical.text });
+        options.replay?.recordAgentAttempt(replayCall, { ok: true, text: physical.text });
         return physical.outcome;
       }
       lastFailure = physical.result;
@@ -2695,7 +2703,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         message: `[workflow:retry] ${workflowAgentDisplayName(req)}${req.label === undefined ? "" : ` (${req.label})`}: transport attempt ${attempt} of ${attempts} failed with ${workflowAgentFailureCause(physical.result)}; re-running the identical request`,
       });
     }
-    options.replay?.recordAgentAttempt(canonicalRequest, { ok: false });
+    options.replay?.recordAgentAttempt(replayCall, { ok: false });
     throw new WorkflowAgentExecutionError(lastFailure!);
   }
 
@@ -3690,6 +3698,31 @@ function assertBoundContinuation(binding: WorkflowBoundContinuation | undefined,
  */
 export function workflowSlotKey(input: { phase?: string | undefined; label?: string | undefined }): string {
   return `${input.phase ?? ""}${input.label ?? ""}`;
+}
+
+/**
+ * Readable identity of one agent call for the replay record: `(phase, label,
+ * occurrence)`, where `occurrence` counts the earlier calls sharing that slot in
+ * THIS run. A loop or a `parallel()` branch legitimately repeats a label, so the
+ * counter is what keeps two rounds of one node apart.
+ *
+ * A call without a label gets no name, and the replay controller fails closed on
+ * it once the source bytes changed: naming a call is the author's job, and the
+ * runtime has no second source of truth to fall back on.
+ *
+ * Called on the synchronous path that also claims the record's ordinal, so the
+ * counter and the position are captured together; deriving the name after an
+ * `await` would let another branch of a group take the ordinal in between.
+ */
+function workflowNodeName(
+  input: { phase?: string | undefined; label?: string | undefined },
+  occurrences: Map<string, number>,
+): string | undefined {
+  if (input.label === undefined) return undefined;
+  const slot = workflowSlotKey(input);
+  const occurrence = occurrences.get(slot) ?? 0;
+  occurrences.set(slot, occurrence + 1);
+  return JSON.stringify([input.phase ?? null, input.label, occurrence]);
 }
 
 /**

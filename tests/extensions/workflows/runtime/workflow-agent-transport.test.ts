@@ -1137,11 +1137,11 @@ describe("agent attempts — replay", () => {
     const begun: string[] = [];
     const recorded: Array<{ ok: boolean }> = [];
     const controller: WorkflowReplayController = {
-      beginAgentAttempt: (canonicalRequest) => {
-        begun.push(canonicalRequest);
+      beginAgentAttempt: (call) => {
+        begun.push(call.canonicalRequest);
         return { replayed: false, reason: "no-record" };
       },
-      recordAgentAttempt: (_canonicalRequest, outcome) => {
+      recordAgentAttempt: (_call, outcome) => {
         recorded.push({ ok: outcome.ok });
       },
       resolveValue: (_kind, produce) => produce(),
@@ -1193,8 +1193,8 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     const { controller, begun } = (() => {
       const begunKeys: string[] = [];
       const ctrl: WorkflowReplayController = {
-        beginAgentAttempt: (key) => {
-          begunKeys.push(key);
+        beginAgentAttempt: (call) => {
+          begunKeys.push(call.canonicalRequest);
           return { replayed: false, reason: "no-record" };
         },
         recordAgentAttempt: () => {},

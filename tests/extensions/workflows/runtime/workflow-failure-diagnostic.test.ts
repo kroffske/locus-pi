@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import type { AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   buildWorkflowFailureDiagnostic,
   formatWorkflowFailureDiagnosticLines,
@@ -35,10 +36,12 @@ describe("workflow failure diagnostic", () => {
       error: "review inventory returned neither a coverage entry nor the declaration",
       target: { ref: "review" },
       scriptIdentity: { sourcePath: "/repo/extensions/workflows/examples/review/review.workflow.mjs" },
+      // Exactly the shape the artifact store records: relative to the run's
+      // artifacts directory, so the pointer must resolve under runtime/artifacts.
       artifacts: [
-        { kind: "answer", stage: "resolve-scope", relativePath: "artifacts/answers/call-0002-scope.md.md" },
-        { kind: "answer", stage: "inventory-changes", relativePath: "artifacts/answers/call-0003-inventory.md.md" },
-        { kind: "published", stage: "resolve-scope", relativePath: "artifacts/published/published-0001-intent.md" },
+        { kind: "answer", stage: "resolve-scope", relativePath: "answers/call-0002-scope.md.md" },
+        { kind: "answer", stage: "inventory-changes", relativePath: "answers/call-0003-inventory.md.md" },
+        { kind: "published", stage: "resolve-scope", relativePath: "published/published-0001-intent.md" },
       ],
     });
 
@@ -48,13 +51,13 @@ describe("workflow failure diagnostic", () => {
       stage: "inventory-changes",
       workflow: "review",
       scriptPath: "extensions/workflows/examples/review/review.workflow.mjs",
-      evidencePath: ".pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md",
+      evidencePath: ".pi/locus-pi/runs/run-1/runtime/artifacts/answers/call-0003-inventory.md.md",
       journalPath: ".pi/locus-pi/runs/run-1/journal.ndjson",
       repairRequest:
         'Fix the "review" workflow: its script rejected the run at stage "inventory-changes" — review inventory ' +
         "returned neither a coverage entry nor the declaration. " +
         "Script: extensions/workflows/examples/review/review.workflow.mjs. " +
-        "Failing stage answer: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md. " +
+        "Failing stage answer: .pi/locus-pi/runs/run-1/runtime/artifacts/answers/call-0003-inventory.md.md. " +
         "Run journal: .pi/locus-pi/runs/run-1/journal.ndjson.",
     });
     // The repair request survives a round trip through result.json unchanged.
@@ -102,8 +105,9 @@ describe("workflow failure diagnostic", () => {
         path.join(root, "boom.workflow.mjs"),
         [
           "export const meta = { name: 'boom', description: 'throws in a declared stage' };",
-          "export default async function run({ phase }) {",
+          "export default async function run({ agent, phase }) {",
           "  phase('inventory-changes');",
+          "  await agent('inventory the changes', { label: 'inventory' });",
           "  throw new Error('inventory answer does not follow its prompt');",
           "}",
           "",
@@ -116,6 +120,18 @@ describe("workflow failure diagnostic", () => {
         ctx: harness.ctx,
         signal: new AbortController().signal,
         scriptPath: "boom.workflow.mjs",
+        createExecutor: () => ({
+          async run(request: AgentRunRequest) {
+            return {
+              status: "completed" as const,
+              agentName: request.agent?.name ?? "sub-agent",
+              reason: "answered",
+              text: "inventory: two files changed",
+              diagnostics: [],
+              lifecycleEntryIds: [],
+            };
+          },
+        }),
       });
 
       expect(result.ok).toBe(false);
@@ -127,6 +143,13 @@ describe("workflow failure diagnostic", () => {
         scriptPath: "boom.workflow.mjs",
       });
       expect(result.failureDiagnostic?.journalPath).toContain(result.runId);
+      // The pointer is only useful if it opens. Asserting the string shape alone
+      // is how a two-segment path error survived: the producer writes the answer
+      // relative to the artifacts directory, and the diagnostic must say so.
+      const evidencePath = result.failureDiagnostic?.evidencePath;
+      expect(evidencePath).toBeDefined();
+      expect(existsSync(path.resolve(root, evidencePath ?? ""))).toBe(true);
+      expect(readFileSync(path.resolve(root, evidencePath ?? ""), "utf8")).toContain("inventory: two files changed");
       expect(result.failureDiagnostic?.repairRequest).toContain('Fix the "boom.workflow.mjs" workflow');
       expect(result.failureDiagnostic?.repairRequest).toContain("Script: boom.workflow.mjs");
 

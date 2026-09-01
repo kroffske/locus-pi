@@ -49,7 +49,6 @@ const roots: string[] = [];
 const REPLAY_REFUSAL_REASONS: Record<WorkflowReplayRefusalReason, true> = {
   "source-run-unusable": true,
   "target-changed": true,
-  "script-changed": true,
   "identity-coverage-unproven": true,
   "replay-unsafe-script": true,
   "no-recorded-calls": true,
@@ -178,6 +177,27 @@ export default async function runWorkflow(dsl, input) {
   return { summary: [one, two, three].join(" | ") };
 }
 `;
+
+/**
+ * Three labeled stages, so a repair between two runs can name the node it
+ * repaired. `bPrompt` is the only thing an edit changes, which is what makes the
+ * middle node the repaired one and A the completed prefix.
+ */
+function labeledThreeStageWorkflow(bPrompt: string): string {
+  return `export const meta = { name: "labeled", description: "three labeled stages" };
+export default async function runWorkflow(dsl) {
+  const a = await dsl.agent("stage-a", { label: "node-a" });
+  const b = await dsl.agent(${JSON.stringify(bPrompt)}, { label: "node-b" });
+  const c = await dsl.agent("stage-c", { label: "node-c" });
+  return { summary: [a, b, c].join(" | ") };
+}
+`;
+}
+
+/** The name the runtime writes and compares: `[phase, label, occurrence]`. */
+function nodeName(label: string, occurrence = 0, phase: string | null = null): string {
+  return JSON.stringify([phase, label, occurrence]);
+}
 
 /**
  * The scripted child echoes its prompt, so the JSON it must return is fenced
@@ -438,24 +458,269 @@ describe("workflow --resume replays recorded agent calls", () => {
     });
   });
 
-  it("refuses to replay when the script bytes changed, and runs every call fresh", async () => {
+  it("continues a repaired workflow from the stop point instead of refusing the changed bytes", async () => {
     const root = temporaryProject();
-    writeWorkflow(root, "stages", THREE_STAGE_WORKFLOW);
-    const first = await runWorkflow(root, "stages", { input: "alpha" });
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b"));
+    const first = await runWorkflow(root, "labeled");
+    expect(first.executedPrompts).toEqual(["stage-a", "stage-b", "stage-c"]);
 
-    // Same prompts, different bytes: the runner cannot prove the recorded calls
-    // still sit at the same positions, so it refuses rather than guessing.
-    writeWorkflow(root, "stages", `${THREE_STAGE_WORKFLOW}\n// reviewed edit\n`);
-    const resumed = await runWorkflow(root, "stages", { input: "alpha", resumeFromRunId: first.runId });
+    // The repair: only node B's prompt changes. This is the whole feature — the
+    // operator edits the stopped workflow in place and continues the same run id.
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b repaired"));
+    const resumed = await runWorkflow(root, "labeled", { resumeFromRunId: first.runId });
 
+    // The load-bearing assertion is about REUSE, not freshness: `freshCalls: 2`
+    // alone is equally true of a full restart. A never reaches a child again.
+    expect(resumed.executedPrompts).toEqual(["stage-b repaired", "stage-c"]);
+    expect(resumed.executedPrompts).not.toContain("stage-a");
     expect(resumed.replay).toMatchObject({
-      replayed: false,
-      refusedReason: "script-changed",
+      replayed: true,
+      replayedCalls: 1,
+      freshCalls: 2,
+      divergedAtCall: 1,
+      divergedAtNode: nodeName("node-b"),
+    });
+    expect(resumed.replay.refusedReason).toBeUndefined();
+    expect(resumed.result).toMatchObject({
+      summary: "answer(stage-a) | answer(stage-b repaired) | answer(stage-c)",
+    });
+  });
+
+  it("still reaches zero reuse when the repair also edits the earlier node", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b"));
+    const first = await runWorkflow(root, "labeled");
+
+    // The distinguishing negative. Without it the positive test above proves
+    // nothing: a counter that can only ever report reuse would pass it too.
+    writeWorkflow(
+      root,
+      "labeled",
+      labeledThreeStageWorkflow("stage-b repaired").replace('"stage-a"', '"stage-a repaired"'),
+    );
+    const resumed = await runWorkflow(root, "labeled", { resumeFromRunId: first.runId });
+
+    expect(resumed.executedPrompts).toEqual(["stage-a repaired", "stage-b repaired", "stage-c"]);
+    expect(resumed.replay).toMatchObject({
       replayedCalls: 0,
       freshCalls: 3,
+      divergedAtCall: 0,
+      divergedAtNode: nodeName("node-a"),
     });
-    expect(resumed.executedPrompts).toEqual(["stage-1", "stage-2 alpha", "stage-3"]);
-    expect(resumed.journal.some((line) => JSON.stringify(line).includes("reason=script-changed"))).toBe(true);
+  });
+
+  it("compares the recorded node name before the request key when the source changed", () => {
+    // A SYNTHETIC unit on hand-written entries, and only that: it fixes the order
+    // of the controller's checks. The runtime cannot produce this input, because
+    // the canonical key already carries `phase` and `label`, so two different
+    // names always hash to two different keys. It is not evidence against any
+    // reachable answer substitution — that one is closed by the unique-label rule.
+    const root = temporaryProject();
+    const sourceRunId = "20260812-020202-a001";
+    const source = createWorkflowReplayController({ runDir: ensureWorkflowRunDir(root, sourceRunId) });
+    source.recordAgentAttempt(
+      { node: nodeName("recorded"), canonicalRequest: "recorded-request" },
+      {
+        ok: true,
+        text: "recorded answer",
+      },
+    );
+
+    const resumed = createWorkflowReplayController({
+      runDir: ensureWorkflowRunDir(root, "20260812-020202-a002"),
+      recorded: readWorkflowReplayLog(root, sourceRunId),
+      sourceScriptChanged: true,
+    });
+
+    // Both the name and the key differ; the reported reason names the node.
+    expect(
+      resumed.beginAgentAttempt({ node: nodeName("current"), canonicalRequest: "other-request", replayable: true }),
+    ).toEqual({ replayed: false, reason: "node-mismatch" });
+  });
+
+  it("latches divergence after a recorded failure so the tail cannot replay a stale world", () => {
+    const root = temporaryProject();
+    const sourceRunId = "20260812-010101-f001";
+    const source = createWorkflowReplayController({ runDir: ensureWorkflowRunDir(root, sourceRunId) });
+    source.recordAgentAttempt({ canonicalRequest: "call-0" }, { ok: true, text: "recorded answer" });
+    source.recordAgentAttempt({ canonicalRequest: "call-1" }, { ok: false });
+    source.recordAgentAttempt({ canonicalRequest: "call-2" }, { ok: true, text: "later answer" });
+
+    const resumed = createWorkflowReplayController({
+      runDir: ensureWorkflowRunDir(root, "20260812-010101-f002"),
+      recorded: readWorkflowReplayLog(root, sourceRunId),
+    });
+
+    // A recorded failure is never served back as an answer: it is named and re-run.
+    expect(resumed.beginAgentAttempt({ canonicalRequest: "call-0", replayable: true })).toEqual({
+      replayed: true,
+      text: "recorded answer",
+    });
+    expect(resumed.beginAgentAttempt({ canonicalRequest: "call-1", replayable: true })).toEqual({
+      replayed: false,
+      reason: "recorded-failure",
+    });
+    // And re-running it changed the world, so the answer recorded AFTER it came
+    // from a run where that node behaved differently. Serving it would be a
+    // silent lie, so the latch holds for the rest of the run.
+    expect(resumed.beginAgentAttempt({ canonicalRequest: "call-2", replayable: true })).toEqual({
+      replayed: false,
+      reason: "diverged",
+    });
+    expect(resumed.counts()).toEqual({ replayedCalls: 1, freshCalls: 2, divergedAtCall: 1 });
+  });
+
+  it("latches divergence after a side-effecting call, which no longer replays its tail", () => {
+    const root = temporaryProject();
+    const sourceRunId = "20260812-030303-s001";
+    const source = createWorkflowReplayController({ runDir: ensureWorkflowRunDir(root, sourceRunId) });
+    source.recordAgentAttempt({ canonicalRequest: "call-0" }, { ok: true, text: "first answer" });
+    source.recordAgentAttempt({ canonicalRequest: "call-1" }, { ok: true, text: "worktree answer" });
+    source.recordAgentAttempt({ canonicalRequest: "call-2" }, { ok: true, text: "later answer" });
+
+    const resumed = createWorkflowReplayController({
+      runDir: ensureWorkflowRunDir(root, "20260812-030303-s002"),
+      recorded: readWorkflowReplayLog(root, sourceRunId),
+    });
+
+    expect(resumed.beginAgentAttempt({ canonicalRequest: "call-0", replayable: true })).toEqual({
+      replayed: true,
+      text: "first answer",
+    });
+    // A worktree call runs for real, so the filesystem this run observes is not
+    // the one the later recorded answers describe. This narrows what a resume
+    // reuses, deliberately: the name was previously covered by no test at all.
+    expect(resumed.beginAgentAttempt({ canonicalRequest: "call-1", replayable: false })).toEqual({
+      replayed: false,
+      reason: "side-effecting-call",
+    });
+    expect(resumed.beginAgentAttempt({ canonicalRequest: "call-2", replayable: true })).toEqual({
+      replayed: false,
+      reason: "diverged",
+    });
+    expect(resumed.counts()).toEqual({ replayedCalls: 1, freshCalls: 2, divergedAtCall: 1 });
+  });
+
+  it("keeps a record written before node names replayable on identical bytes only", async () => {
+    const root = temporaryProject();
+    const unnamed = `export const meta = { name: "legacy", description: "two unnamed stages" };
+export default async function runWorkflow(dsl) {
+  const a = await dsl.agent("stage-a");
+  const b = await dsl.agent("stage-b");
+  return { summary: [a, b].join(" | ") };
+}
+`;
+    writeWorkflow(root, "legacy", unnamed);
+    const first = await runWorkflow(root, "legacy");
+    expect(readWorkflowReplayLog(root, first.runId).every((entry) => !("node" in entry))).toBe(true);
+
+    // Unchanged bytes: the position is still a legitimate name, so the old record
+    // replays exactly as it always did.
+    const identical = await runWorkflow(root, "legacy", { resumeFromRunId: first.runId });
+    expect(identical.executedPrompts).toEqual([]);
+    expect(identical.replay).toMatchObject({ replayedCalls: 2, freshCalls: 0 });
+
+    // Repaired bytes: the record cannot say which node it holds, and the current
+    // call has a name it cannot match. Fail closed on the first call, run fresh.
+    writeWorkflow(
+      root,
+      "legacy",
+      unnamed.replace(/dsl\.agent\("stage-(a|b)"\)/gu, 'dsl.agent("stage-$1", { label: "node-$1" })'),
+    );
+    const repaired = await runWorkflow(root, "legacy", { resumeFromRunId: first.runId });
+    expect(repaired.executedPrompts).toEqual(["stage-a", "stage-b"]);
+    expect(repaired.replay).toMatchObject({
+      replayedCalls: 0,
+      freshCalls: 2,
+      divergedAtCall: 0,
+      divergedAtNode: nodeName("node-a"),
+    });
+  });
+
+  it("names the current first fresh call in divergedAtNode, and omits it when that call is unnamed", async () => {
+    const root = temporaryProject();
+    const oneNode = `export const meta = { name: "grow", description: "one labeled stage" };
+export default async function runWorkflow(dsl) {
+  return await dsl.agent("stage-a", { label: "node-a" });
+}
+`;
+    writeWorkflow(root, "grow", oneNode);
+    const first = await runWorkflow(root, "grow");
+
+    // The repair appends a node. Its miss is `no-record`, where no recorded name
+    // exists at all — so the field can only come from the CURRENT call.
+    writeWorkflow(
+      root,
+      "grow",
+      oneNode.replace(
+        'return await dsl.agent("stage-a", { label: "node-a" });',
+        'await dsl.agent("stage-a", { label: "node-a" });\n  return await dsl.agent("stage-b", { label: "node-b" });',
+      ),
+    );
+    const named = await runWorkflow(root, "grow", { resumeFromRunId: first.runId });
+    expect(named.executedPrompts).toEqual(["stage-b"]);
+    expect(named.replay).toMatchObject({ replayedCalls: 1, divergedAtNode: nodeName("node-b") });
+
+    // Same shape, but the appended call carries no label: there is no name to
+    // report, and the field is absent rather than invented.
+    writeWorkflow(
+      root,
+      "grow",
+      oneNode.replace(
+        'return await dsl.agent("stage-a", { label: "node-a" });',
+        'await dsl.agent("stage-a", { label: "node-a" });\n  return await dsl.agent("stage-b");',
+      ),
+    );
+    const unnamedTail = await runWorkflow(root, "grow", { resumeFromRunId: first.runId });
+    expect(unnamedTail.executedPrompts).toEqual(["stage-b"]);
+    expect(unnamedTail.replay).toMatchObject({ replayedCalls: 1, divergedAtCall: 1 });
+    expect(unnamedTail.replay.divergedAtNode).toBeUndefined();
+  });
+
+  it("reads the completed prefix back from the record by node name alone", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b"));
+    const first = await runWorkflow(root, "labeled");
+
+    // This is what the field is stored FOR. The operator asks "which nodes
+    // finished" and answers it from the record, without the workflow source and
+    // without inverting a request hash.
+    const completed = readWorkflowReplayLog(root, first.runId)
+      .filter((entry) => entry.kind === "agent")
+      .map((entry) => (entry as { node?: string }).node);
+    expect(completed).toEqual([nodeName("node-a"), nodeName("node-b"), nodeName("node-c")]);
+  });
+
+  it("serves a deleted duplicate-label call's answer to its twin — the accepted residual", async () => {
+    const root = temporaryProject();
+    let answered = 0;
+    const distinctAnswers = () => `answer-${String((answered += 1))}`;
+    const twins = `export const meta = { name: "twins", description: "two call sites sharing one label" };
+export default async function runWorkflow(dsl) {
+  const first = await dsl.agent("same prompt", { label: "dup" });
+  const second = await dsl.agent("same prompt", { label: "dup" });
+  return { summary: [first, second].join(" | ") };
+}
+`;
+    writeWorkflow(root, "twins", twins);
+    const source = await runWorkflow(root, "twins", { answer: distinctAnswers });
+    expect(source.result).toMatchObject({ summary: "answer-1 | answer-2" });
+
+    // Delete the FIRST site. The survivor slides onto occurrence 0, so its name
+    // and its key both match the deleted call's entry, and it is handed an answer
+    // that belonged to a different call site. The recorded name does not catch
+    // this; nothing in the runtime can. The strict source checker rejects such a
+    // source before it runs, which is where this class is actually closed.
+    writeWorkflow(
+      root,
+      "twins",
+      twins.replace('  const first = await dsl.agent("same prompt", { label: "dup" });\n', "  const first = null;\n"),
+    );
+    const resumed = await runWorkflow(root, "twins", { resumeFromRunId: source.runId, answer: distinctAnswers });
+
+    expect(resumed.executedPrompts).toEqual([]);
+    expect(resumed.result).toMatchObject({ summary: " | answer-1" });
+    expect(resumed.replay).toMatchObject({ replayedCalls: 1 });
   });
 
   it("refuses to replay identical bytes when the persisted target changed", async () => {

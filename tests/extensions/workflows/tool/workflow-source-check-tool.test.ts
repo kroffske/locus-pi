@@ -114,6 +114,94 @@ describe("workflow_check_source", () => {
     );
   });
 
+  it("requires a literal agent label in the strict mode, so a generated workflow can be repaired", async () => {
+    const root = temporaryRoot();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      standardSource('return agent("Review the change");'),
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+
+    // The compatibility mode still accepts every reviewed workflow written before
+    // the rule; only the strict mode generated sources must pass gains it.
+    const compatibility = await runTool(harness, "workflow_check_source", {
+      path: ".pi/workflows/sample.workflow.mjs",
+    });
+    const strict = await runTool(harness, "workflow_check_source", {
+      path: ".pi/workflows/sample.workflow.mjs",
+      mode: "orchestration-only",
+    });
+
+    expect(compatibility.isError).not.toBe(true);
+    expect(strict.isError).toBe(true);
+    expect(strict.details?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "WF_AGENT_LABEL_MISSING",
+          severity: "error",
+          message:
+            "agent() must declare a literal label; a call without one cannot be resumed after the source is repaired",
+        }),
+      ]),
+    );
+  });
+
+  it("rejects two agent calls sharing one label, the only reachable answer substitution", async () => {
+    const root = temporaryRoot();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      standardSource(
+        'const first = await agent("same prompt", { label: "dup" });\n' +
+          '  const second = await agent("same prompt", { label: "dup" });\n' +
+          '  return [first, second].join(" | ");',
+      ).replace("export default function run", "export default async function run"),
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+
+    const strict = await runTool(harness, "workflow_check_source", {
+      path: ".pi/workflows/sample.workflow.mjs",
+      mode: "orchestration-only",
+    });
+
+    // The paired runtime test records what such a source does once it runs: after
+    // the first site is deleted, the second is served the first's recorded answer.
+    // The source never reaching Build is the actual fix.
+    expect(strict.isError).toBe(true);
+    expect(strict.details?.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "WF_AGENT_LABEL_DUPLICATE",
+          severity: "error",
+          message:
+            'agent() label "dup" is already used in this file; two call sites sharing a label are one address on resume',
+        }),
+      ]),
+    );
+  });
+
+  it("accepts a strict source whose agent calls all carry unique literal labels", async () => {
+    const root = temporaryRoot();
+    writeFileSync(
+      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      standardSource(
+        'const draft = await agent("draft it", { label: "draft" });\n' +
+          '  return await agent("review it: " + draft, { label: "review" });',
+      ).replace("export default function run", "export default async function run"),
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+
+    const strict = await runTool(harness, "workflow_check_source", {
+      path: ".pi/workflows/sample.workflow.mjs",
+      mode: "orchestration-only",
+    });
+
+    expect(strict.isError).not.toBe(true);
+    expect(strict.details?.errorCount).toBe(0);
+  });
+
   it("keeps errorCount as the unique legacy-message count when structured occurrences repeat", async () => {
     const root = temporaryRoot();
     writeFileSync(

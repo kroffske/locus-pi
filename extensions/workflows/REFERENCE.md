@@ -2283,10 +2283,50 @@ A declared `schema` needs no separate field — the shape contract is already pa
 of the prompt the child receives, and each schema retry is recorded as its own
 call, so a shaped stage replays its retries exactly as it ran them.
 
-Replay is a **strict prefix**. The first call whose key does not match the record
-invalidates that call _and every later call_, including calls whose own prompt
-did not change: a later recorded answer was produced after an earlier answer that
-no longer exists, so reusing it would misreport what the run observed.
+Each recorded agent line also carries a `node` name, `[phase, label, occurrence]`,
+absent when the call had no `label`. It is the readable identity of the completed
+prefix: `runtime/replay.ndjson` answers "which nodes finished" without the
+workflow source, and the `replay` envelope reports `divergedAtNode`. It is not
+the safety boundary — the key already carries `phase` and `label` — so a name
+never contradicts a matching key on an unbroken prefix.
+
+Replay is a **strict prefix**. The first call that does not resolve from the
+record invalidates that call _and every later call_, including calls whose own
+prompt did not change: a later recorded answer was produced after an earlier
+answer that no longer exists, so reusing it would misreport what the run
+observed. Every miss reason latches, not only a key mismatch — running a call for
+real changes the world the later recorded answers came from.
+
+### Continuing a repaired workflow
+
+Changed source bytes do not end a resume. Repairing the stopped workflow in the
+same file and continuing under the original run id is the supported path: the
+completed nodes return their recorded answers, and the repaired node and its tail
+run fresh. Once the bytes differ, the node name becomes mandatory — a call the
+author never labeled cannot be located in a program that changed under it.
+
+| Miss                  | Meaning                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `no-record`           | the record has no entry at this position                              |
+| `unnamed-node`        | source changed and either the entry or the current call has no name   |
+| `node-mismatch`       | source changed and the names differ                                   |
+| `key-mismatch`        | the resolved request differs from the recorded one                    |
+| `recorded-failure`    | the recorded call failed; a failure is never served back as an answer |
+| `side-effecting-call` | the call writes to a worktree, so its record cannot stand in for it   |
+| `diverged`            | the latch is already set by one of the above                          |
+
+A `fusion()` group standing after the divergence point does not run fresh: every
+member and the judge are replay-required for the whole of any resume, so the
+group ends the run with `fusion resume cannot mix recorded and fresh agent calls`.
+The panel's rule against mixing recorded and live answers is kept at the cost of
+a terminal error. The same rule costs one case that used to work — a
+byte-identical resume no longer replays a fusion tail standing after a recorded
+failure.
+
+The strict `orchestration-only` source mode requires every `agent()` call to
+declare a unique literal `label`. That rule, not the recorded name, is what
+prevents a deleted call site from handing its recorded answer to a twin sharing
+its label.
 
 ### When replay is refused
 
@@ -2297,7 +2337,6 @@ Refusal is never silent — the reason is written to the journal and to
 | ---------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `source-run-unusable`        | the named run has no readable persisted script identity                                              |
 | `target-changed`             | the persisted source target does not match the target selected for this resume                       |
-| `script-changed`             | `scriptSha256` differs from the recorded run's                                                       |
 | `identity-coverage-unproven` | the script declares `entry-only`, so imported bytes could move calls without changing the entry hash |
 | `replay-unsafe-script`       | the AST found direct clock/randomness syntax (below)                                                 |
 | `no-recorded-calls`          | the recorded run wrote no replay record                                                              |
@@ -2358,8 +2397,8 @@ so:
 
 - `journal.ndjson` — `agent_start` / `agent_end` carry `replayed: true`.
 - `result.json` — a `replay` envelope with `replayed`, `recorded`, `sourceRunId`,
-  `refusedReason`, `notRecordedReason`, `replayedCalls`, `freshCalls`, and
-  `divergedAtCall`.
+  `refusedReason`, `notRecordedReason`, `replayedCalls`, `freshCalls`,
+  `divergedAtCall`, and `divergedAtNode`.
 - `/workflows status` — `replayed=<n>` on the run row, and a detail line reading
   `N/M agent call(s) reused a recorded run — not fresh evidence`.
 - the live progress panel — `replayed=<n>` in the header.

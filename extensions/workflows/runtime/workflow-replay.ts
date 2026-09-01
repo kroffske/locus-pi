@@ -9,13 +9,24 @@
  * Two invariants shape everything here:
  *
  *   1. FAIL CLOSED. An entry that cannot be resolved — missing, keyed for a
- *      different request, recorded as a failure, or positioned after a
- *      divergence — is reported as a MISS, and the caller runs the real child.
- *      No branch of this module can invent an answer.
- *   2. STRICT PREFIX. The first key mismatch sets `#diverged` and every later
- *      lookup misses, including lookups whose own key would have matched. A
- *      later call's recorded answer was produced in a context that no longer
- *      exists, so reusing it would be a silent lie about what the run observed.
+ *      different request, named for a different node, recorded as a failure, or
+ *      positioned after a divergence — is reported as a MISS, and the caller
+ *      runs the real child. No branch of this module can invent an answer.
+ *   2. STRICT PREFIX. ANY miss sets `#diverged`, and every later lookup misses
+ *      too, including lookups whose own key would have matched. The rule is one
+ *      rule for every miss reason because a fresh call CHANGES THE WORLD: the
+ *      next recorded answer was produced after this call behaved differently,
+ *      so reusing it would be a silent lie about what the run observed. The two
+ *      exceptions latch nothing because there is nothing to latch: replay is
+ *      switched off entirely, or the latch is already set.
+ *
+ * Repairing the source between two runs is expected, not a defect: the runner
+ * reports `sourceScriptChanged` instead of refusing, and the recorded node name
+ * becomes the readable identity of the completed prefix. It is not the safety
+ * boundary — the canonical request key already carries `phase` and `label`, so
+ * a call whose key matches on an unbroken prefix cannot carry a different name.
+ * Safety rests on that strict prefix plus the unique-literal-label rule the
+ * strict source checker enforces for generated workflows.
  *
  * Why a sidecar instead of `journal.ndjson`: the journal deliberately records no
  * prompt and no child text (see `WorkflowJournalLine`). Putting them there would
@@ -56,7 +67,6 @@ export type WorkflowReplayValueKind = "clock" | "random";
 export type WorkflowReplayRefusalReason =
   | "source-run-unusable"
   | "target-changed"
-  | "script-changed"
   | "identity-coverage-unproven"
   | "replay-unsafe-script"
   | "no-recorded-calls";
@@ -64,16 +74,37 @@ export type WorkflowReplayRefusalReason =
 /** Why this run wrote no replay record a later resume could use. */
 export type WorkflowReplayNotRecordedReason = "identity-coverage-unproven" | "replay-unsafe-script";
 
+/**
+ * Readable identity of one agent call: `[phase, label, occurrence]`, absent when
+ * the author gave the call no label. The field is optional and the schema
+ * version stays 3 on purpose — a record written before this field existed still
+ * replays byte-identical bytes exactly as it did, and only a repaired source
+ * makes the missing name matter.
+ */
 export type WorkflowReplayEntry =
-  | { v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION; seq: number; kind: "agent"; key: string; ok: true; text: string }
-  | { v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION; seq: number; kind: "agent"; key: string; ok: false }
+  | {
+      v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION;
+      seq: number;
+      kind: "agent";
+      node?: string;
+      key: string;
+      ok: true;
+      text: string;
+    }
+  | { v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION; seq: number; kind: "agent"; node?: string; key: string; ok: false }
   | { v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION; seq: number; kind: WorkflowReplayValueKind; value: number };
 
 export type WorkflowReplayAgentEntry = Extract<WorkflowReplayEntry, { kind: "agent" }>;
 
 /** Why one agent attempt was not served from the record. Never a silent miss. */
 export type WorkflowReplayMissReason =
-  "no-record" | "key-mismatch" | "recorded-failure" | "side-effecting-call" | "diverged";
+  | "no-record"
+  | "unnamed-node"
+  | "node-mismatch"
+  | "key-mismatch"
+  | "recorded-failure"
+  | "side-effecting-call"
+  | "diverged";
 
 export type WorkflowReplayAgentLookup =
   { replayed: true; text: string } | { replayed: false; reason: WorkflowReplayMissReason };
@@ -97,6 +128,8 @@ export interface WorkflowReplayEnvelope {
   replayedCalls: number;
   freshCalls: number;
   divergedAtCall?: number;
+  /** Node name of the first fresh call, when that call carried a label. */
+  divergedAtNode?: string;
 }
 
 export interface WorkflowReplayCounts {
@@ -104,6 +137,20 @@ export interface WorkflowReplayCounts {
   freshCalls: number;
   /** 0-based ordinal of the first agent attempt that broke the prefix, if any. */
   divergedAtCall?: number;
+  /**
+   * Name of the CURRENT first fresh call, absent when that call has no label.
+   * The current call is the only available source: on `no-record` and
+   * `unnamed-node` there is no recorded name at all, and those are exactly the
+   * paths a repair-and-continue resume takes.
+   */
+  divergedAtNode?: string;
+}
+
+/** One agent call as the runtime sees it, named where the author named it. */
+export interface WorkflowReplayAgentCall {
+  /** `[phase, label, occurrence]`; absent for a call without a label. */
+  node?: string;
+  canonicalRequest: string;
 }
 
 /**
@@ -117,9 +164,9 @@ export interface WorkflowReplayController {
    * the caller must invoke it exactly once per attempt, even when it will not
    * use the answer.
    */
-  beginAgentAttempt(canonicalRequest: string, replayable: boolean): WorkflowReplayAgentLookup;
+  beginAgentAttempt(call: WorkflowReplayAgentCall & { replayable: boolean }): WorkflowReplayAgentLookup;
   /** Record this run's own outcome for the attempt just begun. */
-  recordAgentAttempt(canonicalRequest: string, outcome: { ok: true; text: string } | { ok: false }): void;
+  recordAgentAttempt(call: WorkflowReplayAgentCall, outcome: { ok: true; text: string } | { ok: false }): void;
   /** Replay a recorded value, or produce and record a fresh one. */
   resolveValue(kind: WorkflowReplayValueKind, produce: () => number): number;
   counts(): WorkflowReplayCounts;
@@ -164,6 +211,13 @@ export interface CreateWorkflowReplayControllerOptions {
   runDir: string;
   /** Recorded entries from the resume source. Omit to record without replaying. */
   recorded?: readonly WorkflowReplayEntry[];
+  /**
+   * The root script bytes differ from the recorded run's. Repair is the expected
+   * reason, so replay continues — but the node name stops being decoration and
+   * becomes required: a call the author never named cannot be located in a
+   * program that changed underneath it.
+   */
+  sourceScriptChanged?: boolean;
 }
 
 export function createWorkflowReplayController(
@@ -178,12 +232,14 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
   readonly #recordedAgents: readonly WorkflowReplayAgentEntry[];
   readonly #recordedValues: ReadonlyMap<WorkflowReplayValueKind, readonly number[]>;
   readonly #replayEnabled: boolean;
+  readonly #sourceScriptChanged: boolean;
   #readCursor = 0;
   #writeCursor = 0;
   readonly #valueCursors = new Map<WorkflowReplayValueKind, number>();
   readonly #valueWriteCursors = new Map<WorkflowReplayValueKind, number>();
   #diverged = false;
   #divergedAtCall: number | undefined;
+  #divergedAtNode: string | undefined;
   #replayedCalls = 0;
   #freshCalls = 0;
   #directoryEnsured = false;
@@ -193,6 +249,7 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
     this.#recordPath = workflowReplayFile(options.runDir);
     const recorded = options.recorded ?? [];
     this.#replayEnabled = options.recorded !== undefined;
+    this.#sourceScriptChanged = options.sourceScriptChanged === true;
     this.#recordedAgents = recorded.filter((entry): entry is WorkflowReplayAgentEntry => entry.kind === "agent");
     const values = new Map<WorkflowReplayValueKind, number[]>();
     for (const entry of recorded) {
@@ -204,43 +261,56 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
     this.#recordedValues = values;
   }
 
-  beginAgentAttempt(canonicalRequest: string, replayable: boolean): WorkflowReplayAgentLookup {
+  beginAgentAttempt(call: WorkflowReplayAgentCall & { replayable: boolean }): WorkflowReplayAgentLookup {
     const ordinal = this.#readCursor;
     this.#readCursor += 1;
+    // Every miss below latches, so the latch is set here once rather than at six
+    // return sites. The two paths that return before this helper are the two
+    // that must NOT latch: replay is switched off, and the latch already holds.
     const miss = (reason: WorkflowReplayMissReason): WorkflowReplayAgentLookup => {
       this.#freshCalls += 1;
+      if (!this.#diverged) {
+        this.#diverged = true;
+        this.#divergedAtCall = ordinal;
+        this.#divergedAtNode = call.node;
+      }
       return { replayed: false, reason };
     };
-    if (!this.#replayEnabled) return miss("no-record");
-    if (this.#diverged) return miss("diverged");
+    if (!this.#replayEnabled) {
+      this.#freshCalls += 1;
+      return { replayed: false, reason: "no-record" };
+    }
+    if (this.#diverged) {
+      this.#freshCalls += 1;
+      return { replayed: false, reason: "diverged" };
+    }
 
     const entry = this.#recordedAgents[ordinal];
     if (entry === undefined) return miss("no-record");
-    if (entry.key !== hashCanonicalRequest(canonicalRequest)) {
-      // The recorded request at this position is not the request being made, so
-      // every later recorded answer belongs to a run that no longer exists.
-      this.#diverged = true;
-      this.#divergedAtCall = ordinal;
-      return miss("key-mismatch");
+    // Name before key, and only when the bytes moved. On unchanged bytes the
+    // position is still a legitimate name, so a record written before this field
+    // existed keeps replaying exactly as it did.
+    if (this.#sourceScriptChanged) {
+      if (entry.node === undefined || call.node === undefined) return miss("unnamed-node");
+      if (entry.node !== call.node) return miss("node-mismatch");
     }
-    // From here the key matches, so the prefix stays intact whatever we return:
-    // the caller re-executes the identical request and the run continues in the
-    // same shape the record describes.
+    if (entry.key !== hashCanonicalRequest(call.canonicalRequest)) return miss("key-mismatch");
     if (!entry.ok) return miss("recorded-failure");
-    if (!replayable) return miss("side-effecting-call");
+    if (!call.replayable) return miss("side-effecting-call");
 
     this.#replayedCalls += 1;
     return { replayed: true, text: entry.text };
   }
 
-  recordAgentAttempt(canonicalRequest: string, outcome: { ok: true; text: string } | { ok: false }): void {
+  recordAgentAttempt(call: WorkflowReplayAgentCall, outcome: { ok: true; text: string } | { ok: false }): void {
     const seq = this.#writeCursor;
     this.#writeCursor += 1;
-    const key = hashCanonicalRequest(canonicalRequest);
+    const key = hashCanonicalRequest(call.canonicalRequest);
+    const node = call.node === undefined ? {} : { node: call.node };
     this.#append(
       outcome.ok
-        ? { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", key, ok: true, text: outcome.text }
-        : { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", key, ok: false },
+        ? { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", ...node, key, ok: true, text: outcome.text }
+        : { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", ...node, key, ok: false },
     );
   }
 
@@ -269,6 +339,7 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
       replayedCalls: this.#replayedCalls,
       freshCalls: this.#freshCalls,
       ...(this.#divergedAtCall !== undefined ? { divergedAtCall: this.#divergedAtCall } : {}),
+      ...(this.#divergedAtNode !== undefined ? { divergedAtNode: this.#divergedAtNode } : {}),
     };
   }
 
@@ -302,12 +373,19 @@ function parseReplayEntry(value: unknown): WorkflowReplayEntry | undefined {
   if (typeof record.seq !== "number" || !Number.isInteger(record.seq) || record.seq < 0) return undefined;
   if (record.kind === "agent") {
     if (typeof record.key !== "string" || !/^[a-f0-9]{64}$/u.test(record.key)) return undefined;
+    // Optional, but not lax: a `node` of the wrong type is a malformed line, and
+    // silently dropping just the field would turn it into a legacy-shaped entry
+    // that replays under a repaired source. Absent stays absent; wrong is a
+    // skipped line, exactly as a wrong `key` is.
+    if (record.node !== undefined && typeof record.node !== "string") return undefined;
+    const node = record.node === undefined ? {} : { node: record.node };
     if (record.ok === true) {
       return typeof record.text === "string"
         ? {
             v: WORKFLOW_REPLAY_SCHEMA_VERSION,
             seq: record.seq,
             kind: "agent",
+            ...node,
             key: record.key,
             ok: true,
             text: record.text,
@@ -315,7 +393,14 @@ function parseReplayEntry(value: unknown): WorkflowReplayEntry | undefined {
         : undefined;
     }
     if (record.ok === false) {
-      return { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq: record.seq, kind: "agent", key: record.key, ok: false };
+      return {
+        v: WORKFLOW_REPLAY_SCHEMA_VERSION,
+        seq: record.seq,
+        kind: "agent",
+        ...node,
+        key: record.key,
+        ok: false,
+      };
     }
     return undefined;
   }
