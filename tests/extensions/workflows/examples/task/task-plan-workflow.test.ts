@@ -37,6 +37,15 @@ describe("Package workflow: task/plan", () => {
     expect(calls[2]?.prompt).toContain("JavaScript bytes only");
     expect(calls[3]?.prompt).toContain("node --check workflow.mjs");
     expect(calls[3]?.prompt).toContain('mode: "orchestration-only"');
+    // The strict checker the verify stage runs rejects an unlabeled or
+    // duplicate-labeled agent call, and that stage has exactly one correction
+    // attempt. Without the rule in every prompt, each candidate would burn it on
+    // a defect the generator was never told to avoid.
+    for (const call of calls) {
+      expect(call.prompt, call.options.label).toContain(
+        "Every agent call\ndeclares a literal label, and no two agent calls share one",
+      );
+    }
     expect(result).toEqual({ name: "workflow.mjs", text: source });
   });
 });

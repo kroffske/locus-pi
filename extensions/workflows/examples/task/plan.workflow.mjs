@@ -20,7 +20,9 @@ meta.profile: "standard", and one default run function. Source contains only
 author-known prompts, direct agent/DSL calls, visible control flow, exact text
 handoffs, and in-memory text publication. Allowed DSL calls are agent,
 parallel, pipeline, workflow, invokeWorkflow, items, phase, log,
-awaitOperator, publishArtifact, and publishPrimaryArtifact. Do not use imports,
+awaitOperator, publishArtifact, and publishPrimaryArtifact. Every agent call
+declares a literal label, and no two agent calls share one, so a stopped run can
+be repaired in place and continued. Do not use imports,
 consumeTextArtifact, continuationArtifacts, outputDir, projectRoot, promptFile,
 publishPrimaryFile, workspace, now, random, parsers, renderers, custom retries,
 or hidden agent wrappers.`;

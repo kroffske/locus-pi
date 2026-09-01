@@ -2087,6 +2087,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     replayController = createWorkflowReplayController({
       runDir,
       ...(replayPlan.recorded === undefined ? {} : { recorded: replayPlan.recorded }),
+      ...(replayPlan.sourceScriptChanged === true ? { sourceScriptChanged: true } : {}),
     });
   }
   // Silent on the default path. A plain run that records normally is the norm,
@@ -2361,6 +2362,12 @@ interface WorkflowReplayPlan {
   sourceRunId?: string;
   refusedReason?: WorkflowReplayRefusalReason;
   notRecordedReason?: WorkflowReplayNotRecordedReason;
+  /**
+   * The source run's script bytes differ from the ones executing now. Repairing
+   * the stopped workflow in place is the expected reason, so this is reported to
+   * the controller instead of ending the resume.
+   */
+  sourceScriptChanged?: boolean;
 }
 
 interface PlanWorkflowReplayInput {
@@ -2420,13 +2427,16 @@ function planWorkflowReplay(input: PlanWorkflowReplayInput): WorkflowReplayPlan 
     return refuse("target-changed");
   }
   if (sourceSha256 === undefined) return refuse("source-run-unusable");
-  if (sourceSha256 !== scriptIdentity.scriptSha256) return refuse("script-changed");
   if (!coverageProven) return refuse("identity-coverage-unproven");
   if (replaySafety === "unproven") return refuse("replay-unsafe-script");
 
+  // Edited bytes are the operator's repair, not a reason to erase the progress
+  // that repair is meant to continue. The controller is told, and it makes the
+  // recorded node name mandatory for the rest of the run.
+  const sourceScriptChanged = sourceSha256 !== scriptIdentity.scriptSha256;
   const recorded = readWorkflowReplayLog(projectRoot, resumeFromRunId);
   if (recorded.length === 0) return refuse("no-recorded-calls");
-  return { record, recorded, sourceRunId: resumeFromRunId };
+  return { record, recorded, sourceRunId: resumeFromRunId, ...(sourceScriptChanged ? { sourceScriptChanged } : {}) };
 }
 
 /** Static replay-safety of the exact bytes this run executes; unreadable reads as unproven. */
@@ -2454,6 +2464,7 @@ function workflowReplayEnvelope(
     replayedCalls: counts.replayedCalls,
     freshCalls: counts.freshCalls,
     ...(counts.divergedAtCall !== undefined ? { divergedAtCall: counts.divergedAtCall } : {}),
+    ...(counts.divergedAtNode !== undefined ? { divergedAtNode: counts.divergedAtNode } : {}),
   };
 }
 

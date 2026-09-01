@@ -34,6 +34,70 @@ describe("shipped workflow run skill", () => {
     expect(authoringSkill).toContain("`locus-pi-workflow-run` skill");
   });
 
+  it("owns the stopped-run recovery procedure and routes to it", () => {
+    const runSkill = readFileSync(path.join(root, "skills/locus-pi-workflow-run/SKILL.md"), "utf8");
+
+    // Without the description the skill is never selected for "the run stopped",
+    // and the procedure below is unreachable however complete it is.
+    expect(runSkill).toContain("recover a run that stopped, failed, or was interrupted when only its run id is known");
+    expect(runSkill).toContain("## Recover a stopped run");
+
+    for (const contract of [
+      // Evidence path an agent can walk on its own: files, not an operator command.
+      "The `workflow` tool schema has no `status` operation",
+      ".locus-pi/runs/<runId>/runtime/result.json",
+      "`failureDiagnostic` inside that file",
+      "The failing stage's answer at `evidencePath`",
+      ".locus-pi/runs/<runId>/runtime/journal.ndjson",
+      "`replay: not recorded reason=…` means no later run can resume from it",
+      // The completed prefix is readable from the record by node name alone.
+      "carries a `node` naming the call as `[phase, label, occurrence]`",
+      "without reading the workflow source",
+      // Outcome declared before launch, then proven from the new run.
+      "Name `continue` or `refuse` before starting anything",
+      "prove that outcome\nfrom the new run's evidence afterwards",
+      // Replay reuses answer text only; a cleaned workspace is a false green.
+      "It does not re-create files, re-read\n  the project, or repeat any child side effect",
+      'cleaned workspace turns a replayed "checks passed" answer into a false green',
+      // Repair is the expected reason to edit, not a reason to lose the prefix.
+      "Editing the stopped workflow first is allowed and\n  expected",
+      "Changed source bytes no longer\n  end a resume",
+      "The first fresh call ends reuse for the whole run",
+      // The fusion boundary is named, with the case it costs.
+      "ends the\n  run with `fusion resume cannot mix recorded and fresh agent calls`",
+      "no longer replays a fusion tail that sat\n  after a recorded failure",
+      // Reuse is proven from the new run, and a fresh-call count proves nothing.
+      "`divergedAtNode` names the node",
+      "`freshCalls` alone proves nothing",
+      // Resume is bound to the source workspace.
+      "A resume runs in the workspace of the source run",
+      "repeat it with `outputDir`",
+      "fails closed instead of creating a new\nworkspace silently",
+      // The seven named refusals.
+      "no `.locus-pi/runs/<runId>/`, or `result.json` is\n   missing or corrupt",
+      "The source journal says `replay: not recorded`",
+      "`scriptPath` resolves outside the current `projectRoot`",
+      "The original semantic input is unavailable",
+      "The terminal status is `awaiting_operator`",
+      "The workspace or project tree changed since the source run",
+      "Resume was requested without the source workspace, or with a different one",
+      "recorded before node names existed",
+      // Source edits belong to the authoring skill; operator answers are never invented.
+      "belongs to the `locus-pi-workflow-create` skill",
+      "every\n`agent()` call carries a unique literal `label`",
+      "the answer must never be synthesized",
+    ]) {
+      expect(runSkill, contract).toContain(contract);
+    }
+
+    // One answer to "the run stopped" per file: the broad retry promise is gone.
+    expect(runSkill).not.toContain("retry a failed run through `resumeFromRunId`");
+    expect(runSkill).toContain('it is not a general "retry the failed run" switch');
+    // The rejected route must not survive as a name anywhere in the procedure.
+    expect(runSkill).not.toContain("repair-then-fresh");
+    expect(runSkill).not.toContain("script-changed");
+  });
+
   it("keeps provider, model, and role selection operator-owned", () => {
     const runSkill = readFileSync(path.join(root, "skills/locus-pi-workflow-run/SKILL.md"), "utf8");
 

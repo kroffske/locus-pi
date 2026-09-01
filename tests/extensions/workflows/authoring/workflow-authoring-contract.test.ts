@@ -562,6 +562,15 @@ ${authoring[1] ?? ""}
     expect(skill).toMatch(/Agents own interpretation, any source inspection requested by their prompt/u);
   });
 
+  it("requires a unique literal agent label so a generated workflow can be repaired and continued", () => {
+    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
+    expect(skill).toContain("Every `agent()` call declares a literal `label`, and no two calls in one file\nshare one");
+    // The rule is only worth writing if the author is told what it buys and what
+    // breaks without it, so the generated workflow is not merely compliant.
+    expect(skill).toContain("addresses a completed call by its `phase`, `label`, and occurrence");
+    expect(skill).toContain("Both cases fail the strict source check");
+  });
+
   it("keeps semantic input out of hidden branch protocols", () => {
     const skill = source("skills/locus-pi-workflow-create/SKILL.md");
     const card = source("skills/locus-pi-workflow-create/references/fixed-fan-out.md");

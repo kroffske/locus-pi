@@ -89,9 +89,35 @@ Root results and direct `parallel()`/`pipeline()` returns share one terminal-out
 
 ## Resume and replay
 
-`--resume <runId>` reuses eligible recorded agent answers only when source identity and request-prefix checks match. Replayed answers are marked as recorded evidence, not fresh work. Replay does not repeat child side effects or re-read files; use it only when those semantics are acceptable. Repeat the same `--run-name <name>` when resuming a named non-task workflow. Supplying a different workspace fails closed.
+`--resume <runId>` reuses eligible recorded agent answers. Editing the workflow source between the two runs no longer ends the resume: the recorded answers stay in play and each call is matched by its recorded node name and its exact request. Replayed answers are marked as recorded evidence, not fresh work. A replayed call returns the recorded answer text and nothing else: it does not repeat child side effects, re-create files, or re-read the project. Reuse is therefore correct only while the workspace and the project tree still contain what the replayed calls wrote; against a cleaned workspace a recorded "checks passed" answer is a false green. Repeat the same `--run-name <name>` when resuming a named non-task workflow. Supplying a different workspace fails closed.
 
 A run awaiting operator input must be continued explicitly. Automation must not synthesize an operator answer.
+
+## Recovery
+
+A workflow that stopped at some node is repaired in the same file and continued from that node. Recovery starts from the run id and ends in a new terminal result or a named refusal. Read `/workflows status <runId>` for stages, replay markers, and the failure diagnostic, `/workflows result <runId>` for the exact prose, and the run's own `runtime/result.json`, `runtime/journal.ndjson`, and `runtime/replay.ndjson` for the same content as files. There are two outcomes: `continue` and `refuse`.
+
+**Continue the stopped run.** Fix the wrong node in the same `.workflow.mjs`, then run `/workflows run <target> --resume <runId>`. The nodes that already completed return their recorded answers and do not execute again; the repaired node and the tail after it run fresh. Each recorded agent line carries a `node` name — `[phase, label, occurrence]` — so `runtime/replay.ndjson` answers "which nodes finished" on its own, and the `replay` envelope of the new run's `result.json` reports `divergedAtNode`, the node where continuation became fresh.
+
+The precondition is binding: the workspace and project tree must still hold the files the replayed calls produced, because replay reuses answer text only. A resume runs in the source run's workspace. When that workspace was chosen explicitly, repeat it with `--run-name <name>` (or `outputDir` on the tool path); omitting it or passing another path fails closed rather than starting somewhere new.
+
+When the prefix is reused after a repair:
+
+| Condition                                                         | Result                                                    |
+| ----------------------------------------------------------------- | --------------------------------------------------------- |
+| recorded node name and current node name match, request unchanged | the recorded answer is reused                             |
+| the record has no node name, or the current call has no `label`   | `unnamed-node` — that call and everything after run fresh |
+| the names differ                                                  | `node-mismatch` — same                                    |
+| the resolved request differs, which is what a repaired node is    | `key-mismatch` — same                                     |
+| the recorded call failed, or the call writes to a worktree        | `recorded-failure` / `side-effecting-call` — same         |
+
+A `fusion()` group standing after the point where continuation went fresh does not run fresh: it ends the run with `fusion resume cannot mix recorded and fresh agent calls`. The group's transactional rule — never mix recorded answers with live ones inside one panel — is kept at the cost of a terminal error. The same rule costs one case that used to work: a byte-identical resume no longer replays a fusion tail that stood after a recorded failure.
+
+Known limitations: a stopped run recorded before node names existed carries none, so a repair makes every call miss with `unnamed-node` and the continuation is a fresh run. Checkpoint identity covers entry and child script bytes, not a neighboring `.prompt.md`, and repairing a parent invalidates the checkpoints of even its untouched children, so hierarchical workflows do not continue in place.
+
+`/workflows continue <runId>` is not part of recovery. It answers a handoff a run declared itself and stopped at, and it needs a real operator answer.
+
+Named refusal is a valid outcome. Refuse when the run directory or `result.json` is unreadable, when the source journal says `replay: not recorded`, when the script lives outside the project, when the original input cannot be reproduced, when the run ended `awaiting_operator`, when the workspace or project tree changed under the recorded answers, or when a resume cannot use the source workspace.
 
 Live `workflow_ask` answers are stored as indexed run artifacts with digest readback. If that evidence cannot be persisted, the child call fails with `ask-evidence-persistence`; the answer is not returned as a successful tool result and the same invocation does not show the question again.
 

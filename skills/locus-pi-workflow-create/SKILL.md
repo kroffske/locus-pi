@@ -112,6 +112,14 @@ unique literal `phase("...")` id exactly once and in first-source order. Case
 drift, duplicate declarations, and missing ids fail source checking; unused
 declarations and order drift are warnings.
 
+Every `agent()` call declares a literal `label`, and no two calls in one file
+share one. This is what makes the workflow repairable: the replay record
+addresses a completed call by its `phase`, `label`, and occurrence, so an
+unlabeled call cannot be found again after the source is edited, and two call
+sites under one label are a single address — delete the first and the second is
+handed its recorded answer. Both cases fail the strict source check, so a
+generated workflow that skips a label does not reach Build.
+
 New source from this skill uses the orchestration-only subset of the standard
 profile. It may call `agent`, `parallel`, `pipeline`, `workflow`,
 `invokeWorkflow`, `items`, `phase`, `log`, `awaitOperator`, `publishArtifact`,

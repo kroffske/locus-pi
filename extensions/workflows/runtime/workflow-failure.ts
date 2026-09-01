@@ -14,6 +14,7 @@
  */
 
 import path from "node:path";
+import { workflowRunArtifactsDir } from "./workflow-run-layout.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
 
 /** Who failed: trusted script contract vs. the runtime/host around it. */
@@ -177,7 +178,10 @@ function failingAnswerPath(
   const forStage = stage === undefined ? [] : answers.filter((record) => record.stage === stage);
   const record = forStage.at(-1) ?? answers.at(-1);
   if (record === undefined) return undefined;
-  return relativizePath(projectRoot, path.join(runDir, record.relativePath));
+  // `relativePath` is written relative to the artifacts directory, not to the
+  // run directory. Joining it onto `runDir` printed a pointer that resolves to
+  // nothing, so the operator's first move after a failure hit a missing file.
+  return relativizePath(projectRoot, path.join(workflowRunArtifactsDir(runDir), record.relativePath));
 }
 
 /** Project-relative when the path is inside the root; the absolute path otherwise. */

@@ -186,8 +186,8 @@ describe("workflow agent bridge — live ask wiring", () => {
     const h = createHarness();
     const keys: string[] = [];
     const replay = {
-      beginAgentAttempt(canonicalRequest: string) {
-        keys.push(canonicalRequest);
+      beginAgentAttempt(call: { canonicalRequest: string }) {
+        keys.push(call.canonicalRequest);
         return { replayed: false, reason: "no-recorded-calls" } as const;
       },
       recordAgentAttempt() {},

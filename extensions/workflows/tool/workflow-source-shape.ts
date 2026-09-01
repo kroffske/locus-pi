@@ -14,6 +14,8 @@ export interface WorkflowSourceDiagnosticRelated extends WorkflowSourceSpan {
 }
 
 const WORKFLOW_SOURCE_DIAGNOSTIC_CODES = {
+  agentLabelDuplicate: "WF_AGENT_LABEL_DUPLICATE",
+  agentLabelMissing: "WF_AGENT_LABEL_MISSING",
   authoringSubset: "WF_AUTHORING_SUBSET",
   binding: "WF_BINDING",
   call: "WF_CALL",
@@ -225,15 +227,15 @@ export function orchestrationOnlyWorkflowSourceShapeDiagnostics(source: string):
 
   const diagnostics = new WorkflowSourceDiagnosticBag();
   const root = parse(Lang.JavaScript, source).root();
+  const firstCallSiteByLabel = new Map<string, SgNode>();
   for (const call of root.findAll({ rule: { kind: "call_expression" } })) {
-    const callee = unwrapStandardParentheses(callCallee(call));
-    const method =
-      callee?.kind() === "identifier"
-        ? callee.text()
-        : callee?.kind() === "member_expression" && callee.field("object")?.text() === "dsl"
-          ? callee.field("property")?.text()
-          : undefined;
-    if (method === undefined || !ORCHESTRATION_ONLY_FORBIDDEN_DSL_METHODS.has(method)) continue;
+    const method = orchestrationOnlyDslMethod(call);
+    if (method === undefined) continue;
+    if (method === "agent") {
+      validateOrchestrationOnlyAgentLabel(call, firstCallSiteByLabel, diagnostics);
+      continue;
+    }
+    if (!ORCHESTRATION_ONLY_FORBIDDEN_DSL_METHODS.has(method)) continue;
     diagnostics.add(
       WORKFLOW_SOURCE_DIAGNOSTIC_CODES.authoringSubset,
       "error",
@@ -251,6 +253,64 @@ export function orchestrationOnlyWorkflowSourceShapeDiagnostics(source: string):
       compareCodeUnits(left.code, right.code) ||
       compareCodeUnits(left.message, right.message),
   );
+}
+
+/** The DSL method one call names, whether the source destructured `dsl` or not. */
+function orchestrationOnlyDslMethod(call: SgNode): string | undefined {
+  const callee = unwrapStandardParentheses(callCallee(call));
+  if (callee?.kind() === "identifier") return callee.text();
+  if (callee?.kind() === "member_expression" && callee.field("object")?.text() === "dsl") {
+    return callee.field("property")?.text();
+  }
+  return undefined;
+}
+
+/**
+ * Every `agent()` declares a literal `label`, and no two declare the same one.
+ *
+ * This is the rule that makes a generated workflow repairable. The replay record
+ * addresses a call by `(phase, label, occurrence)`, so a call with no label
+ * cannot be located after the source is edited, and two call sites sharing one
+ * label collapse into the same address: delete the first and the second slides
+ * onto its position and is handed its recorded answer. Neither the request key
+ * nor the recorded name can tell those two apart at run time, so the source
+ * checker is where the case is closed.
+ */
+function validateOrchestrationOnlyAgentLabel(
+  call: SgNode,
+  firstCallSiteByLabel: Map<string, SgNode>,
+  diagnostics: WorkflowSourceDiagnosticBag,
+): void {
+  const options = unwrapStandardParentheses(standardCallArguments(call)[1]);
+  const labelNode =
+    options?.kind() === "object"
+      ? options
+          .children()
+          .find((child) => child.kind() === "pair" && staticObjectKey(child.field("key")) === "label")
+          ?.field("value")
+      : undefined;
+  const label = staticStringValue(unwrapStandardParentheses(labelNode ?? undefined));
+  if (label === undefined || label === "") {
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.agentLabelMissing,
+      "error",
+      "agent() must declare a literal label; a call without one cannot be resumed after the source is repaired",
+      call,
+    );
+    return;
+  }
+  const first = firstCallSiteByLabel.get(label);
+  if (first !== undefined) {
+    diagnostics.add(
+      WORKFLOW_SOURCE_DIAGNOSTIC_CODES.agentLabelDuplicate,
+      "error",
+      `agent() label "${label}" is already used in this file; two call sites sharing a label are one address on resume`,
+      labelNode ?? call,
+      [{ message: `first used here`, node: first }],
+    );
+    return;
+  }
+  firstCallSiteByLabel.set(label, labelNode ?? call);
 }
 
 /** Legacy message-only projection retained for existing tests and automation. */
