@@ -75,6 +75,66 @@ describe("workflow run artifact store", () => {
     assert.equal(readWorkflowArtifactIndex(root, "../escape").status, "invalid");
   });
 
+  it("indexes operator answers under a stable identity and detects payload tampering", () => {
+    const root = project();
+    const id = "operator-ask-run";
+    const directory = runDir(root, id);
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: directory });
+    const record = {
+      tool: "workflow_ask" as const,
+      toolCallId: "tool-call-7",
+      declined: false,
+      entries: [
+        {
+          id: "storage",
+          question: "Which storage?",
+          status: "answered" as const,
+          answer: "sqlite",
+          kind: "option" as const,
+        },
+      ],
+    };
+
+    const ref = store.recordOperatorAskEvidence("call-0003", record.toolCallId, 2, record);
+
+    assert.equal(ref.artifactId, "call-0003-operator-ask-0002");
+    const indexed = store.list().find((entry) => entry.artifactId === ref.artifactId);
+    assert.deepEqual(indexed, {
+      runId: id,
+      artifactId: ref.artifactId,
+      name: "operator-ask-0002.json",
+      sha256: ref.sha256,
+      kind: "operator-ask",
+      mediaType: "application/json",
+      size: Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`, "utf8"),
+      relativePath: path.join("operator-asks", "call-0003", "operator-ask-0002.json"),
+      provenance: "fresh",
+      createdAt: indexed?.createdAt,
+      callId: "call-0003",
+      toolCallId: "tool-call-7",
+      sequence: 2,
+    });
+    const read = readWorkflowArtifactRecord(root, id, ref.artifactId);
+    assert.equal(read.status, "ready");
+    if (read.status === "ready") assert.deepEqual(JSON.parse(read.bytes.toString("utf8")), record);
+
+    writeFileSync(path.join(workflowRunArtifactsDir(directory), indexed!.relativePath), "tampered\n");
+    assert.equal(readWorkflowArtifactRecord(root, id, ref.artifactId).status, "tampered");
+  });
+
+  it("rejects mismatched operator-answer identity before writing an artifact", () => {
+    const root = project();
+    const id = "operator-ask-invalid";
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
+    const record = { tool: "workflow_ask" as const, toolCallId: "tool-a", declined: true, entries: [] };
+
+    assert.throws(
+      () => store.recordOperatorAskEvidence("call-0001", "tool-b", 1, record),
+      /toolCallId does not match/u,
+    );
+    assert.equal(store.list().length, 0);
+  });
+
   it("classifies a dangling index as invalid and refuses to replace it", () => {
     const root = project();
     const id = "dangling-index";

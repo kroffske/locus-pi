@@ -37,7 +37,7 @@ afterEach(() => clearViewerExternalRows("workflow-live"));
 
 /** A workflow started by explicit path: 127 columns of `scriptRef`, shared by both header tests. */
 const LONG_ABSOLUTE_REF =
-  "/home/operator/projects/locus-pi-design-review/.locus-pi/plans/20260826-120000-a1b2-task-planning-x/implement-plan.workflow.mjs";
+  "/home/operator/projects/locus-pi-design-review/.locus-pi/workspaces/20260826-120000-a1b2-task-planning-x/implement-plan.workflow.mjs";
 
 function line(input: Omit<WorkflowJournalLine, "ts"> & { ts: string | number }): WorkflowJournalLine {
   return input as WorkflowJournalLine;
@@ -477,7 +477,7 @@ describe("workflow progress widget", () => {
   it("keeps the rail commands when the workflow was started by a long absolute path", () => {
     agentLiveStore.reset();
     const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 170 } };
-    expect(LONG_ABSOLUTE_REF.length).toBe(127);
+    expect(LONG_ABSOLUTE_REF.length).toBe(132);
     const component = new WorkflowProgressComponent(tui, {}, LONG_ABSOLUTE_REF, "path-r1", { scope: "workflow" });
 
     const rail = component.render(170)[0] ?? "";

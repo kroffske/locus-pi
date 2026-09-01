@@ -177,10 +177,12 @@ describe("design-first readable workflow authoring", () => {
   it("teaches one project-local workflow workspace separate from two-zone run evidence", () => {
     for (const relativePath of ["extensions/workflows/AUTHORING.md", "docs/workflows.md"]) {
       const text = source(relativePath);
-      expect(text).toContain(".locus-pi/plans/<generated-run-name>");
+      expect(text).toContain(".locus-pi/workspaces/<generated-run-name>");
       expect(text).not.toContain("outputs/<workflow-name>");
     }
-    expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain(".locus-pi/plans/<generated-run-name>");
+    expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain(
+      ".locus-pi/workspaces/<generated-run-name>",
+    );
     const storage = source("docs/workflows.md");
     expect(storage).toContain("runs/<runId>/");
     expect(storage).toContain("outputs/    human-readable host projection");

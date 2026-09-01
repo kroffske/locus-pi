@@ -198,13 +198,15 @@ emergency compatibility alias; every other operation uses `/workflows`.
 ```
 
 Every fresh workflow launch receives a unique
-`.locus-pi/plans/<generated-run-name>` workspace. This includes
+`.locus-pi/workspaces/<generated-run-name>` workspace. This includes
 `post-code-review`, so its normal start command needs no manual `outputDir`.
 Callers may still select another confined project-relative workspace with
 `--output-dir`. A fresh `post-code-review` launch cannot reuse a workspace that
 already has durable review state. Resume binds to the original run's exact
-workspace. Any workflow may select a stable `.locus-pi/plans/<name>` workspace
-with `--run-name <name>`.
+workspace. Any workflow may select a stable `.locus-pi/workspaces/<name>` workspace
+with `--run-name <name>`. An existing legacy-only `.locus-pi/plans/<name>` is
+reused at its original physical identity; if both roots exist, launch fails
+before child execution.
 
 Each accepted `post-code-review` workspace also owns one optional operator file,
 `style.md`. Before launch, the operator may place comment and project-style
@@ -468,8 +470,8 @@ only the non-symlink `outputs/` and `runtime/` evidence directories and writes
 the first `runtime/journal.ndjson` line before it
 announces the RunID; initialization failure announces no start and launches no
 child. Agent-authored files use a separate project-local workspace. Fresh
-workflows default to `.locus-pi/plans/<generated-run-name>/`.
-`--run-name <name>` selects `.locus-pi/plans/<name>/` for any workflow. The
+workflows default to `.locus-pi/workspaces/<generated-run-name>/`.
+`--run-name <name>` selects `.locus-pi/workspaces/<name>/` for any workflow. The
 start surface reports the resolved run directory, which matters when
 the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
@@ -1441,9 +1443,10 @@ Those questions stay in their run's evidence and reopen on request: the
 and `/workflows continue <runId>` takes a named run.
 
 `outputDir()` returns the project-relative workflow workspace. Fresh runs
-default to `.locus-pi/plans/<generated-run-name>` under the project root. The
+default to `.locus-pi/workspaces/<generated-run-name>` under the project root. The
 `--run-name <name>` form selects
-`.locus-pi/plans/<name>`. The same workspace can be selected through the
+`.locus-pi/workspaces/<name>`. A legacy-only `.locus-pi/plans/<name>` remains
+bound to its original physical identity. The same workspace can be selected through the
 programmatic tool's `outputDir` or `/workflows run <name|path> --output-dir
 <path>`. The runtime
 preserves a qualified child's complete saved name in the generated workspace
@@ -1816,10 +1819,11 @@ rules:
   SDK backstop cannot pause, so an `ask: true` call widens it by a fixed
   24-hour allowance; a single wait longer than that still dies by the backstop
   (named residual).
-- **Evidence is durable.** Each answered call writes an
-  `operator-ask-<n>.json` artifact (questions, answers, declined flag) into the
-  call's artifact directory and one `workflow_ask: operator answered N/M`
-  diagnostics line into the result envelope.
+- **Evidence is durable.** Each answered call records one indexed `operator-ask`
+  artifact (questions, answers, declined flag) through the run artifact store;
+  viewer readback verifies its digest. If persistence fails after the question
+  was shown, the current child call aborts with `ask-evidence-persistence`,
+  returns no successful answer/ref, and does not remount the same invocation.
 - **Replay forks on `ask`.** The call key records the declaration, so a record
   made without `ask` is never served to an asking call, and vice versa. A
   completed call replays its recorded final text as usual; an interrupted call
@@ -2466,7 +2470,7 @@ A replayed call reports **no** token usage, so the run budget shown by
                              group_start | group_end | error
     replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
                       absent for scripts that are not replay-safe (see "Resume and replay")
-    result.json       — Final result + disposition + full journal snapshot + identity/replay envelopes
+    result.json       — Final result + disposition + bounded finalization errors + identity/replay envelopes
     artifacts/
       index.json       — Canonical digest-bound inventory for this run
       answers/         — Exact automatic agent answers
@@ -2478,7 +2482,7 @@ A replayed call reports **no** token usage, so the run budget shown by
 
 Files deliberately written by workflow agents are outside this tree, under the
 selected project-local workflow workspace. Fresh workflows default to
-`.locus-pi/plans/<generated-run-name>/`.
+`.locus-pi/workspaces/<generated-run-name>/`.
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
 `schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared

@@ -25,9 +25,15 @@ Prompt-shelf commands write project-local prompt files or an explicitly resolved
 
 Interactive prompts and the plan-to-execution handoff require an interactive host. Headless calls must provide the request explicitly and cannot simulate the selector.
 
+## Plan storage
+
+Authored plans live in the current checkout at `.locus-pi/plans/<plan-slug>.md`. The first `/plan` read or write safely prepares that directory from the former `~/.pi/locus-pi/<project-slug>/plans/` location. Legacy-only regular Markdown files are copied atomically and verified byte-for-byte. Identical files are accepted, current-only files remain authoritative, and a differing file with the same slug stops migration before any copy. Symlinks and non-regular legacy entries are refused. Legacy files are never modified or deleted automatically, and new plans are never written to the home directory.
+
+The checkout-local boundary is intentional: two worktrees no longer share one implicit plan library. Copy or reconcile a plan explicitly when it must exist in more than one checkout.
+
 ## Implementation
 
 - Entrypoint and commands: `extensions/plan/index.ts`, `extensions/plan/command/command-router.ts`
-- Plan mode: `extensions/plan/mode/mode-state.ts`, `extensions/plan/mode/system-prompt.ts`
+- Plan mode and storage: `extensions/plan/mode/mode-state.ts`, `extensions/plan/mode/plan-storage.ts`, `extensions/plan/mode/system-prompt.ts`
 - Goal tool/state: `extensions/plan/goal/goal-tool.ts`, `extensions/plan/goal/goal-command.ts`
 - Manifest: `extensions/plan/manifest.json`

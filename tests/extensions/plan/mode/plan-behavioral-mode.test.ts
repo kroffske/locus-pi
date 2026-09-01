@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,9 +6,15 @@ import {
   currentCycleMode,
   isInPlanMode,
   loadActiveModeState,
+  loadModeState,
   modeStatePath,
   writeModeState,
 } from "../../../../extensions/plan/mode/mode-state.js";
+import {
+  legacyPlanLibraryDir,
+  planArtifactPath,
+  planLibraryDir,
+} from "../../../../extensions/plan/mode/plan-storage.js";
 import { registerPlan } from "../../../../extensions/plan/index.js";
 import {
   __resetModeUiStateForTests,
@@ -204,6 +210,76 @@ describe("/mode explicit command boundary", () => {
   });
 });
 
+describe("/plan saved-library migration", () => {
+  it("migrates a legacy plan before opening it and activates only the project-local path", async () => {
+    const legacyPath = path.join(legacyPlanLibraryDir(root), "legacy-plan.md");
+    mkdirSync(path.dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, "# Legacy plan\n", "utf8");
+    const harness = createHarness(root);
+    registerPlan(harness.pi);
+
+    await harness.commands.get("plan")!.handler("open legacy-plan", harness.ctx);
+
+    const currentPath = planArtifactPath(root, "legacy-plan");
+    expect(readFileSync(currentPath, "utf8")).toBe("# Legacy plan\n");
+    expect(readFileSync(legacyPath, "utf8")).toBe("# Legacy plan\n");
+    expect(loadModeState(root)).toMatchObject({
+      mode: "plan",
+      slug: "legacy-plan",
+      activeArtifactPath: currentPath,
+      status: "active",
+    });
+  });
+
+  it("keeps active state unchanged when a different overlap blocks the full pre-scan", async () => {
+    armPlanMode();
+    const before = loadModeState(root);
+    const legacyPath = path.join(legacyPlanLibraryDir(root), "conflict.md");
+    mkdirSync(path.dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, "legacy\n", "utf8");
+    mkdirSync(planLibraryDir(root), { recursive: true });
+    writeFileSync(planArtifactPath(root, "conflict"), "current\n", "utf8");
+    const harness = createHarness(root);
+    registerPlan(harness.pi);
+
+    await harness.commands.get("plan")!.handler("list", harness.ctx);
+
+    expect(loadModeState(root)).toEqual(before);
+    expect(harness.widgets.get("plan")).toContain("[ERROR] Saved plans");
+    expect(harness.widgets.get("plan")).toContain("current and legacy files differ:");
+    expect(harness.widgets.get("plan")).toContain("conflict.md");
+    expect(readFileSync(legacyPath, "utf8")).toBe("legacy\n");
+    expect(readFileSync(planArtifactPath(root, "conflict"), "utf8")).toBe("current\n");
+  });
+
+  it("rebinds an active legacy plan before exit reads the prepared current copy", async () => {
+    const legacyPath = path.join(legacyPlanLibraryDir(root), "active-legacy.md");
+    mkdirSync(path.dirname(legacyPath), { recursive: true });
+    writeFileSync(legacyPath, "# Rebound plan\n\n- current authority\n", "utf8");
+    writeModeState(root, {
+      version: 1,
+      mode: "plan",
+      slug: "active-legacy",
+      activeArtifactPath: legacyPath,
+      enteredAt: new Date().toISOString(),
+      status: "active",
+    });
+    const harness = createHarness(root);
+    registerPlan(harness.pi);
+
+    await harness.commands.get("plan")!.handler("list", harness.ctx);
+    const currentPath = planArtifactPath(root, "active-legacy");
+    expect(loadModeState(root)?.activeArtifactPath).toBe(currentPath);
+    rmSync(legacyPath);
+
+    await harness.commands.get("plan")!.handler("exit", { ...harness.ctx, hasUI: true });
+
+    expect(harness.sentUserMessages).toHaveLength(1);
+    expect(harness.sentUserMessages[0]!.message).toContain("current authority");
+    expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
+  });
+});
+
 describe("mode-aware UI: status badge + input border color (T-UI)", () => {
   it("publishes PLAN through the shared bounded status and clears the legacy key", async () => {
     __setEditorBaseLoaderForTests(async () => undefined); // skip editor install; only badge here
@@ -320,6 +396,46 @@ describe("plan -> execution handoff on exit (T-D)", () => {
     expect(harness.selectCalls).toHaveLength(0);
     expect(isInPlanMode(loadActiveModeState(root))).toBe(false);
     expect(harness.sentUserMessages).toHaveLength(0);
+  });
+
+  it("keeps plan mode and shows the saved-plans error when /plan exit finds a migration conflict", async () => {
+    armPlanWithArtifact();
+    const legacy = legacyPlanLibraryDir(root);
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(path.join(legacy, "conflict.md"), "legacy\n", "utf8");
+    mkdirSync(planLibraryDir(root), { recursive: true });
+    writeFileSync(planArtifactPath(root, "conflict"), "current\n", "utf8");
+    const before = loadModeState(root);
+    const harness = createHarness(root);
+    registerPlan(harness.pi);
+
+    await harness.commands.get("plan")!.handler("exit", uiCtx(harness));
+
+    expect(loadModeState(root)).toEqual(before);
+    expect(harness.selectCalls).toHaveLength(0);
+    expect(harness.sentUserMessages).toHaveLength(0);
+    expect(harness.widgets.get("plan")).toContain("[ERROR] Saved plans");
+    expect(harness.widgets.get("plan")).toContain("current and legacy files differ:");
+    expect(harness.widgets.get("plan")).toContain("conflict.md");
+  });
+
+  it("keeps plan mode and shows the saved-plans error when /mode default finds a symlinked library", async () => {
+    armPlanWithArtifact();
+    const outside = path.join(locusPiHome, "symlinked-current-library");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, path.join(root, ".locus-pi"));
+    const before = loadModeState(root);
+    const harness = createHarness(root);
+    registerPlan(harness.pi);
+
+    await harness.commands.get("mode")!.handler("default", uiCtx(harness));
+
+    expect(loadModeState(root)).toEqual(before);
+    expect(harness.selectCalls).toHaveLength(0);
+    expect(harness.sentUserMessages).toHaveLength(0);
+    expect(harness.widgets.get("plan")).toContain("[ERROR] Saved plans");
+    expect(harness.widgets.get("plan")).toContain("current library path component must");
+    expect(harness.widgets.get("plan")).toContain("not be a symlink:");
   });
 
   it("'Execute (this context)' clears plan mode and injects the plan as a follow-up", async () => {

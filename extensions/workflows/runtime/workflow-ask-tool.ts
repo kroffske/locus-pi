@@ -44,6 +44,11 @@ export const WORKFLOW_ASK_NO_UI_MESSAGE =
   "workflow_ask failed closed: the parent session cannot mount an operator question " +
   "(no interactive UI). Run the workflow interactively or remove `ask: true` from this stage.";
 
+export const WORKFLOW_ASK_EVIDENCE_PERSISTENCE_PREFIX =
+  "workflow_ask failed closed after the operator answered: durable answer evidence could not be persisted";
+
+export type WorkflowAskFailureCause = "ask-unavailable" | "ask-evidence-persistence";
+
 export interface WorkflowAskQuestion {
   id: string;
   question: string;
@@ -75,9 +80,9 @@ export interface WorkflowAskToolDeps {
   onWaitStart: () => void;
   /** Re-arm the fuse once the wait is over (answered, declined, or failed). */
   onWaitEnd: () => void;
-  /** Fail the whole child call with the named `ask-unavailable` cause. */
-  failCall: (message: string) => void;
-  /** Durable record hook; the bridge writes the artifact and diagnostics line. */
+  /** Fail the whole child call before any answer can re-enter model context. */
+  failCall: (message: string, cause: WorkflowAskFailureCause) => void;
+  /** Durable record hook; the artifact store indexes the answer before readback. */
   recordEvidence: (record: WorkflowAskEvidenceRecord) => void;
   /** Test seams. Production callers leave these unset. */
   requestQuestion?: typeof requestOperatorQuestion;
@@ -149,7 +154,7 @@ export function createWorkflowAskTool(deps: WorkflowAskToolDeps): ReadOnlyAgentC
       const parsed = parseWorkflowAskInput(input);
       if (!parsed.ok) return errorText(`Invalid ${WORKFLOW_ASK_TOOL_NAME} params: ${parsed.error}`);
       if (!parentCanMountQuestion(deps.ctx)) {
-        deps.failCall(WORKFLOW_ASK_NO_UI_MESSAGE);
+        deps.failCall(WORKFLOW_ASK_NO_UI_MESSAGE, "ask-unavailable");
         return errorText(WORKFLOW_ASK_NO_UI_MESSAGE);
       }
       deps.onWaitStart();
@@ -264,7 +269,7 @@ async function walkQuestions(
       throw error;
     }
     if (result.status === "unavailable") {
-      deps.failCall(WORKFLOW_ASK_NO_UI_MESSAGE);
+      deps.failCall(WORKFLOW_ASK_NO_UI_MESSAGE, "ask-unavailable");
       return errorText(WORKFLOW_ASK_NO_UI_MESSAGE);
     }
     if (result.status === "cancelled") {
@@ -296,7 +301,13 @@ async function walkQuestions(
     return { id: question.id, question: question.question, status: declined ? "declined" : "skipped" };
   });
   const record: WorkflowAskEvidenceRecord = { tool: WORKFLOW_ASK_TOOL_NAME, toolCallId, declined, entries };
-  deps.recordEvidence(record);
+  try {
+    deps.recordEvidence(record);
+  } catch (error) {
+    const message = `${WORKFLOW_ASK_EVIDENCE_PERSISTENCE_PREFIX}: ${errorMessage(error)}`;
+    deps.failCall(message, "ask-evidence-persistence");
+    return errorText(message);
+  }
   return {
     content: [{ type: "text", text: renderReadback(entries, declined) }],
     details: { declined, entries },
@@ -327,6 +338,10 @@ function renderReadback(entries: WorkflowAskAnswerEntry[], declined: boolean): s
 
 function errorText(text: string): ReadOnlyAgentToolResult {
   return { content: [{ type: "text", text }], isError: true };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function remountDelay(delayMs: number, signal: AbortSignal): Promise<void> {

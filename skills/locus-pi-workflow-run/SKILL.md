@@ -49,7 +49,9 @@ to a recorded handoff. Do not spawn `pi`, build a slash-command, or call a shell
 when this tool exists. Read the returned run id, paths, disposition, result, and
 artifacts from the tool result.
 
-For any workflow, `runName: "<name>"` selects `.locus-pi/plans/<name>`. Do not
+For any workflow, `runName: "<name>"` selects `.locus-pi/workspaces/<name>`. An
+existing legacy-only `.locus-pi/plans/<name>` remains bound in place so its
+checkpoint identity does not change. If both paths exist, launch fails closed. Do not
 combine `runName` with `outputDir`.
 
 The native tool uses the current Pi session model. It has no per-run model

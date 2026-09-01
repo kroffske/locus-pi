@@ -208,7 +208,9 @@ describe("string-only workflow input", () => {
     const schema = tool.parameters;
     const outputDirDescription = (schema as { properties?: Record<string, { description?: string }> }).properties
       ?.outputDir?.description;
-    expect(outputDirDescription).toContain("Fresh workflows default to unique .locus-pi/plans/<generated-run-name>");
+    expect(outputDirDescription).toContain(
+      "Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name>",
+    );
     expect(outputDirDescription).toContain("resume repeats the source workspace");
     expect(outputDirDescription).not.toMatch(/defaults to tmp\/<workflow-name> beneath the Pi working directory\.$/u);
 
@@ -217,7 +219,7 @@ describe("string-only workflow input", () => {
     expect(
       Value.Check(schema, {
         name: "task/plan",
-        outputDir: ".locus-pi/plans/20260819-120000-a1b2-task-draft",
+        outputDir: ".locus-pi/workspaces/20260819-120000-a1b2-task-draft",
       }),
     ).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(199)}/${"b".repeat(200)}` })).toBe(true);
@@ -270,7 +272,7 @@ describe("string-only workflow input", () => {
 
   it("forwards an explicit task workspace without requiring a run id during tool preflight", async () => {
     const { harness, tool } = registerTool();
-    const outputDir = ".locus-pi/plans/tool-selected-plan";
+    const outputDir = ".locus-pi/workspaces/tool-selected-plan";
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
       runId: "task-plan-explicit-output",
       runDir: "/tmp/task-plan-explicit-output",

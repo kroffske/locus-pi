@@ -25,6 +25,7 @@ import {
 import {
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
+  readWorkflowRunSummary,
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import { workflowRunArtifactsDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
@@ -368,8 +369,9 @@ describe("agent failure cause — run boundary", () => {
 });
 
 describe("agent failure cause — bridge", () => {
-  it("projects the live execution petname as an additive workflow result identity", async () => {
-    const harness = createHarness(bridgeProject(), { sessionId: "transport-petname" });
+  it("round-trips the live execution petname through persisted agent_end evidence", async () => {
+    const root = bridgeProject();
+    const harness = createHarness(root, { sessionId: "transport-petname" });
     const rowId = "workflow:transport-petname:call-0001";
     const runner = createWorkflowAgentRunner({
       pi: harness.pi,
@@ -397,10 +399,25 @@ describe("agent failure cause — bridge", () => {
       }),
     });
 
-    const result = await runner({ prompt: "work", agent: "default", label: "identity proof" });
+    const runId = "transport-petname";
+    const { dsl } = createWorkflowRuntime({
+      runId,
+      projectRoot: root,
+      agentRunner: runner,
+      journal: createWorkflowJournalSink(root, runId),
+    });
+    await expect(dsl.agent("work", { agent: "default", label: "identity proof" })).resolves.toBe("done");
     const displayName = agentLiveStore.rows.get(rowId)?.displayName;
     expect(displayName).toBeDefined();
-    expect(result).toMatchObject({ agent: "default", displayName, status: "completed" });
+    const persisted = readWorkflowRunJournalState(root, runId);
+    expect(persisted.diagnostics).toEqual([]);
+    expect(persisted.lines.find((line) => line.kind === "agent_end")).toMatchObject({
+      agent: "default",
+      displayName,
+      status: "completed",
+    });
+    expect(readWorkflowRunSummary(root, runId)).toMatchObject({ agentsEnded: 1, lastKind: "agent_end" });
+    rmSync(root, { recursive: true, force: true });
   });
 
   it("names an unknown catalog agent as an author error", async () => {
@@ -803,6 +820,44 @@ describe("agent failure cause — runtime", () => {
     expect(result.failureCause).toBe("ask-unavailable");
     expect(result.summary).toMatch(/failed closed/u);
     // Not retryable: re-asking with no UI would re-fail identically.
+    expect(await retriesOn(result.failureCause)).toBe(false);
+  });
+
+  it("declares ask-evidence-persistence when an operator answer cannot be indexed", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-ask-persistence-cause-"));
+    const h = createHarness(root);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      workflowRunId: "ask-persistence-cause",
+      evidenceDestinations: () => ({
+        transcriptDir: path.join(root, "transcripts"),
+        resultArtifactsDir: path.join(root, "results"),
+        recordOperatorAskEvidence() {
+          throw new Error("injected operator-ask index failure");
+        },
+      }),
+      askRequestQuestion: async () => ({ status: "answered", kind: "custom", answer: "operator answer" }),
+      createExecutor: () => ({
+        async run(request, signal) {
+          const tool = request.customTools?.find((candidate) => candidate.name === "workflow_ask");
+          await tool!.execute("tool-call-1", { questions: [{ question: "Which way?", options: [] }] }, signal);
+          return {
+            status: "cancelled",
+            agentName: "sub-agent",
+            reason: "aborted",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    const result = record(await runner({ prompt: "decide", tools: ["*"], operatorAsk: true, callId: "call-0001" }));
+
+    expect(result.failureCause).toBe("ask-evidence-persistence");
+    expect(result.text).toBeUndefined();
     expect(await retriesOn(result.failureCause)).toBe(false);
   });
 });
