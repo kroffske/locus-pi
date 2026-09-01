@@ -148,6 +148,35 @@ describe("model command surfaces", () => {
     expect(plain.thinkingLevel).toBe("off");
   });
 
+  it("moves one strong focus from model to role to effort", async () => {
+    const customTheme = {
+      fg(_color: string, text: string) {
+        return text;
+      },
+      bold(text: string) {
+        return text;
+      },
+    };
+    harness = createHarness(join(root, "project"), { models: REASONING_MODELS, customTheme });
+    harness.ctx.model = REASONING_MODELS[0]!;
+    model(harness.pi);
+    harness.customInputQueue.push(ENTER, ENTER, "q");
+
+    await harness.commands.get("model-roles")!.handler("", harness.ctx);
+
+    const frames = harness.customRenderFrames.map((lines) => lines.join("\n"));
+    const models = frames.find((frame) => frame.includes("[models]")) ?? "";
+    const roles = frames.find((frame) => frame.includes("[roles]")) ?? "";
+    const effort = frames.find((frame) => frame.includes("[effort]")) ?? "";
+    const fill = "\x1b[48;2;88;61;121m";
+    expect(models.split(fill)).toHaveLength(3); // provider + model
+    expect(roles.split(fill)).toHaveLength(3); // provider + role
+    expect(roles).toContain(`[DEFAULT] ${fill}\x1b[38;2;248;241;255mSet as DEFAULT\x1b[0m`);
+    expect(roles).not.toContain(`${fill}\x1b[38;2;248;241;255m> [CURRENT]`);
+    expect(effort.split(fill)).toHaveLength(2); // effort only
+    expect(effort).toContain(`${fill}\x1b[38;2;248;241;255moff\x1b[0m`);
+  });
+
   it("names mode, current level and supported levels when the effort selector cannot open", async () => {
     const rpc = createHarness(join(root, "rpc-effort"), { models: REASONING_MODELS, mode: "rpc" });
     rpc.ctx.model = REASONING_MODELS[0]!;

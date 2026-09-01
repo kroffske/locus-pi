@@ -356,7 +356,7 @@ describe("model extension", () => {
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
     expect(harness.customRenderFrames[0]?.join("\n")).toContain("<accent>[SELECT]</accent>");
-    expect(harness.customRenderFrames[0]?.join("\n")).toContain("<borderAccent>");
+    expect(harness.customRenderFrames[0]?.join("\n")).toContain("\u001b[38;2;196;167;231m╭─ \u001b[39m");
   });
 
   it("renders a typed read-only fallback when custom UI is unavailable", async () => {
@@ -728,7 +728,7 @@ describe("effort operator surfaces", () => {
 });
 
 describe("ModelRoleSelectorComponent", () => {
-  it("uses distinct semantic accents for active filter, routes, models, and cursor", () => {
+  it("uses shared purple focus while keeping settled routes and warning actions semantic", async () => {
     const { rows, summaries } = selectorFixture();
     const colors: Record<string, string> = {
       accent: "36",
@@ -761,20 +761,19 @@ describe("ModelRoleSelectorComponent", () => {
     );
 
     const text = component.render(146).join("\n");
-    // Accent marks what you are looking at (active filter, session model, cursor);
-    // success marks what is already assigned. Every route in this fixture is
-    // assigned, so the surface carries no warning at all.
-    expect(text).toContain("\x1b[36m[ALL]\x1b[39m");
+    // Purple marks active filter and model focus. Green status tokens survive
+    // even while the model identity itself is the active choice.
+    expect(text).toContain("\x1b[48;2;88;61;121m\x1b[38;2;248;241;255m[ALL]\x1b[0m");
     expect(text).not.toContain("\x1b[32m[ALL]\x1b[39m");
-    expect(text).toContain("\x1b[32mCurrent\x1b[39m");
-    expect(text).toContain("\x1b[32mhigh\x1b[39m");
-    expect(text).toContain("\x1b[32mDEFAULT\x1b[39m");
-    expect(text).toContain("\x1b[32mtest/fast:high\x1b[39m");
-    expect(text).toContain("\x1b[36mtest/fast\x1b[39m");
     expect(text).toContain("\x1b[32m[CURRENT]\x1b[39m");
-    expect(text).toContain("\x1b[36m>\x1b[39m");
+    expect(text).toContain("\x1b[32m[DEFAULT]\x1b[39m");
+    expect(text).toContain("\x1b[48;2;88;61;121m\x1b[38;2;248;241;255mtest/fast — Test Fast\x1b[0m");
     expect(text).not.toContain("\x1b[33m");
-    expect(text).not.toContain("Available roles:");
+
+    await component.handleInput(ENTER);
+    const roles = component.render(146).join("\n");
+    expect(roles).toContain("\x1b[48;2;88;61;121m\x1b[38;2;248;241;255mSet as DEFAULT\x1b[0m");
+    expect(roles).toContain("\x1b[33m[DEFAULT]\x1b[39m");
   });
 
   it("renders assigned routes in success on separate lines and keeps warning for unset ones", () => {
@@ -816,8 +815,8 @@ describe("ModelRoleSelectorComponent", () => {
     expect(lines[routingIndex + 1]).toContain("\x1b[32mSUMMARY\x1b[39m");
     expect(lines[routingIndex + 2]).toContain("\x1b[32mSMOL\x1b[39m");
     expect(lines[routingIndex + 1]).toContain("\x1b[32mtest/strong:low\x1b[39m");
-    expect(lines.join("\n")).toContain("\x1b[32m[SUMMARY]\x1b[39m");
-    expect(lines.join("\n")).toContain("\x1b[32mtest/strong\x1b[39m");
+    expect(lines.join("\n")).toMatch(/\x1b\[32m\[SUMMARY\]\x1b\[39m.*\x1b\[32m\[SMOL\]\x1b\[39m/su);
+    expect(lines.join("\n")).toContain("\x1b[48;2;88;61;121m\x1b[38;2;248;241;255mtest/strong");
     // Nothing is pinned to DEFAULT and no model owns the session here, so those
     // two labels keep warning: unset is the surviving attention case.
     expect(lines.join("\n")).toContain("\x1b[33mDEFAULT\x1b[39m");
