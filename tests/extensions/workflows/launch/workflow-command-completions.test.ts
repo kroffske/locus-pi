@@ -23,7 +23,7 @@ afterEach(() => {
 function project(): string {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-completions-"));
   roots.push(root);
-  const workflowsDir = path.join(root, ".pi", "workflows");
+  const workflowsDir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(workflowsDir, { recursive: true });
   writeFileSync(
     path.join(workflowsDir, "alpha.workflow.mjs"),
@@ -237,7 +237,7 @@ describe("workflow command argument completion", () => {
 
   it("offers only canonical saved names and round-trips interior whitespace as one token", () => {
     const root = project();
-    const workflowsDir = path.join(root, ".pi", "workflows");
+    const workflowsDir = path.join(root, ".locus-pi", "workflows");
     const invalidNames = [
       " alpha",
       "alpha ",

@@ -69,7 +69,7 @@ let harnessRootParent: string | undefined;
  *
  * `process.cwd()` used to be the default, which let repository-local state —
  * an interrupted `.locus-pi/runs/<runId>/` left behind by a real
- * local run, a developer's `.pi/workflows/` scripts — leak into assertions and
+ * local run, a developer's `.locus-pi/workflows/` scripts — leak into assertions and
  * fail tests that never wrote that state. A test that wants the repository
  * root must now ask for it explicitly by passing `process.cwd()`.
  */

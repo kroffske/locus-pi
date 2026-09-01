@@ -1948,7 +1948,7 @@ describe("workflow progress widget", () => {
           journal,
           target: { kind: "name", ref: "detail", source: "project" },
           scriptIdentity: {
-            sourcePath: path.join(root, ".pi", "workflows", "detail.workflow.mjs"),
+            sourcePath: path.join(root, ".locus-pi", "workflows", "detail.workflow.mjs"),
             snapshotPath: path.join(workflowRunRuntimeDir(runDir), `script-${"a".repeat(64)}.workflow.mjs`),
             scriptSha256: "a".repeat(64),
           },
@@ -2054,7 +2054,7 @@ describe("workflow progress widget", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const projectDir = path.join(root, ".pi", "workflows");
+      const projectDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(projectDir, { recursive: true });
       writeFileSync(
         path.join(projectDir, "alpha.workflow.mjs"),
@@ -2106,7 +2106,7 @@ describe("workflow progress widget", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const projectDir = path.join(root, ".pi", "workflows");
+      const projectDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(projectDir, { recursive: true });
       writeFileSync(
         path.join(projectDir, "alpha.workflow.mjs"),
@@ -2194,7 +2194,7 @@ describe("workflow progress widget", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       for (let index = 0; index < 6; index += 1) {
         writeFileSync(

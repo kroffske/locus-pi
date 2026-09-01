@@ -52,7 +52,7 @@ function project(): string {
     path.join(root, ".agents", "agents", "default.md"),
     "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
   );
-  mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+  mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
   return root;
 }
 
@@ -76,7 +76,7 @@ describe("workflow workspace and run evidence", () => {
     const workingDirectory = path.join(root, "packages", "docs site");
     mkdirSync(workingDirectory, { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "files.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "files.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  const answer = await dsl.agent("write the plan", { label: "writer" });',
@@ -137,7 +137,7 @@ describe("workflow workspace and run evidence", () => {
     const workingDirectory = path.join(root, "p".repeat(150), "q".repeat(150), "r".repeat(150));
     mkdirSync(workingDirectory, { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "long-default.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "long-default.workflow.mjs"),
       "export default function runWorkflow(dsl) { return dsl.outputDir(); }\n",
     );
     const harness = createHarness(root);
@@ -160,7 +160,7 @@ describe("workflow workspace and run evidence", () => {
   it("creates the default workflow workspace before the script runs", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "empty.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "empty.workflow.mjs"),
       "export default function runWorkflow(dsl) { return dsl.outputDir(); }\n",
     );
     const harness = createHarness(root, { sessionId: "run-files-empty" });
@@ -181,7 +181,7 @@ describe("workflow workspace and run evidence", () => {
   it("fails runWorkspaceDir() with the named migration error", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "legacy-workspace.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "legacy-workspace.workflow.mjs"),
       "export default function runWorkflow(dsl) { return dsl.runWorkspaceDir(); }\n",
     );
     const harness = createHarness(root);
@@ -201,7 +201,7 @@ describe("workflow workspace and run evidence", () => {
     const root = project();
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-outside-pwd-"));
     roots.push(outside);
-    writeFileSync(path.join(root, ".pi", "workflows", "outside.workflow.mjs"), 'export default () => "ok";\n');
+    writeFileSync(path.join(root, ".locus-pi", "workflows", "outside.workflow.mjs"), 'export default () => "ok";\n');
     const harness = createHarness(root);
     harness.ctx.session = { ...harness.ctx.session!, workingDirectory: outside };
 
@@ -222,7 +222,7 @@ describe("workflow workspace and run evidence", () => {
     roots.push(outside);
     const linked = path.join(root, "linked");
     symlinkSync(outside, linked, "dir");
-    writeFileSync(path.join(root, ".pi", "workflows", "linked.workflow.mjs"), 'export default () => "ok";\n');
+    writeFileSync(path.join(root, ".locus-pi", "workflows", "linked.workflow.mjs"), 'export default () => "ok";\n');
     const harness = createHarness(root);
     harness.ctx.session = { ...harness.ctx.session!, workingDirectory: linked };
 
@@ -376,7 +376,7 @@ describe("workflow workspace and run evidence", () => {
   it("rejects empty or padded direct-runtime resume ids instead of normalizing them", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "resume-exact.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "resume-exact.workflow.mjs"),
       'export default function runWorkflow() { return "workflow-ran"; }\n',
     );
     const harness = createHarness(root, { sessionId: "exact-resume-id" });
@@ -404,7 +404,7 @@ describe("workflow workspace and run evidence", () => {
   it("terminalizes non-string direct-runtime resume ids without starting child work", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "resume-type.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "resume-type.workflow.mjs"),
       'export default async (dsl) => dsl.agent("must not run");\n',
     );
     const harness = createHarness(root, { sessionId: "resume-type" });
@@ -439,7 +439,7 @@ describe("workflow workspace and run evidence", () => {
   it("rejects an unsafe resume id before outside result, journal, or replay evidence can be read", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "resume-guard.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "resume-guard.workflow.mjs"),
       'export default function runWorkflow() { return "workflow-ran"; }\n',
     );
     const unsafeRunId = "../../outside";
@@ -489,7 +489,7 @@ describe("workflow workspace and run evidence", () => {
   it("refuses a replaced outputs symlink for terminal writes and later reads", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "symlink-output.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "symlink-output.workflow.mjs"),
       'export default async function runWorkflow() { return "trusted result"; }\n',
     );
     const harness = createHarness(root, { sessionId: "run-output-symlink" });
@@ -578,7 +578,7 @@ describe("workflow workspace and run evidence", () => {
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-terminal-outside-"));
     roots.push(outside);
     writeFileSync(
-      path.join(root, ".pi", "workflows", "replace-runs.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "replace-runs.workflow.mjs"),
       'export default () => "must not escape";\n',
     );
     const harness = createHarness(root, { sessionId: "replace-runs" });

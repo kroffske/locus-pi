@@ -42,6 +42,8 @@ import {
 import path from "node:path";
 
 export const WORKFLOW_ROOT_DIRNAME = ".locus-pi";
+export const WORKFLOW_SAVED_SOURCE_DIRNAME = "workflows";
+export const WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME].join("/");
 export const WORKFLOW_RUNS_DIRNAME = "runs";
 export const WORKFLOW_PLANS_DIRNAME = "plans";
 export const WORKFLOW_WORKSPACES_DIRNAME = "workspaces";

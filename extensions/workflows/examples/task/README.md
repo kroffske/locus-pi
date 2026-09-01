@@ -11,7 +11,7 @@
 
 The second stage replaces the old generic implementation and template-rendering
 pipeline. Nothing executes the generated workflow automatically. Review the
-source, copy it into the target project's `.pi/workflows/` namespace, and run it
+source, copy it into the target project's `.locus-pi/workflows/` namespace, and run it
 only through the normal reviewed-workflow path.
 
 ```text

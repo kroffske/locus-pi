@@ -47,16 +47,16 @@ import { createHarness } from "../../../test-harness.js";
 
 function project(): string {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-durable-"));
-  mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+  mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
   return root;
 }
 
 function writeWorkflow(root: string, name: string, source: string): void {
-  writeFileSync(path.join(root, ".pi", "workflows", `${name}.workflow.mjs`), source, "utf8");
+  writeFileSync(path.join(root, ".locus-pi", "workflows", `${name}.workflow.mjs`), source, "utf8");
 }
 
 function writeWorkflowTree(root: string, name: string, entries: Record<string, string>): void {
-  const directory = path.join(root, ".pi", "workflows", name);
+  const directory = path.join(root, ".locus-pi", "workflows", name);
   mkdirSync(directory, { recursive: true });
   for (const [entry, source] of Object.entries(entries)) {
     writeFileSync(path.join(directory, `${entry}.workflow.mjs`), source, "utf8");
@@ -121,9 +121,9 @@ export default async function run(dsl, input) {
 `;
 
 describe("stable workflow output paths", () => {
-  it("does not re-resolve a host-bound target after source precedence changes", async () => {
+  it("does not fall back to a legacy source after a bound canonical source disappears", async () => {
     const root = project();
-    const piWorkflow = path.join(root, ".pi", "workflows", "switch.workflow.mjs");
+    const piWorkflow = path.join(root, ".locus-pi", "workflows", "switch.workflow.mjs");
     writeWorkflow(root, "switch", `export default () => "project-source";\n`);
     const target = resolveWorkflowTarget({ name: "switch" }, root, root);
     rmSync(piWorkflow);
@@ -167,9 +167,9 @@ describe("stable workflow output paths", () => {
     const root = project();
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-bound-target-"));
     writeFileSync(path.join(outside, "switch.workflow.mjs"), 'export default () => "outside";\n');
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    rmSync(path.join(root, ".pi", "workflows"), { recursive: true, force: true });
-    symlinkSync(outside, path.join(root, ".pi", "workflows"), "dir");
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    rmSync(path.join(root, ".locus-pi", "workflows"), { recursive: true, force: true });
+    symlinkSync(outside, path.join(root, ".locus-pi", "workflows"), "dir");
     const harness = createHarness(root);
     const result = await runWorkflowScript({
       pi: harness.pi,
@@ -180,7 +180,7 @@ describe("stable workflow output paths", () => {
         kind: "name",
         ref: "switch",
         source: "project",
-        path: path.join(root, ".pi", "workflows", "switch.workflow.mjs"),
+        path: path.join(root, ".locus-pi", "workflows", "switch.workflow.mjs"),
       },
     });
     expect(result.ok).toBe(false);
@@ -189,9 +189,9 @@ describe("stable workflow output paths", () => {
 
   it("accepts an internally confined target symlink after physical proof", async () => {
     const root = project();
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    const real = path.join(root, ".pi", "workflows", "switch.workflow.mjs");
-    const alias = path.join(root, ".pi", "workflows", "alias.workflow.mjs");
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    const real = path.join(root, ".locus-pi", "workflows", "switch.workflow.mjs");
+    const alias = path.join(root, ".locus-pi", "workflows", "alias.workflow.mjs");
     writeFileSync(real, 'export default () => "project-source";\n');
     symlinkSync(real, alias);
     const harness = createHarness(root);
@@ -199,10 +199,10 @@ describe("stable workflow output paths", () => {
       pi: harness.pi,
       ctx: harness.ctx,
       signal: new AbortController().signal,
-      scriptPath: ".pi/workflows/alias.workflow.mjs",
+      scriptPath: ".locus-pi/workflows/alias.workflow.mjs",
       targetBinding: {
         kind: "scriptPath",
-        ref: ".pi/workflows/alias.workflow.mjs",
+        ref: ".locus-pi/workflows/alias.workflow.mjs",
         source: "project",
         path: alias,
       },
@@ -795,7 +795,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
   it("binds an absolute owner path to owner metadata and semantic input on resume", async () => {
     const root = project();
     writeWorkflow(root, "post-code-review", `export default (dsl) => dsl.outputDir();\n`);
-    const scriptPath = path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs");
+    const scriptPath = path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs");
     const outputDir = "tmp/post-code-review/absolute-owner";
     const firstHarness = createHarness(root);
     const first = await runWorkflowScript({

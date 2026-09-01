@@ -21,8 +21,11 @@ describe("workflow target physical confinement", () => {
     [{ kind: "name", ref: "post-code-review", source: "project" }, true],
     [{ kind: "name", ref: "post-code-review", source: "personal" }, false],
     [{ kind: "name", ref: "post-code-review", source: "package" }, true],
-    [{ kind: "scriptPath", ref: "./.pi/workflows/post-code-review.workflow.mjs", source: "project" }, true],
-    [{ kind: "scriptPath", ref: "nested/../.pi/workflows/post-code-review.workflow.mjs", source: "project" }, true],
+    [{ kind: "scriptPath", ref: "./.locus-pi/workflows/post-code-review.workflow.mjs", source: "project" }, true],
+    [
+      { kind: "scriptPath", ref: "nested/../.locus-pi/workflows/post-code-review.workflow.mjs", source: "project" },
+      true,
+    ],
     [{ kind: "scriptPath", ref: "nested/post-code-review.workflow.mjs", source: "project" }, false],
   ] as const)("classifies canonical owner identity source/path %j", (identity, expected) => {
     expect(isPostCodeReviewTargetIdentity(identity)).toBe(expected);
@@ -31,14 +34,14 @@ describe("workflow target physical confinement", () => {
   it("classifies an absolute in-project owner path only with its project root", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-owner-absolute-"));
     try {
-      const absolute = path.join(root, ".agents", "workflows", "post-code-review.workflow.mjs");
+      const absolute = path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs");
       expect(isPostCodeReviewTargetIdentity({ kind: "scriptPath", ref: absolute, source: "project" }, root)).toBe(true);
       expect(isPostCodeReviewTargetIdentity({ kind: "scriptPath", ref: absolute, source: "project" })).toBe(false);
       expect(
         isPostCodeReviewTargetIdentity(
           {
             kind: "scriptPath",
-            ref: path.join(root, "..", ".agents", "workflows", "post-code-review.workflow.mjs"),
+            ref: path.join(root, "..", ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
             source: "project",
           },
           root,
@@ -52,7 +55,7 @@ describe("workflow target physical confinement", () => {
   it("uses one canonical key for equivalent path spellings and confined symlink aliases", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-owner-projection-"));
     try {
-      const workflows = path.join(root, ".pi", "workflows");
+      const workflows = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflows, { recursive: true });
       const canonical = path.join(workflows, "post-code-review.workflow.mjs");
       const alias = path.join(root, "post-review-alias.workflow.mjs");
@@ -60,7 +63,7 @@ describe("workflow target physical confinement", () => {
       symlinkSync(canonical, alias);
 
       const canonicalTarget = resolveWorkflowTarget(
-        { scriptPath: ".pi/workflows/post-code-review.workflow.mjs" },
+        { scriptPath: ".locus-pi/workflows/post-code-review.workflow.mjs" },
         root,
         root,
       );
@@ -70,7 +73,7 @@ describe("workflow target physical confinement", () => {
 
       expect(
         workflowTargetIdentityKey(
-          { kind: "scriptPath", ref: "./.pi/workflows/post-code-review.workflow.mjs", source: "project" },
+          { kind: "scriptPath", ref: "./.locus-pi/workflows/post-code-review.workflow.mjs", source: "project" },
           { projectRoot: root },
         ),
       ).toBe(workflowTargetIdentityKey(canonicalIdentity, { projectRoot: root, resolvedPath: canonicalTarget.path }));
@@ -135,7 +138,7 @@ describe("workflow target physical confinement", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-confined-name-"));
     const outside = mkdtempSync(path.join(tmpdir(), "wf-confined-name-outside-"));
     try {
-      const projectWorkflows = path.join(root, ".pi", "workflows");
+      const projectWorkflows = path.join(root, ".locus-pi", "workflows");
       mkdirSync(projectWorkflows, { recursive: true });
       const externalScript = path.join(outside, "named.workflow.mjs");
       writeFileSync(externalScript, "export default () => ({ escaped: true });\n", "utf8");
@@ -157,18 +160,18 @@ describe("workflow target physical confinement", () => {
     try {
       const actualScript = path.join(physicalRoot, "actual", "inside.workflow.mjs");
       mkdirSync(path.dirname(actualScript), { recursive: true });
-      mkdirSync(path.join(physicalRoot, ".pi", "workflows"), { recursive: true });
+      mkdirSync(path.join(physicalRoot, ".locus-pi", "workflows"), { recursive: true });
       writeFileSync(actualScript, "export default () => ({ inside: true });\n", "utf8");
       symlinkSync(physicalRoot, projectAlias);
       symlinkSync(actualScript, path.join(physicalRoot, "entry.workflow.mjs"));
-      symlinkSync(actualScript, path.join(physicalRoot, ".pi", "workflows", "inside.workflow.mjs"));
+      symlinkSync(actualScript, path.join(physicalRoot, ".locus-pi", "workflows", "inside.workflow.mjs"));
 
       const explicit = resolveWorkflowTarget({ scriptPath: "entry.workflow.mjs" }, projectAlias, projectAlias);
       const named = resolveWorkflowTarget({ name: "inside" }, projectAlias, projectAlias);
       expect(explicit.path).toBe(path.join(projectAlias, "entry.workflow.mjs"));
       expect(named).toMatchObject({
         source: "project",
-        path: path.join(projectAlias, ".pi", "workflows", "inside.workflow.mjs"),
+        path: path.join(projectAlias, ".locus-pi", "workflows", "inside.workflow.mjs"),
       });
 
       const harness = createHarness(projectAlias, { sessionId: "wf-confined-internal" });
@@ -206,7 +209,7 @@ describe("workflow target physical confinement", () => {
       expect(() => resolveWorkflowTarget({ scriptPath: "../escape.workflow.mjs" }, root, root)).toThrow(/escapes/u);
 
       process.env.HOME = home;
-      const personalDir = path.join(home, ".pi", "workflows");
+      const personalDir = path.join(home, ".locus-pi", "workflows");
       mkdirSync(personalDir, { recursive: true });
       writeFileSync(path.join(personalDir, "personal.workflow.mjs"), "export default () => 'personal';\n", "utf8");
       expect(resolveWorkflowTarget({ name: "personal" }, root, root)).toMatchObject({
@@ -233,7 +236,7 @@ describe("workflow target physical confinement", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = home;
-      const personalDir = path.join(home, ".pi", "workflows");
+      const personalDir = path.join(home, ".locus-pi", "workflows");
       mkdirSync(personalDir, { recursive: true });
       const internalFile = path.join(personalDir, "inside.workflow.mjs");
       writeFileSync(internalFile, "export default () => 'inside';\n", "utf8");
@@ -247,14 +250,14 @@ describe("workflow target physical confinement", () => {
       symlinkSync(externalFile, path.join(personalDir, "personal.workflow.mjs"));
       expect(() => resolveWorkflowTarget({ name: "personal" }, root, root)).toThrow(/personal workflow root|symlink/u);
 
-      rmSync(path.join(home, ".pi"), { recursive: true, force: true });
+      rmSync(path.join(home, ".locus-pi"), { recursive: true, force: true });
       mkdirSync(path.join(outside, "workflows"), { recursive: true });
       writeFileSync(
         path.join(outside, "workflows", "personal.workflow.mjs"),
         "export default () => 'outside';\n",
         "utf8",
       );
-      symlinkSync(outside, path.join(home, ".pi"), "dir");
+      symlinkSync(outside, path.join(home, ".locus-pi"), "dir");
       expect(() => resolveWorkflowTarget({ name: "personal" }, root, root)).toThrow(/home directory|symlink/u);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
@@ -266,21 +269,13 @@ describe("workflow target physical confinement", () => {
   });
 });
 
-/**
- * T-112 — the docs used to call `.claude/workflows/` an interop source for
- * foreign workflows. It is not one: these directories accept exactly the
- * pi-native `<name>.workflow.mjs`, which is what the narrowed wording now says.
- * This test is what that claim resolves to, and it is what must be changed
- * deliberately if the still-open `.js` decision is ever implemented.
- */
-describe("interop-directory file layout", () => {
+describe("canonical saved-workflow source root", () => {
   const withProject = (run: (root: string) => void): void => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-interop-"));
     const previousHome = process.env.HOME;
     try {
       // Keep a real personal directory out of the resolution path.
       process.env.HOME = path.join(root, "home");
-      mkdirSync(path.join(root, ".claude", "workflows"), { recursive: true });
       run(root);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
@@ -289,40 +284,46 @@ describe("interop-directory file layout", () => {
     }
   };
 
-  it("does not resolve a foreign host's <name>.js dropped into .claude/workflows", () => {
+  it.each([".pi", ".claude", ".agents"])("does not resolve saved names from legacy project root %s", (legacyRoot) => {
     withProject((root) => {
-      writeFileSync(
-        path.join(root, ".claude", "workflows", "foreign.js"),
-        "export default async function () { return args; }\n",
-        "utf8",
-      );
+      const directory = path.join(root, legacyRoot, "workflows");
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(path.join(directory, "old.workflow.mjs"), 'export default () => "old";\n', "utf8");
 
-      expect(() => resolveWorkflowTarget({ name: "foreign" }, root, root)).toThrow(WorkflowNameNotFoundError);
-      expect(listWorkflowCatalogTargets(root, root).map((target) => target.ref)).not.toContain("foreign");
+      expect(() => resolveWorkflowTarget({ name: "old" }, root, root)).toThrow(WorkflowNameNotFoundError);
+      expect(listWorkflowCatalogTargets(root, root).map((target) => target.ref)).not.toContain("old");
     });
   });
 
-  it("resolves a pi-native <name>.workflow.mjs there as an ordinary project source", () => {
+  it("resolves only the pi-native entry from project .locus-pi/workflows", () => {
     withProject((root) => {
-      const file = path.join(root, ".claude", "workflows", "native.workflow.mjs");
-      writeFileSync(file, 'export const meta = { description: "d." };\nexport default () => "native";\n', "utf8");
+      const dir = path.join(root, ".locus-pi", "workflows");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, "both.js"), "export default () => 'js';\n", "utf8");
+      writeFileSync(path.join(dir, "both.workflow.mjs"), "export default () => 'mjs';\n", "utf8");
 
-      expect(resolveWorkflowTarget({ name: "native" }, root, root)).toMatchObject({
+      expect(resolveWorkflowTarget({ name: "both" }, root, root)).toMatchObject({
         kind: "name",
-        ref: "native",
+        ref: "both",
         source: "project",
-        path: file,
+        path: path.join(dir, "both.workflow.mjs"),
       });
     });
   });
 
-  it("never lets a sibling .js win over the accepted .mjs", () => {
+  it("resolves canonical folder roots and direct children", () => {
     withProject((root) => {
-      const dir = path.join(root, ".claude", "workflows");
-      writeFileSync(path.join(dir, "both.js"), "export default () => 'js';\n", "utf8");
-      writeFileSync(path.join(dir, "both.workflow.mjs"), "export default () => 'mjs';\n", "utf8");
+      const namespace = path.join(root, ".locus-pi", "workflows", "catalog");
+      mkdirSync(namespace, { recursive: true });
+      writeFileSync(path.join(namespace, "catalog.workflow.mjs"), 'export default () => "root";\n', "utf8");
+      writeFileSync(path.join(namespace, "analyze-file.workflow.mjs"), 'export default () => "child";\n', "utf8");
 
-      expect(resolveWorkflowTarget({ name: "both" }, root, root).path).toBe(path.join(dir, "both.workflow.mjs"));
+      expect(resolveWorkflowTarget({ name: "catalog" }, root, root).path).toBe(
+        path.join(namespace, "catalog.workflow.mjs"),
+      );
+      expect(resolveWorkflowTarget({ name: "catalog/analyze-file" }, root, root).path).toBe(
+        path.join(namespace, "analyze-file.workflow.mjs"),
+      );
     });
   });
 });
@@ -333,7 +334,7 @@ describe("saved workflow name identity", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       run(root, workflowDir);
     } finally {

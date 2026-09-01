@@ -1377,9 +1377,9 @@ describe("agent attempts — a real call-timeout on an artifact-backed child", (
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "fused.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "fused.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  return await dsl.agent("answer", {',

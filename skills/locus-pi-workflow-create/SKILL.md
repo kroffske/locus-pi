@@ -29,14 +29,14 @@ it does not run the new workflow.
 A plain request to create, design, write, or author a workflow runs one visible
 sequence in the same turn:
 
-1. Create `.pi/workflows/<name>/` and write
-   `.pi/workflows/<name>/<name>.design.md` before any source.
+1. Create `.locus-pi/workflows/<name>/` and write
+   `.locus-pi/workflows/<name>/<name>.design.md` before any source.
 2. Review the design against the request, selected pattern, graph contract, and
    standard source profile. Revise the design until the review finds no material
    mismatch.
 3. Build exactly the direct `.workflow.mjs` entries declared by the reviewed
    design. A `runnable root` design includes
-   `.pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
+   `.locus-pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
    and builds only its direct children. Never invent a root.
 4. Validate source identity, module load, graph correspondence, and standard
    source shape. Do not run the workflow unless the user separately asks to run it.
@@ -290,7 +290,7 @@ a large structured plan.
 ## Build checks
 
 Build writes one canonical folder matching the reviewed design: an optional
-`.pi/workflows/<name>/<name>.workflow.mjs` only when the namespace is declared
+`.locus-pi/workflows/<name>/<name>.workflow.mjs` only when the namespace is declared
 `runnable root`, plus only its declared direct child entries. A `group-only`
 namespace has no root source and never receives a fake one. It then checks:
 
@@ -304,7 +304,7 @@ namespace has no root source and never receives a fake one. It then checks:
 - no design-absent node or standard-profile bad smell appeared.
 - the exact built file passes the Pi-native `workflow_check_source` tool with
   `mode: "orchestration-only"` for every built
-  `.pi/workflows/<name>/*.workflow.mjs` path.
+  `.locus-pi/workflows/<name>/*.workflow.mjs` path.
 - every built source uses only the orchestration-only DSL subset and contains no
   file, path, artifact-consumption, clock, or randomness primitive.
 

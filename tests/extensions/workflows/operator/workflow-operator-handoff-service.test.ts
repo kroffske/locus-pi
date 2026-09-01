@@ -34,7 +34,7 @@ function projectWithHandoff(
 ): string {
   const root = realpathSync(existingRoot ?? mkdtempSync(path.join(tmpdir(), "workflow-handoff-service-")));
   if (existingRoot === undefined) roots.push(root);
-  const workflowsDir = path.join(root, ".pi", "workflows");
+  const workflowsDir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(workflowsDir, { recursive: true });
   const sourcePath = path.join(workflowsDir, "alpha.workflow.mjs");
   writeFileSync(
@@ -163,9 +163,9 @@ describe("workflow operator handoff service", () => {
   it("renders a verified blocker artifact beside three choices and custom input", async () => {
     const root = realpathSync(mkdtempSync(path.join(tmpdir(), "workflow-handoff-detail-")));
     roots.push(root);
-    mkdirSync(path.join(root, ".pi", "workflows", "test-question"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows", "test-question"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "test-question", "answer.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "test-question", "answer.workflow.mjs"),
       `export default (dsl) => {
   const blocker = dsl.publishArtifact("planning-blocker.md", "# Planning Blocker\\n\\n## Question\\nWhich queue should own retries?\\n");
   dsl.awaitOperator({
@@ -298,9 +298,9 @@ describe("workflow operator handoff service", () => {
   it("rejects a post-code-review handoff with a missing launch binding in scan/read/launch", async () => {
     const root = realpathSync(mkdtempSync(path.join(tmpdir(), "workflow-handoff-owner-missing-binding-")));
     roots.push(root);
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
       `export default (dsl) => {\n` +
         `  const intent = dsl.publishArtifact("intent.md", "review", "prepare");\n` +
         `  dsl.awaitOperator({ reason: "review", operatorHandoff: { title: "Review", questions: [{ kind: "select", id: "scope", prompt: "Scope", options: [{ label: "Current" }], recommended: "Current", allowCustom: true }], continuationArtifactRefs: [intent] } });\n` +
@@ -461,7 +461,7 @@ describe("workflow operator handoff service", () => {
     const item = service.scan(root).find((entry) => entry.status === "actionable");
     if (item?.status !== "actionable") throw new Error("expected actionable handoff");
     writeFileSync(
-      path.join(root, ".pi", "workflows", "alpha.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "alpha.workflow.mjs"),
       'export const meta={name:"alpha",description:"Changed"}; export default async()=>({ok:false});\n',
       "utf8",
     );

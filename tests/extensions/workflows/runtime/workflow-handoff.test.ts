@@ -43,7 +43,7 @@ afterEach(() => {
 function project(): string {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-handoff-"));
   roots.push(root);
-  const workflows = path.join(root, ".pi", "workflows");
+  const workflows = path.join(root, ".locus-pi", "workflows");
   mkdirSync(workflows, { recursive: true });
   writeFileSync(
     path.join(workflows, "source.workflow.mjs"),
@@ -146,20 +146,20 @@ describe("workflow operator handoff", () => {
 
   it("claims a raw project scriptPath handoff and accepts a confined symlink alias", async () => {
     const root = project();
-    symlinkSync("source.workflow.mjs", path.join(root, ".pi", "workflows", "alias.workflow.mjs"));
+    symlinkSync("source.workflow.mjs", path.join(root, ".locus-pi", "workflows", "alias.workflow.mjs"));
     const sourceHarness = createHarness(root);
     const source = await runWorkflowScript({
       pi: sourceHarness.pi,
       ctx: sourceHarness.ctx,
       signal: new AbortController().signal,
-      scriptPath: "./.pi/workflows/alias.workflow.mjs",
+      scriptPath: "./.locus-pi/workflows/alias.workflow.mjs",
     });
     const read = readWorkflowOperatorHandoff(source);
     expect(read.status).toBe("ready");
     if (read.status !== "ready") throw new Error("expected ready handoff");
     expect(read.handoff.target).toEqual({
       kind: "scriptPath",
-      ref: "./.pi/workflows/alias.workflow.mjs",
+      ref: "./.locus-pi/workflows/alias.workflow.mjs",
       source: "project",
     });
     const claim = claimWorkflowOperatorHandoff(root, read.handoff);
@@ -170,7 +170,7 @@ describe("workflow operator handoff", () => {
       pi: sourceHarness.pi,
       ctx: sourceHarness.ctx,
       signal: new AbortController().signal,
-      scriptPath: "./.pi/workflows/alias.workflow.mjs",
+      scriptPath: "./.locus-pi/workflows/alias.workflow.mjs",
       input: "operator answer",
       continuation: workflowContinuationForHandoff(read.handoff),
       operatorHandoffClaim: claim.claim,
@@ -183,13 +183,13 @@ describe("workflow operator handoff", () => {
     });
 
     writeFileSync(
-      path.join(root, ".pi", "workflows", "other.workflow.mjs"),
-      readFileSync(path.join(root, ".pi", "workflows", "source.workflow.mjs"), "utf8"),
+      path.join(root, ".locus-pi", "workflows", "other.workflow.mjs"),
+      readFileSync(path.join(root, ".locus-pi", "workflows", "source.workflow.mjs"), "utf8"),
       "utf8",
     );
     const changedTarget = {
       ...read.handoff,
-      target: { ...read.handoff.target, ref: "./.pi/workflows/other.workflow.mjs" },
+      target: { ...read.handoff.target, ref: "./.locus-pi/workflows/other.workflow.mjs" },
     };
     expect(claimWorkflowOperatorHandoff(root, changedTarget)).toMatchObject({
       status: "invalid",
@@ -352,7 +352,7 @@ describe("workflow operator handoff", () => {
   it("fails closed when a workflow forges a continuation artifact reference", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "forged.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "forged.workflow.mjs"),
       `export default async function run(dsl) {
   const ref = dsl.publishArtifact("intent.md", "intent");
   dsl.awaitOperator({
@@ -385,7 +385,7 @@ describe("workflow operator handoff", () => {
   it("requires question detail to be one of the verified continuation artifacts", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "detached-detail.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "detached-detail.workflow.mjs"),
       `export default async function run(dsl) {
   const intent = dsl.publishArtifact("intent.md", "intent");
   const detail = dsl.publishArtifact("planning-blocker.md", "question detail");
@@ -616,8 +616,8 @@ describe("workflow operator handoff", () => {
   it("reuses the claimed post-code-review workspace without the fresh namespace gate", async () => {
     const root = project();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"),
-      readFileSync(path.join(root, ".pi", "workflows", "source.workflow.mjs"), "utf8"),
+      path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
+      readFileSync(path.join(root, ".locus-pi", "workflows", "source.workflow.mjs"), "utf8"),
       "utf8",
     );
     const sourceHarness = createHarness(root);
@@ -686,11 +686,11 @@ describe("workflow operator handoff", () => {
   it("reuses a generated default workspace when the working-directory path contains spaces", async () => {
     const root = project();
     const workingDirectory = path.join(root, "packages", "docs site");
-    const workflows = path.join(workingDirectory, ".pi", "workflows");
+    const workflows = path.join(workingDirectory, ".locus-pi", "workflows");
     mkdirSync(workflows, { recursive: true });
     writeFileSync(
       path.join(workflows, "whitespace-handoff.workflow.mjs"),
-      readFileSync(path.join(root, ".pi", "workflows", "source.workflow.mjs"), "utf8"),
+      readFileSync(path.join(root, ".locus-pi", "workflows", "source.workflow.mjs"), "utf8"),
       "utf8",
     );
     const harness = createHarness(root);

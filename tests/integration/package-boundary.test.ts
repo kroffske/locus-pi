@@ -555,7 +555,7 @@ describe("npm public package boundary", () => {
       if (!packed) throw new Error("npm pack returned no package result");
 
       const consumerRoot = path.join(temporaryRoot, "consumer-project");
-      const workflowDirectory = path.join(consumerRoot, ".pi", "workflows");
+      const workflowDirectory = path.join(consumerRoot, ".locus-pi", "workflows");
       mkdirSync(workflowDirectory, { recursive: true });
       writeFileSync(path.join(consumerRoot, "package.json"), '{"private":true,"type":"module"}\n');
       writeFileSync(
@@ -712,7 +712,7 @@ describe("npm public package boundary", () => {
         writeFileSync(probePath, probe.source);
         return { name: probe.name, path: path.relative(consumerRoot, probePath), accepted: probe.accepted };
       });
-      checks.unshift({ name: "consumer", path: ".pi/workflows/consumer.workflow.mjs", accepted: true });
+      checks.unshift({ name: "consumer", path: ".locus-pi/workflows/consumer.workflow.mjs", accepted: true });
 
       const toolUrl = pathToFileURL(
         path.join(

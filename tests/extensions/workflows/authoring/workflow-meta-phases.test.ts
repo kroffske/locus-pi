@@ -161,8 +161,8 @@ describe("/workflows status <runId> declared-versus-observed", () => {
       "---\nname: default\ndescription: Phase test agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    writeFileSync(path.join(root, ".pi", "workflows", "drifting.workflow.mjs"), DRIFTING_WORKFLOW, "utf8");
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    writeFileSync(path.join(root, ".locus-pi", "workflows", "drifting.workflow.mjs"), DRIFTING_WORKFLOW, "utf8");
 
     const runHarness = createHarness(root, { sessionId: "phase-run" });
     const createExecutor = (): AgentExecutor => ({

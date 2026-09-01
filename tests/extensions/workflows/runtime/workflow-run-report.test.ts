@@ -519,9 +519,9 @@ describe("workflow run report", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "report.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "report.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  dsl.publishArtifact("task.md", "the operator task");',
@@ -583,9 +583,9 @@ describe("workflow run report", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "retried.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "retried.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  return await dsl.agent("answer", {',
@@ -676,9 +676,9 @@ describe("workflow run report", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "threw.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "threw.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  return await dsl.agent("answer", {',
@@ -1255,9 +1255,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "unbounded.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "unbounded.workflow.mjs"),
       'export const meta = { name: "unbounded", description: "declares no limit of any kind" };\n' +
         "export default async function runWorkflow(dsl) {\n" +
         '  return await dsl.agent("answer");\n' +
@@ -1304,9 +1304,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "report-fail.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "report-fail.workflow.mjs"),
       'export const meta = { name: "report-fail", description: "one stage" };\n' +
         "export default async function runWorkflow(dsl) {\n" +
         '  return await dsl.agent("answer");\n' +
@@ -1383,9 +1383,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "finalization-fallback.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "finalization-fallback.workflow.mjs"),
       'export default async function runWorkflow(dsl) { return await dsl.agent("answer"); }\n',
       "utf8",
     );
@@ -1441,9 +1441,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "result-fail.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "result-fail.workflow.mjs"),
       'export default async function runWorkflow() { return "answer"; }\n',
       "utf8",
     );

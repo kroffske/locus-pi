@@ -31,7 +31,7 @@ afterEach(() => {
 function project(): string {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-no-operator-"));
   roots.push(root);
-  const workflows = path.join(root, ".pi", "workflows");
+  const workflows = path.join(root, ".locus-pi", "workflows");
   mkdirSync(workflows, { recursive: true });
   writeFileSync(
     path.join(workflows, "asking.workflow.mjs"),

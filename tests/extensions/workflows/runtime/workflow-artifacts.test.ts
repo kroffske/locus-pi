@@ -403,7 +403,9 @@ describe("workflow run artifact store", () => {
     const removedPersonal = parseWorkflowPersistedBinding(
       {
         target: { kind: "name", ref: "plan", source: "personal" },
-        scriptIdentity: identity(path.join(homedir(), ".pi", "workflows", "removed", "deep", "plan.workflow.mjs")),
+        scriptIdentity: identity(
+          path.join(homedir(), ".locus-pi", "workflows", "removed", "deep", "plan.workflow.mjs"),
+        ),
       },
       root,
       runId,
@@ -675,7 +677,7 @@ describe("workflow run artifact store", () => {
         runDir: runDir(root, sourceRunId),
       });
       const sourceRef = source.publishText("plan.md", "exact plan");
-      const targetPath = path.join(root, ".pi", "workflows", "target.workflow.mjs");
+      const targetPath = path.join(root, ".locus-pi", "workflows", "target.workflow.mjs");
       mkdirSync(path.dirname(targetPath), { recursive: true });
       if (kind === "external") {
         const external = path.join(path.dirname(root), "external-target-only.workflow.mjs");
@@ -691,7 +693,7 @@ describe("workflow run artifact store", () => {
         `${JSON.stringify({
           runId: sourceRunId,
           ok: true,
-          target: { kind: "scriptPath", ref: ".pi/workflows/target.workflow.mjs", source: "project" },
+          target: { kind: "scriptPath", ref: ".locus-pi/workflows/target.workflow.mjs", source: "project" },
           artifactRefs: [sourceRef],
         })}\n`,
       );
@@ -887,9 +889,9 @@ describe("workflow run artifact store", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "evidence.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "evidence.workflow.mjs"),
       'export default async function runWorkflow(dsl) { return { ok: true, answer: await dsl.agent("answer", { artifact: "review.md" }) }; }\n',
     );
     const harness = createHarness(root, { sessionId: "artifact-parent" });
@@ -944,9 +946,9 @@ describe("workflow run artifact store", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "replay.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "replay.workflow.mjs"),
       'export default async function runWorkflow(dsl) { return { ok: true, answer: await dsl.agent("same") }; }\n',
     );
     const harness = createHarness(root, { sessionId: "replay-parent" });
@@ -1003,9 +1005,9 @@ describe("workflow run artifact store", () => {
         path.join(root, ".agents", "agents", "default.md"),
         "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
       );
-      mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+      mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
       writeFileSync(
-        path.join(root, ".pi", "workflows", "replay-snapshot.workflow.mjs"),
+        path.join(root, ".locus-pi", "workflows", "replay-snapshot.workflow.mjs"),
         'export default async function runWorkflow(dsl) { return { answer: await dsl.agent("same") }; }\n',
       );
       const harness = createHarness(root, { sessionId: `replay-snapshot-${mutation}` });

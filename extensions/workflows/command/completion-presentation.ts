@@ -2,6 +2,7 @@ import { Box, Text, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui
 import type { CustomUiComponent, ExtensionAPI, ThemeLike } from "../../_shared/host/pi-api.js";
 import { WORKFLOW_RESULT_CUSTOM_TYPE, WORKFLOW_RUN_CUSTOM_TYPE } from "./receipts.js";
 import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
+import { WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT } from "../runtime/workflow-run-layout.js";
 
 export interface WorkflowCompletionPresentation {
   generatedRunCommand?: string;
@@ -23,7 +24,7 @@ export function workflowCompletionPresentation(
     };
   }
   return {
-    nextAction: `Review ${primaryFile}. Copy it to the target project's .pi/workflows/<name>.workflow.mjs path, verify its meta.name, then run the saved name through the normal reviewed-workflow path.`,
+    nextAction: `Review ${primaryFile}. Copy it to the target project's ${WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT}/<name>.workflow.mjs path, verify its meta.name, then run the saved name through the normal reviewed-workflow path.`,
   };
 }
 

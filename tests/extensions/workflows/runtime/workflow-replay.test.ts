@@ -73,7 +73,7 @@ function temporaryProject(): string {
 }
 
 function writeWorkflow(root: string, name: string, body: string): void {
-  const dir = path.join(root, ".pi", "workflows");
+  const dir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${name}.workflow.mjs`), body, "utf8");
 }
@@ -746,7 +746,7 @@ export default async function runWorkflow(dsl) {
     const root = temporaryProject();
     writeWorkflow(root, "post-code-review", THREE_STAGE_WORKFLOW);
     symlinkSync(
-      path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
       path.join(root, "post-code-review-alias.workflow.mjs"),
     );
     const firstHarness = createHarness(root, { sessionId: "replay-owner-alias-first" });
@@ -776,7 +776,7 @@ export default async function runWorkflow(dsl) {
       pi: secondHarness.pi,
       ctx: secondHarness.ctx,
       signal: new AbortController().signal,
-      scriptPath: ".pi/workflows/post-code-review.workflow.mjs",
+      scriptPath: ".locus-pi/workflows/post-code-review.workflow.mjs",
       outputDir: "post-code-review-alias",
       resumeFromRunId: first.runId,
       createExecutor: () => ({
