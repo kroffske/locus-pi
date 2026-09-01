@@ -86,7 +86,7 @@ describe("focused workflow catalog", () => {
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toContain(model.current[0]!.originPath);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("    · Alpha workflow");
+    expect(lines[row + 1]).toContain("  · Alpha workflow");
     expect(lines.join("\n")).not.toContain("profile=");
     expect(lines.join("\n")).not.toContain(model.current[0]!.originPath);
     expect(lines.join("\n")).toContain(`Catalog: ${path.join(root, ".locus-pi", "workflows")}`);
@@ -95,14 +95,14 @@ describe("focused workflow catalog", () => {
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> beta · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
-    expect(lines[row + 1]).toContain("    · Beta workflow");
+    expect(lines[row + 1]).toContain("  · Beta workflow");
 
     viewer.handleInput("left");
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> alpha · run 20260101-000001-alpha · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("    · historical run snapshot");
+    expect(lines[row + 1]).toContain("  · historical run snapshot");
   });
 
   it("keeps source sections and folder hierarchy readable at narrow widths", () => {
@@ -156,8 +156,8 @@ describe("focused workflow catalog", () => {
     focusProject(viewer);
 
     const rendered = viewer.render(48).join("\n");
-    expect(rendered).toContain("    · Alpha workflow description uses complete");
-    expect(rendered).toContain("      words across the available terminal width");
+    expect(rendered).toContain("  · Alpha workflow description uses complete");
+    expect(rendered).toContain("    words across the available terminal width");
     expect(rendered).not.toContain("profile=");
     expect(rendered).not.toContain(model.current[0]!.originPath);
   });
@@ -178,6 +178,34 @@ describe("focused workflow catalog", () => {
     expect(history).toContain("Project 1  User 0  Package 11  [History 1]");
     expect(history).toContain("alpha · run 20260101-000001-alpha · [P]");
     expect(history).not.toContain("> alpha · [P]");
+  });
+
+  it("pins the source tabs directly below the header across different content heights", () => {
+    const root = projectWithWorkflows(manyWorkflows(18));
+    writeRun(root, "20260101-000001-alpha", "alpha");
+    const model = buildWorkflowCatalogModel(root, root);
+    const { viewer } = createViewer(model, root, 48);
+    const tabRows: number[] = [];
+
+    for (let index = 0; index < 4; index += 1) {
+      const lines = viewer.render(146);
+      tabRows.push(lines.findIndex((line) => line.includes("Project 18") && line.includes("Package 11")));
+      viewer.handleInput("left");
+    }
+
+    expect(tabRows).toEqual([1, 1, 1, 1]);
+  });
+
+  it("uses the fixed workflow-purple active-tab palette only for themed rendering", () => {
+    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    const model = buildWorkflowCatalogModel(root, root);
+    const themed = createViewer(model, root, 18, { fg: (_color: string, text: string) => text }).viewer.render(146);
+    const plain = createViewer(model, root, 18).viewer.render(146);
+
+    expect(themed[1]).toContain("\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m[Package 11]\u001b[0m");
+    expect(visibleWidth(themed[1]!)).toBe(visibleWidth(plain[1]!));
+    expect(plain[1]).toContain("[Package 11]");
+    expect(plain[1]).not.toContain("\u001b[");
   });
 
   it("opens the richest current source and keeps fixed-order ties deterministic", () => {

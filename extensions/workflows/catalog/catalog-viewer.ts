@@ -32,6 +32,11 @@ const SOURCE_FRAME_ROWS = 2;
 // Same `keys action · keys action` shape every other footer in this browser uses,
 // so scroll hints read as a list instead of one run-on key sequence.
 const SCROLL_CONTROLS = "↑/↓ scroll · PgUp/PgDn page · Home/End jump";
+// Fixed contrast keeps the requested workflow-purple selection visible even
+// when a custom Pi theme maps its generic selected backgrounds to neutral gray.
+const ACTIVE_TAB_BACKGROUND = "\u001b[48;2;88;61;121m";
+const ACTIVE_TAB_FOREGROUND = "\u001b[38;2;248;241;255m";
+const ACTIVE_TAB_RESET = "\u001b[0m";
 
 interface WorkflowCatalogTheme {
   fg?(color: string, text: string): string;
@@ -253,13 +258,14 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const tab = activeCatalogTab(this.#tabIndex);
     if (height <= 6)
       return compactCatalogProjection(this.model, tab.id, this.#selectedIndex, height, width, this.#theme);
-    const footer = catalogFooter(this.model, tab.id, width, this.#theme);
-    const footerHeight = Math.min(COMPACT_FOOTER_ROWS, Math.max(0, height - 1));
+    const tabs = fitLine(catalogTabBar(this.model, tab.id, width, this.#theme), width);
+    const controls = catalogControls(this.model, tab.id);
+    const footerHeight = Math.min(1, Math.max(0, height - 2));
     const location = catalogLocationLines(this.model, tab.id, this.projectRoot, width, this.#theme).slice(
       0,
-      Math.max(0, height - 1 - footerHeight),
+      Math.max(0, height - 2 - footerHeight),
     );
-    const bodyHeight = Math.max(0, height - 1 - location.length - footerHeight);
+    const bodyHeight = Math.max(0, height - 2 - location.length - footerHeight);
     const query = this.model.query === undefined ? "" : ` · query ${JSON.stringify(this.model.query)}`;
     const rows = selectableRows(this.model, tab.id);
     const header = fitLine(
@@ -269,9 +275,10 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const body = catalogBody(this.model, tab.id, this.#selectedIndex, bodyHeight, width, this.#theme);
     return [
       header,
+      tabs,
       ...location,
       ...clipLines(body, bodyHeight, width),
-      ...footer.slice(0, footerHeight).map((line) => fitLine(line, width)),
+      ...(footerHeight === 0 ? [] : [fitLine(controls, width)]),
     ];
   }
 
@@ -451,19 +458,11 @@ function copyDestinationAction(destination: WorkflowCopyDestination): "copy-proj
   return destination === "project" ? "copy-project" : "copy-personal";
 }
 
-function catalogFooter(
-  model: WorkflowCatalogModel,
-  active: CatalogTabId,
-  width: number,
-  theme: WorkflowCatalogTheme,
-): string[] {
+function catalogControls(model: WorkflowCatalogModel, active: CatalogTabId): string {
   const rows = selectableRows(model, active);
-  return [
-    catalogTabBar(model, active, width, theme),
-    rows.length === 0
-      ? "Tab/←/→ source · Esc close · no rows in this source"
-      : `Tab/←/→ source · ↑/↓ select · Enter inspect · Esc close${active === "history" ? " · review-only" : ""}`,
-  ];
+  return rows.length === 0
+    ? "Tab/←/→ source · Esc close · no rows in this source"
+    : `Tab/←/→ source · ↑/↓ select · Enter inspect · Esc close${active === "history" ? " · review-only" : ""}`;
 }
 
 function catalogTabBar(
@@ -475,7 +474,11 @@ function catalogTabBar(
   const compact = width < 64;
   return CATALOG_TABS.map((tab) => {
     const label = `${compact ? tab.compactLabel : tab.label} ${selectableRows(model, tab.id).length}`;
-    return tab.id === active ? style(theme, "accent", `[${label}]`) : label;
+    if (tab.id !== active) return label;
+    const selected = `[${label}]`;
+    return typeof theme.fg === "function"
+      ? `${ACTIVE_TAB_BACKGROUND}${ACTIVE_TAB_FOREGROUND}${selected}${ACTIVE_TAB_RESET}`
+      : selected;
   }).join("  ");
 }
 
@@ -670,8 +673,8 @@ function rowLines(
     return [selected ? bold(theme, style(theme, "accent", summary)) : style(theme, "text", summary)];
   }
   const isChild = row.kind === "current" && row.role === "child";
-  const pathPrefix = isChild ? "      · " : "    · ";
-  const continuationPrefix = isChild ? "        " : "      ";
+  const pathPrefix = isChild ? "      · " : "  · ";
+  const continuationPrefix = isChild ? "        " : "    ";
   const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
   const details = wrapPlain(row.description, Math.max(1, detailWidth));
   return [
