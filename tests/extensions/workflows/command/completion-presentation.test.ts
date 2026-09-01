@@ -142,7 +142,7 @@ describe("workflow completion presentation", () => {
 
   it("hands a completed task draft to task/plan as editable semantic input", () => {
     const harness = createHarness();
-    const planningWorkspace = ".locus-pi/plans/20260819-120000-a1b2-task-draft";
+    const planningWorkspace = ".locus-pi/workspaces/20260819-120000-a1b2-task-draft";
     const transcript = createWorkflowTranscript(harness.ctx, "task/draft", "command");
     transcript.start("run-draft-tui", "/repo/.pi/locus-pi/runs/run-draft-tui");
     const completion = transcript.finish({
@@ -171,7 +171,7 @@ describe("workflow completion presentation", () => {
   it("hands a completed workflow source to the normal saved-workflow path", () => {
     const harness = createHarness();
     const transcript = createWorkflowTranscript(harness.ctx, "task/plan", "tool");
-    const workspace = ".locus-pi/plans/airflow-builder";
+    const workspace = ".locus-pi/workspaces/airflow-builder";
     transcript.start("run-plan-named", "/repo/.locus-pi/runs/run-plan-named");
     const completion = transcript.finish({
       runId: "run-plan-named",

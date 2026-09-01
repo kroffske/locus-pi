@@ -58,7 +58,7 @@ The registry ships three curated Package workflow namespaces with eleven runnabl
 
 Bare `/workflows` opens the command menu when interactive UI is available and otherwise prints typed help.
 
-Use `--` when semantic input begins with an option-looking token. Every fresh workflow run receives a unique `.locus-pi/plans/<generated-run-name>` workspace. Pass `--run-name <name>` with any workflow to select the stable `.locus-pi/plans/<name>` workspace. The `task/draft` completion card tells the operator to copy or edit the complete draft before passing it to `task/plan`; the `task/plan` card points to the generated `workflow.mjs`. `/workflows run <name|path> --output-dir <path>` selects another confined workspace. An absolute path must stay inside the project, `./path` resolves from the agent working directory, and other relative paths resolve from the project root.
+Use `--` when semantic input begins with an option-looking token. Every fresh workflow run receives a unique `.locus-pi/workspaces/<generated-run-name>` workspace. Pass `--run-name <name>` with any workflow to select the stable `.locus-pi/workspaces/<name>` workspace. Existing named workspaces under `.locus-pi/plans/<name>` remain bound to that physical directory so their checkpoint identity cannot change; if both old and new directories exist, launch fails before child work. The `task/draft` completion card tells the operator to copy or edit the complete draft before passing it to `task/plan`; the `task/plan` card points to the generated `workflow.mjs`. `/workflows run <name|path> --output-dir <path>` selects another confined workspace. An absolute path must stay inside the project, `./path` resolves from the agent working directory, and other relative paths resolve from the project root. A legacy `.locus-pi/plans/<name>` explicit output directory is accepted only when it already exists; new legacy workspaces are never created.
 
 The model-callable `workflow` tool accepts a package name or trusted script path and supports structured fields such as `items`, `outputDir`, `resumeFromRunId`, and an approved continuation. Fields that have no slash-command representation must fail closed rather than be silently dropped.
 
@@ -71,13 +71,15 @@ Each accepted run receives a stable directory:
   outputs/    human-readable host projection
   runtime/    machine evidence and continuation authority
     journal.ndjson         append-only lifecycle evidence
-    result.json            terminal result and run metadata
+    result.json            terminal result, run metadata, and bounded finalization errors
     replay.ndjson          replay records when the source is eligible
     script-<sha256>.workflow.mjs
     artifacts/             answers, transcripts, result envelopes, inputs, and publications
 ```
 
-Workflow-owned working files live separately under a unique `.locus-pi/plans/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent attempts therefore never overwrite one another. The workflow workspace and run-evidence directory must never resolve to the same directory.
+Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent attempts therefore never overwrite one another. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
+
+`runtime/journal.ndjson` is the chronological event authority. New `runtime/result.json` envelopes do not repeat the full journal. They retain only typed bounded finalization errors that must survive an independent best-effort journal write failure. Older envelopes with an embedded journal remain readable.
 
 `.locus-pi/workflow-state/v1/<hash>/` is active runtime state. It holds the workspace lease namespace and saved-child checkpoints. A workflow with no saved children can leave this directory empty after its temporary lock is released; that empty directory is not legacy run evidence.
 
@@ -90,6 +92,10 @@ Root results and direct `parallel()`/`pipeline()` returns share one terminal-out
 `--resume <runId>` reuses eligible recorded agent answers only when source identity and request-prefix checks match. Replayed answers are marked as recorded evidence, not fresh work. Replay does not repeat child side effects or re-read files; use it only when those semantics are acceptable. Repeat the same `--run-name <name>` when resuming a named non-task workflow. Supplying a different workspace fails closed.
 
 A run awaiting operator input must be continued explicitly. Automation must not synthesize an operator answer.
+
+Live `workflow_ask` answers are stored as indexed run artifacts with digest readback. If that evidence cannot be persisted, the child call fails with `ask-evidence-persistence`; the answer is not returned as a successful tool result and the same invocation does not show the question again.
+
+Cleanup is explicit. Remove retained Git worktrees through Git before deleting a run. Remove a workspace checkpoint namespace only after the workspace is retired. Migration never deletes legacy workspaces or home plan files automatically.
 
 ## Fusion
 

@@ -7,8 +7,10 @@ import type {
 } from "../../../../extensions/_shared/operator/operator-question.js";
 import {
   createWorkflowAskTool,
+  WORKFLOW_ASK_EVIDENCE_PERSISTENCE_PREFIX,
   WORKFLOW_ASK_NO_UI_MESSAGE,
   WORKFLOW_ASK_TOOL_NAME,
+  type WorkflowAskFailureCause,
   type WorkflowAskEvidenceRecord,
   type WorkflowAskToolDeps,
 } from "../../../../extensions/workflows/runtime/workflow-ask-tool.js";
@@ -30,19 +32,19 @@ interface DepsProbe {
   deps: WorkflowAskToolDeps;
   events: string[];
   records: WorkflowAskEvidenceRecord[];
-  failures: string[];
+  failures: Array<{ message: string; cause: WorkflowAskFailureCause }>;
 }
 
 function makeDeps(overrides: Partial<WorkflowAskToolDeps> = {}, opts: { globalQueue?: boolean } = {}): DepsProbe {
   const events: string[] = [];
   const records: WorkflowAskEvidenceRecord[] = [];
-  const failures: string[] = [];
+  const failures: Array<{ message: string; cause: WorkflowAskFailureCause }> = [];
   const deps: WorkflowAskToolDeps = {
     ctx: tuiCtx,
     contextText: 'Workflow run test — agent "reviewer" is asking:',
     onWaitStart: () => events.push("wait-start"),
     onWaitEnd: () => events.push("wait-end"),
-    failCall: (message) => failures.push(message),
+    failCall: (message, cause) => failures.push({ message, cause }),
     recordEvidence: (record) => records.push(record),
     // Unit tests stay off the module-global FIFO unless they test it explicitly.
     ...(opts.globalQueue === true ? {} : { enqueue: (job) => job() }),
@@ -187,7 +189,7 @@ describe("workflow_ask — fail-closed", () => {
     const { deps, failures } = makeDeps({ ctx: printCtx, requestQuestion: scripted([]) });
     const tool = createWorkflowAskTool(deps);
     const result = await tool.execute("call-1", ONE_QUESTION, signal());
-    expect(failures).toEqual([WORKFLOW_ASK_NO_UI_MESSAGE]);
+    expect(failures).toEqual([{ message: WORKFLOW_ASK_NO_UI_MESSAGE, cause: "ask-unavailable" }]);
     expect(result.isError).toBe(true);
   });
 
@@ -197,8 +199,35 @@ describe("workflow_ask — fail-closed", () => {
     });
     const tool = createWorkflowAskTool(deps);
     const result = await tool.execute("call-1", ONE_QUESTION, signal());
-    expect(failures).toEqual([WORKFLOW_ASK_NO_UI_MESSAGE]);
+    expect(failures).toEqual([{ message: WORKFLOW_ASK_NO_UI_MESSAGE, cause: "ask-unavailable" }]);
     expect(result.isError).toBe(true);
+  });
+
+  it("aborts after one displayed answer when durable evidence persistence fails", async () => {
+    let mounts = 0;
+    const { deps, failures } = makeDeps({
+      requestQuestion: async () => {
+        mounts += 1;
+        return { status: "answered", kind: "option", answer: "sqlite", label: "sqlite" };
+      },
+      recordEvidence: () => {
+        throw new Error("injected index write failure");
+      },
+    });
+    const tool = createWorkflowAskTool(deps);
+
+    const result = await tool.execute("call-1", ONE_QUESTION, signal());
+
+    expect(mounts).toBe(1);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]?.text).toContain(WORKFLOW_ASK_EVIDENCE_PERSISTENCE_PREFIX);
+    expect(result.content[0]?.text).not.toContain("Answer: sqlite");
+    expect(failures).toEqual([
+      {
+        message: `${WORKFLOW_ASK_EVIDENCE_PERSISTENCE_PREFIX}: injected index write failure`,
+        cause: "ask-evidence-persistence",
+      },
+    ]);
   });
 });
 

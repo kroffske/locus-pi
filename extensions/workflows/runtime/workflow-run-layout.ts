@@ -11,7 +11,7 @@
  *     evidence. Humans can inspect it, but no file there is a deliverable.
  *
  * Fresh workflow workspaces live separately under
- * `<projectRoot>/.locus-pi/plans/`; workflow-output owns their selected leaf
+ * `<projectRoot>/.locus-pi/workspaces/`; workflow-output owns their selected leaf
  * and confinement while this module owns the shared storage components.
  *
  * This module also owns path discipline for the artifact store: the run id must
@@ -44,6 +44,7 @@ import path from "node:path";
 export const WORKFLOW_ROOT_DIRNAME = ".locus-pi";
 export const WORKFLOW_RUNS_DIRNAME = "runs";
 export const WORKFLOW_PLANS_DIRNAME = "plans";
+export const WORKFLOW_WORKSPACES_DIRNAME = "workspaces";
 export const WORKFLOW_LEGACY_ROOT_DIRNAME = ".pi";
 export const WORKFLOW_LEGACY_EXTENSION_DIRNAME = "locus-pi";
 export const WORKFLOW_LEGACY_RUNS_DIRNAMES = ["runs", "workflows"] as const;
@@ -53,7 +54,7 @@ export const WORKFLOW_RUN_ARTIFACTS_DIRNAME = "artifacts";
 export const WORKFLOW_RUN_JOURNAL_FILENAME = "journal.ndjson";
 export const WORKFLOW_SAFE_COMPONENT_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
 export const WORKFLOW_RUN_STORAGE_PATTERN = ".locus-pi/runs/<runId>/";
-export const WORKFLOW_PLANS_STORAGE_PREFIX = ".locus-pi/plans/";
+export const WORKFLOW_WORKSPACES_STORAGE_PREFIX = ".locus-pi/workspaces/";
 
 const WORKFLOW_RUN_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
 const TASK_WORKSPACE_TARGET_NAMES = new Set(["task/draft", "task/plan"]);

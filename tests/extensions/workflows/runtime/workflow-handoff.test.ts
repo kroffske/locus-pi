@@ -708,7 +708,7 @@ describe("workflow operator handoff", () => {
     expect(claim.status).toBe("claimed");
     if (claim.status !== "claimed") throw new Error("expected claim");
     const workspace = readWorkflowResumeWorkspaceIdentity(root, source.runId);
-    expect(workspace.relativePath).toBe(`.locus-pi/plans/${source.runId}-whitespace-handoff`);
+    expect(workspace.relativePath).toBe(`.locus-pi/workspaces/${source.runId}-whitespace-handoff`);
 
     const child = await runWorkflowScript({
       pi: harness.pi,

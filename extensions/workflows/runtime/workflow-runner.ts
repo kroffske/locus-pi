@@ -116,12 +116,14 @@ import {
 import {
   prepareWorkflowResult,
   isWorkflowResultExplicitFailure,
+  workflowFinalizationError,
   workflowDispositionForCompletion,
   workflowResultFile,
   workflowResultText,
   writeWorkflowResultJson,
   writeWorkflowResultText,
   type WorkflowDisposition,
+  type WorkflowFinalizationError,
   type WorkflowResultDiagnosticSentinel,
   type WorkflowResultPersistence,
 } from "./workflow-result.js";
@@ -136,6 +138,7 @@ import {
 } from "./workflow-script-identity.js";
 import {
   acquireWorkflowRootLease,
+  assertWorkflowRunName,
   assertFreshWorkflowOutputNamespace,
   assertFreshWorkflowOutputNamespacePath,
   assertUniqueWorkflowItemKeys,
@@ -143,6 +146,7 @@ import {
   assertWorkflowRootLease,
   commitWorkflowCompletedCheckpoint,
   ensureWorkflowWorkspaceFile,
+  isLegacyWorkflowWorkspacePath,
   isWorkflowPathWithinRoot,
   readWorkflowCompletedCheckpoint,
   referenceWorkflowPrimaryFile,
@@ -151,7 +155,7 @@ import {
   resolveWorkflowOutputDirectory,
   resolveWorkflowOutputDirectoryPath,
   resolveWorkflowOutputDirectoryForReuse,
-  workflowWorkspaceRelativePathForRunName,
+  resolveNamedWorkflowWorkspacePath,
   type WorkflowCheckpointIdentity,
   type WorkflowOutputDirectory,
   type WorkflowPrimaryFileReference,
@@ -185,6 +189,9 @@ import {
   readWorkflowRunTextFile,
   workflowLegacyRunMigrationMessage,
   workflowRunRuntimeDir,
+  WORKFLOW_PLANS_DIRNAME,
+  WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_WORKSPACES_DIRNAME,
 } from "./workflow-run-layout.js";
 import { verifyWorkflowPersistedSnapshot } from "./workflow-persisted-binding.js";
 import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
@@ -294,7 +301,7 @@ export interface RunWorkflowScriptOptions {
   items?: readonly string[];
   /** Optional project-relative workflow workspace. */
   outputDir?: string;
-  /** Short workflow workspace name expanded under `.locus-pi/plans/`. */
+  /** Short workflow workspace name expanded under `.locus-pi/workspaces/` with legacy reuse. */
   runName?: string;
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
@@ -385,6 +392,8 @@ export interface RunWorkflowScriptResult {
    *  newest slice when a run produced more than the projection limit. */
   artifactRefs?: WorkflowArtifactRef[];
   artifactRefsOmitted?: number;
+  /** Bounded late failures persisted independently from the best-effort journal sink. */
+  finalizationErrors?: WorkflowFinalizationError[];
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
   continuation?: WorkflowContinuationJournal;
@@ -1111,8 +1120,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     opts.onEvent?.(line);
   };
   /**
-   * Evidence without a live announcement: the durable journal, `result.json` and
-   * the run report get the line; the progress surface does not.
+   * Evidence without a live announcement: the durable journal and run report
+   * get the line; the progress surface does not. `result.json` keeps terminal
+   * state, not a second copy of the event stream.
    *
    * Used for facts that are true of EVERY run. Pushing those through `onEvent`
    * would turn a run that emitted nothing into an eventful one and make the no-UI
@@ -1187,7 +1197,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
             // repeat the source outputDir as an ordinary option.
             workspaceDirExplicit:
               handoffReuseOutput === undefined
-                ? resumeSourceWorkspace?.explicit === true || selectedOutputDir !== undefined
+                ? resumeSourceWorkspace?.explicit === true || opts.outputDir !== undefined
                 : opts.operatorHandoffWorkspaceReuse?.explicit === true,
             ...(targetForMetadata !== undefined && isPostCodeReviewTarget(targetForMetadata, projectRoot)
               ? {
@@ -1210,6 +1220,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
     let primaryOutputPath: string | undefined;
+    const finalizationErrors: WorkflowFinalizationError[] = [];
     let enrichedFields: RunResultFields = {
       ...fields,
       ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
@@ -1352,6 +1363,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         message,
       };
       journal.write(outputFailure);
+      finalizationErrors.push(workflowFinalizationError("terminal-output", message));
       enrichedFields = withFailureDiagnostic({
         ...enrichedFields,
         ok: false,
@@ -1377,6 +1389,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           message,
         };
         journal.write(leaseFailure);
+        finalizationErrors.push(workflowFinalizationError("lease-release", message));
         leaseReleased = true;
         enrichedFields = withFailureDiagnostic({
           ...enrichedFields,
@@ -1393,8 +1406,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // the workflow explicitly publishes one. Files agents wrote themselves stay
     // under their own names in the separate project-local workflow workspace.
     // The envelope below stays the durable truth, and a report failure never fails
-    // the run. It runs BEFORE result.json so a failed write can still be recorded
-    // in the journal that result.json persists.
+    // the run. It runs BEFORE result.json so a failed write can still enter the
+    // bounded finalizationErrors projection even if its journal append also fails.
     if (artifactStore !== undefined) {
       const reportOutcome = writeWorkflowRunReport(
         {
@@ -1432,6 +1445,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           message: `Workflow run report was not written to ${workflowReportDir(projectRoot, runId)}: ${reportOutcome.message}`,
         };
         journal.write(reportFailure);
+        finalizationErrors.push(
+          workflowFinalizationError("report", reportFailure.message ?? "Workflow run report failed."),
+        );
         try {
           opts.onEvent?.(reportFailure);
         } catch {
@@ -1441,9 +1457,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       }
     }
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
+    const { journal: _inMemoryJournal, ...persistedFields } = enrichedFields;
+    const finalizationProjection =
+      finalizationErrors.length === 0 ? {} : { finalizationErrors: [...finalizationErrors] };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
-      ...enrichedFields,
+      ...persistedFields,
+      ...finalizationProjection,
       resultPersistence: intendedPersistence,
     });
     if (resultPersistence.ok) {
@@ -1451,6 +1471,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         runId,
         runDir,
         ...enrichedFields,
+        ...finalizationProjection,
         resultPersistence,
         ...(resultTextPath === undefined ? {} : { resultTextPath }),
         ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
@@ -1514,6 +1535,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       runId,
       runDir,
       ...failedFields,
+      ...finalizationProjection,
       resultPersistence,
       ...(resultTextPath === undefined ? {} : { resultTextPath }),
       ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
@@ -1633,7 +1655,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       if (opts.outputDir !== undefined) {
         throw new Error("workflow runName and outputDir are mutually exclusive");
       }
-      selectedOutputDir = workflowWorkspaceRelativePathForRunName(opts.runName);
+      assertWorkflowRunName(opts.runName);
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -1819,10 +1841,31 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         projectRoot,
         resumeSourceBinding.result.scriptIdentity?.sourcePath,
       ) === targetIdentityKey(target, projectRoot);
+    if (opts.runName !== undefined && resumeSourceWorkspace !== undefined) {
+      const expectedCurrent = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_WORKSPACES_DIRNAME, opts.runName].join("/");
+      const expectedLegacy = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME, opts.runName].join("/");
+      if (
+        resumeSourceWorkspace.relativePath !== expectedCurrent &&
+        resumeSourceWorkspace.relativePath !== expectedLegacy
+      ) {
+        throw new Error(
+          `Cannot resume workflow: runName ${JSON.stringify(opts.runName)} does not match the source workspace ` +
+            `${JSON.stringify(resumeSourceWorkspace.relativePath)}.`,
+        );
+      }
+    }
     const resumeReuseOutput =
       resumeSourceWorkspace !== undefined && selectedOutputDir === undefined && resumeSourceTargetMatches
         ? resolveWorkflowOutputDirectoryForReuse(projectRoot, resumeSourceWorkspace, { create: false })
         : undefined;
+    if (
+      opts.runName !== undefined &&
+      resumeSourceWorkspace === undefined &&
+      handoffReuseOutput === undefined &&
+      inheritedCoordination === undefined
+    ) {
+      selectedOutputDir = resolveNamedWorkflowWorkspacePath(projectRoot, opts.runName);
+    }
     const candidateOutputPath =
       handoffReuseOutput ??
       resumeReuseOutput ??
@@ -1833,6 +1876,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         workingDirectory,
         { runId },
       );
+    const reusesLegacyWorkspace = isLegacyWorkflowWorkspacePath(candidateOutputPath.relativePath);
     if (
       resumeSourceWorkspace !== undefined &&
       candidateOutputPath.relativePath !== resumeSourceWorkspace.relativePath
@@ -1860,7 +1904,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         workflowDefaultOutputName(target),
         workingDirectory,
         {
-          create: !hasResume,
+          create: !hasResume && !reusesLegacyWorkspace,
           runId,
         },
       );
@@ -1925,7 +1969,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           physicalIdentitySchemaVersion: 1,
           explicit:
             handoffReuseOutput === undefined
-              ? selectedOutputDir !== undefined
+              ? opts.outputDir !== undefined
               : opts.operatorHandoffWorkspaceReuse?.explicit === true,
         },
         semanticInput: requestedSemanticInput,

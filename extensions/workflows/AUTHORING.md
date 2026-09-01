@@ -241,7 +241,7 @@ file contents on the child's behalf.
 
 The runtime still prepends one exact absolute workflow workspace to every child
 prompt. Fresh runs default to a unique
-`.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
+`.locus-pi/workspaces/<generated-run-name>/` workspace under the project root. A
 qualified child keeps both name components in its generated leaf. Source may call
 `outputDir()` when it needs the project-relative identity, but authors should
 only need to name the assigned relative file and the idempotent replacement
@@ -323,9 +323,10 @@ positional keys from fresh model output, and never parse a discovery document as
 transport.
 
 The workflow workspace is distinct from run evidence. Fresh runs default to a
-unique `.locus-pi/plans/<generated-run-name>/` directory; callers may select
+unique `.locus-pi/workspaces/<generated-run-name>/` directory; callers may select
 another safe project-relative `outputDir`. `--run-name <name>` selects
-`.locus-pi/plans/<name>` for any workflow. Every child receives the
+`.locus-pi/workspaces/<name>` for any workflow. An existing legacy-only
+`.locus-pi/plans/<name>` stays bound in place. Every child receives the
 resolved absolute path once. Writers
 replace their assigned file atomically or otherwise idempotently—never append blindly.
 `publishPrimaryFile(relativePath)` validates one regular, non-symlink, non-empty

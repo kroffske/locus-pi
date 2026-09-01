@@ -16,7 +16,7 @@ import {
   workflowRunOptionDescriptor,
   WORKFLOW_RUN_OPTION_DESCRIPTORS,
 } from "../command/command-parser.js";
-import { WORKFLOW_PLANS_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";
+import { WORKFLOW_WORKSPACES_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";
 import { listExampleNames } from "../operator/operator-ui.js";
 import { listWorkflowCatalogTargets } from "../runtime/workflow-runner.js";
 
@@ -167,7 +167,7 @@ function workflowRunOptionCompletions(
           descriptor.field === "outputDir"
             ? "Select a workflow workspace path"
             : descriptor.field === "runName"
-              ? `Use ${WORKFLOW_PLANS_STORAGE_PREFIX}<name> for this workflow`
+              ? `Use ${WORKFLOW_WORKSPACES_STORAGE_PREFIX}<name> for this workflow`
               : "Resume from a prior run",
       })),
       {

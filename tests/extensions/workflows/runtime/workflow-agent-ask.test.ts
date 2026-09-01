@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,6 +8,11 @@ import {
   WORKFLOW_NO_OPERATOR_ASK_MESSAGE,
 } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import { WORKFLOW_ASK_TOOL_NAME } from "../../../../extensions/workflows/runtime/workflow-ask-tool.js";
+import {
+  createWorkflowArtifactStore,
+  readWorkflowArtifactIndex,
+  readWorkflowArtifactRecord,
+} from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { createWorkflowRuntime } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import type { WorkflowReplayController } from "../../../../extensions/workflows/runtime/workflow-replay.js";
 import { createHarness } from "../../../test-harness.js";
@@ -58,17 +63,18 @@ describe("workflow agent bridge — live ask wiring", () => {
   });
 
   it("pauses the fuse while the operator thinks, and records the Q&A artifact", async () => {
-    const h = createHarness();
-    const artifactsRoot = mkdtempSync(path.join(tmpdir(), "workflow-ask-evidence-"));
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-ask-evidence-"));
+    const h = createHarness(root);
+    const runId = "ask-pause-run";
+    const runDir = path.join(root, ".locus-pi", "runs", runId);
+    mkdirSync(runDir, { recursive: true });
+    const artifactStore = createWorkflowArtifactStore({ projectRoot: root, runId, runDir });
     const runner = createWorkflowAgentRunner({
       pi: h.pi,
       ctx: h.ctx,
       signal: new AbortController().signal,
-      workflowRunId: "ask-pause-run",
-      evidenceDestinations: (callId) => ({
-        transcriptDir: path.join(artifactsRoot, callId, "transcripts"),
-        resultArtifactsDir: path.join(artifactsRoot, callId, "artifacts"),
-      }),
+      workflowRunId: runId,
+      evidenceDestinations: (callId) => artifactStore.childEvidenceDestinations(callId),
       // A scripted operator that takes 200 ms to answer — four times the fuse.
       askRequestQuestion: async () => {
         await new Promise((resolve) => setTimeout(resolve, 200));
@@ -100,14 +106,80 @@ describe("workflow agent bridge — live ask wiring", () => {
     expect(result.ok).toBe(true);
     expect(result.text).toContain("Answer: sqlite");
     expect(result.diagnostics.some((line) => line.includes("workflow_ask: operator answered 1/1"))).toBe(true);
-    const artifactPath = path.join(artifactsRoot, "ask-call-1", "artifacts", "operator-ask-1.json");
-    expect(existsSync(artifactPath)).toBe(true);
-    const record = JSON.parse(readFileSync(artifactPath, "utf8")) as {
+    const index = readWorkflowArtifactIndex(root, runId);
+    expect(index.status).toBe("ready");
+    if (index.status !== "ready") throw new Error(index.message);
+    const indexed = index.index.artifacts.find((entry) => entry.kind === "operator-ask");
+    expect(indexed).toMatchObject({
+      artifactId: "ask-call-1-operator-ask-0001",
+      callId: "ask-call-1",
+      toolCallId: "call-1",
+      sequence: 1,
+    });
+    const readback = readWorkflowArtifactRecord(root, runId, indexed!.artifactId);
+    expect(readback.status).toBe("ready");
+    if (readback.status !== "ready") throw new Error(readback.message);
+    const record = JSON.parse(readback.bytes.toString("utf8")) as {
       declined: boolean;
       entries: Array<{ id: string; status: string; answer?: string }>;
     };
     expect(record.declined).toBe(false);
     expect(record.entries[0]).toMatchObject({ id: "q1", status: "answered", answer: "sqlite" });
+  });
+
+  it("aborts the current child with a typed cause when operator-answer indexing fails", async () => {
+    const h = createHarness();
+    let mounts = 0;
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      workflowRunId: "ask-persistence-failure",
+      evidenceDestinations: () => ({
+        transcriptDir: path.join(tmpdir(), "unused-transcripts"),
+        resultArtifactsDir: path.join(tmpdir(), "unused-results"),
+        recordOperatorAskEvidence() {
+          throw new Error("injected operator-ask index failure");
+        },
+      }),
+      askRequestQuestion: async () => {
+        mounts += 1;
+        return { status: "answered", kind: "option", answer: "sqlite", label: "sqlite" };
+      },
+      createExecutor: () => ({
+        async run(request, signal) {
+          const tool = request.customTools?.find((candidate) => candidate.name === WORKFLOW_ASK_TOOL_NAME);
+          const toolResult = await tool!.execute(
+            "tool-call-1",
+            { questions: [{ id: "q1", question: "Which storage?", options: [{ label: "sqlite" }] }] },
+            signal,
+          );
+          expect(toolResult.isError).toBe(true);
+          expect(toolResult.content[0]?.text).not.toContain("Answer: sqlite");
+          expect(signal.aborted).toBe(true);
+          return {
+            status: "cancelled",
+            agentName: "sub-agent",
+            reason: "aborted",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    const result = await runner({
+      prompt: "decide storage",
+      tools: ["*"],
+      operatorAsk: true,
+      callId: "call-0001",
+    });
+
+    expect(mounts).toBe(1);
+    expect(result.ok).toBe(false);
+    expect(result.failureCause).toBe("ask-evidence-persistence");
+    expect(result.text).toBeUndefined();
+    expect(result.diagnostics.join("\n")).toContain("injected operator-ask index failure");
   });
 
   it("forks the replay key on ask, so a no-ask record is never served to an asking call", async () => {

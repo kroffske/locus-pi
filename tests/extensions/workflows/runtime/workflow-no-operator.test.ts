@@ -125,7 +125,6 @@ describe("workflow run-level no-operator mode", () => {
     const childRunDir = result.childRuns![0]!.runDir!;
     const childResult = JSON.parse(readFileSync(path.join(childRunDir, "runtime", "result.json"), "utf8")) as {
       error?: string;
-      journal: Array<{ kind: string; message: string }>;
       operatorHandoff?: unknown;
     };
     const named = workflowOperatorInputForbiddenError("review clarification required");
@@ -133,7 +132,11 @@ describe("workflow run-level no-operator mode", () => {
     expect(childResult.operatorHandoff).toBeUndefined();
     // Inheritance is visible in the child's own durable journal: the prelude
     // line is there even though the child was never launched with the option.
-    expect(childResult.journal.some((line) => line.message === WORKFLOW_NO_OPERATOR_PRELUDE)).toBe(true);
+    const childJournal = readFileSync(path.join(childRunDir, "runtime", "journal.ndjson"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { message?: string });
+    expect(childJournal.some((line) => line.message === WORKFLOW_NO_OPERATOR_PRELUDE)).toBe(true);
     expect(existsSync(childRunDir)).toBe(true);
   });
 

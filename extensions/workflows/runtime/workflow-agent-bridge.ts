@@ -7,8 +7,6 @@
  * so tests can mock createSession and prove the wiring.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import {
@@ -52,7 +50,12 @@ import type {
   WorkspaceMode,
 } from "./workflow-runtime.js";
 import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
-import { createWorkflowAskTool, WORKFLOW_ASK_NO_UI_MESSAGE, type WorkflowAskToolDeps } from "./workflow-ask-tool.js";
+import {
+  createWorkflowAskTool,
+  WORKFLOW_ASK_NO_UI_MESSAGE,
+  type WorkflowAskFailureCause,
+  type WorkflowAskToolDeps,
+} from "./workflow-ask-tool.js";
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/model/workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
@@ -448,7 +451,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // abort controller it shares.
     let pauseAskFuse: () => void = () => {};
     let resumeAskFuse: () => void = () => {};
-    let failAskCall: (message: string) => void = () => {};
+    let failAskCall: (message: string, cause: WorkflowAskFailureCause) => void = () => {};
     const askNotes: string[] = [];
     let askEvidenceCounter = 0;
     const askTool =
@@ -462,28 +465,23 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
             }),
             onWaitStart: () => pauseAskFuse(),
             onWaitEnd: () => resumeAskFuse(),
-            failCall: (message) => failAskCall(message),
+            failCall: (message, cause) => failAskCall(message, cause),
             ...(options.askRequestQuestion !== undefined ? { requestQuestion: options.askRequestQuestion } : {}),
             recordEvidence: (record) => {
-              askEvidenceCounter += 1;
-              let artifactNote = "";
-              if (evidenceDestinations !== undefined) {
-                try {
-                  mkdirSync(evidenceDestinations.resultArtifactsDir, { recursive: true });
-                  const artifactPath = join(
-                    evidenceDestinations.resultArtifactsDir,
-                    `operator-ask-${askEvidenceCounter}.json`,
-                  );
-                  writeFileSync(artifactPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-                  artifactNote = `; artifact ${artifactPath}`;
-                } catch (error) {
-                  artifactNote = `; artifact write failed: ${error instanceof Error ? error.message : String(error)}`;
-                }
+              const sequence = ++askEvidenceCounter;
+              if (evidenceDestinations === undefined || req.callId === undefined) {
+                throw new Error("workflow artifact store is not configured for operator-answer evidence");
               }
+              const ref = evidenceDestinations.recordOperatorAskEvidence(
+                req.callId,
+                record.toolCallId,
+                sequence,
+                record,
+              );
               const answered = record.entries.filter((entry) => entry.status === "answered").length;
               askNotes.push(
                 `workflow_ask: operator answered ${answered}/${record.entries.length}` +
-                  `${record.declined ? ", declined the rest" : ""}${artifactNote}`,
+                  `${record.declined ? ", declined the rest" : ""}; artifact ${ref.artifactId}`,
               );
             },
           })
@@ -627,7 +625,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // Run cancellation, the per-call fuse and the live-ask fail-closed path share
     // one child signal. Whichever source aborts it first owns the durable outcome;
     // the other sources must not relabel it while the executor unwinds.
-    let abortOwner: "run" | "timeout" | "ask-unavailable" | undefined;
+    let abortOwner: "run" | "timeout" | WorkflowAskFailureCause | undefined;
     let askFailureMessage: string | undefined;
     const abortFromRun = (): void => {
       if (abortOwner !== undefined) return;
@@ -668,9 +666,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       if (askWaitDepth !== 0 || abortOwner !== undefined || timer !== undefined) return;
       armFuse();
     };
-    failAskCall = (message: string): void => {
+    failAskCall = (message: string, cause: WorkflowAskFailureCause): void => {
       if (abortOwner !== undefined) return;
-      abortOwner = "ask-unavailable";
+      abortOwner = cause;
       askFailureMessage = message;
       callAbort.abort(new Error(message));
     };
@@ -686,7 +684,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         // it observed — or return a late success after the fuse already fired. Finalize
         // both status and cause before the envelope is written.
         finalizeResult: (result) => {
-          if (abortOwner !== "timeout" && abortOwner !== "ask-unavailable") return result;
+          if (
+            abortOwner !== "timeout" &&
+            abortOwner !== "ask-unavailable" &&
+            abortOwner !== "ask-evidence-persistence"
+          ) {
+            return result;
+          }
           const { text: _lateText, ...resultWithoutText } = result;
           return {
             ...resultWithoutText,
@@ -695,7 +699,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
               abortOwner === "timeout"
                 ? `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`
                 : (askFailureMessage ?? WORKFLOW_ASK_NO_UI_MESSAGE),
-            failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
+            failureCause: abortOwner === "timeout" ? "call-timeout" : abortOwner,
           };
         },
         ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
@@ -706,7 +710,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
     const displayName =
       liveExecution === undefined ? undefined : agentLiveStore.rowForExecution(liveExecution)?.displayName;
-    if (abortOwner === "timeout" || abortOwner === "ask-unavailable") {
+    if (abortOwner === "timeout" || abortOwner === "ask-unavailable" || abortOwner === "ask-evidence-persistence") {
       // Name the fuse (or the fail-closed ask refusal). Without this the operator
       // reads only the host's generic abort reason and cannot tell them apart.
       const message =
@@ -716,8 +720,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       return {
         ok: false,
         status: "failed",
-        // Both are TRANSPORT failures: the child was aborted, not answered badly.
-        failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
+        // These are typed bridge failures: the child was aborted, not answered badly.
+        // Runtime retry policy still decides each cause separately.
+        failureCause: abortOwner === "timeout" ? "call-timeout" : abortOwner,
         summary: message,
         diagnostics: [...boundary.diagnostics, ...askNotes, message],
         ...resultIdentity,

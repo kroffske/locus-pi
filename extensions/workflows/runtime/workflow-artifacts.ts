@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import type { WorkflowAskEvidenceRecord } from "./workflow-ask-tool.js";
 import { workflowResultFile } from "./workflow-result.js";
 import { parseWorkflowPersistedBinding } from "./workflow-persisted-binding.js";
 import {
@@ -28,7 +29,8 @@ export interface WorkflowArtifactRef {
   sha256: string;
 }
 
-export type WorkflowArtifactKind = "answer" | "transcript" | "result" | "published" | "primary" | "input";
+export type WorkflowArtifactKind =
+  "answer" | "transcript" | "result" | "published" | "primary" | "input" | "operator-ask";
 export type WorkflowArtifactProvenance = "fresh" | "replay" | "published" | "consumed";
 
 export interface WorkflowArtifactRecord extends WorkflowArtifactRef {
@@ -39,6 +41,8 @@ export interface WorkflowArtifactRecord extends WorkflowArtifactRef {
   provenance: WorkflowArtifactProvenance;
   createdAt: string;
   callId?: string;
+  toolCallId?: string;
+  sequence?: number;
   stage?: string;
   childSessionId?: string;
   source?: WorkflowArtifactRef;
@@ -131,12 +135,21 @@ export interface WorkflowArtifactPorts {
   consumeText(ref: WorkflowArtifactRef, stage?: string): WorkflowConsumedTextArtifact;
 }
 
-export interface WorkflowChildEvidenceDestinations {
+export interface WorkflowOperatorAskEvidencePort {
+  recordOperatorAskEvidence(
+    callId: string,
+    toolCallId: string,
+    sequence: number,
+    record: WorkflowAskEvidenceRecord,
+  ): WorkflowArtifactRef;
+}
+
+export interface WorkflowChildEvidenceDestinations extends WorkflowOperatorAskEvidencePort {
   transcriptDir: string;
   resultArtifactsDir: string;
 }
 
-export interface WorkflowArtifactStore extends WorkflowArtifactPorts {
+export interface WorkflowArtifactStore extends WorkflowArtifactPorts, WorkflowOperatorAskEvidencePort {
   readonly runId: string;
   readonly artifactsDir: string;
   childEvidenceDestinations(callId: string): WorkflowChildEvidenceDestinations;
@@ -317,6 +330,15 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     verifyIndexUnchanged();
     assertSafeComponent(input.artifactId, "artifactId");
     assertArtifactName(input.name);
+    if (
+      input.kind === "operator-ask" &&
+      (input.callId === undefined || input.toolCallId === undefined || input.sequence === undefined)
+    ) {
+      throw new Error("Workflow operator-ask artifact requires its stable identity.");
+    }
+    if (input.kind !== "operator-ask" && (input.toolCallId !== undefined || input.sequence !== undefined)) {
+      throw new Error("Workflow non-operator artifact cannot carry operator-ask identity fields.");
+    }
     const relativePath = normalizeRelativePath(input.relativePath);
     if (index.artifacts.some((entry) => entry.artifactId === input.artifactId || entry.relativePath === relativePath)) {
       throw new Error(`Duplicate workflow artifact identity: ${input.artifactId}`);
@@ -341,6 +363,8 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
         provenance: input.provenance,
         createdAt: now(),
         ...(input.callId !== undefined ? { callId: input.callId } : {}),
+        ...(input.toolCallId !== undefined ? { toolCallId: input.toolCallId } : {}),
+        ...(input.sequence !== undefined ? { sequence: input.sequence } : {}),
         ...(input.stage !== undefined ? { stage: input.stage } : {}),
         ...(input.childSessionId !== undefined ? { childSessionId: input.childSessionId } : {}),
         ...(input.source !== undefined ? { source: cloneRef(input.source) } : {}),
@@ -460,6 +484,39 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     return evidence;
   }
 
+  function recordOperatorAskEvidence(
+    callId: string,
+    toolCallId: string,
+    sequence: number,
+    record: WorkflowAskEvidenceRecord,
+  ): WorkflowArtifactRef {
+    assertSafeComponent(callId, "callId");
+    if (typeof toolCallId !== "string" || toolCallId.trim() === "") {
+      throw new Error("Workflow operator-ask evidence requires a non-empty toolCallId.");
+    }
+    if (!Number.isSafeInteger(sequence) || sequence < 1) {
+      throw new Error("Workflow operator-ask evidence sequence must be a positive safe integer.");
+    }
+    if (record.toolCallId !== toolCallId) {
+      throw new Error("Workflow operator-ask evidence toolCallId does not match its record.");
+    }
+    const ordinal = String(sequence).padStart(4, "0");
+    const artifactId = `${callId}-operator-ask-${ordinal}`;
+    const serialized = `${JSON.stringify(record, null, 2)}\n`;
+    return addRecord({
+      artifactId,
+      name: `operator-ask-${ordinal}.json`,
+      kind: "operator-ask",
+      mediaType: "application/json",
+      bytes: boundedText(serialized, maxTextBytes),
+      relativePath: path.join("operator-asks", callId, `operator-ask-${ordinal}.json`),
+      provenance: "fresh",
+      callId,
+      toolCallId,
+      sequence,
+    });
+  }
+
   function publishText(
     name: string,
     text: string,
@@ -537,6 +594,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     runId: options.runId,
     artifactsDir,
     recordAgentEvidence,
+    recordOperatorAskEvidence,
     publishText,
     consumeText,
     childEvidenceDestinations(callId) {
@@ -545,7 +603,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       const resultArtifactsDir = path.join(artifactsDir, "results", callId);
       ensureWorkflowDirectoryNoSymlink(artifactsDir, transcriptDir);
       ensureWorkflowDirectoryNoSymlink(artifactsDir, resultArtifactsDir);
-      return { transcriptDir, resultArtifactsDir };
+      return { transcriptDir, resultArtifactsDir, recordOperatorAskEvidence };
     },
     list() {
       verifyIndexUnchanged();
@@ -612,7 +670,18 @@ function parseRecord(value: unknown, runId: string): WorkflowArtifactRecord {
   ] as const;
   for (const field of required)
     if (typeof value[field] !== "string") throw new Error(`Workflow artifact record has invalid ${field}.`);
-  const allowed = ["runId", ...required, "size", "callId", "stage", "childSessionId", "source", "replaySourceRunId"];
+  const allowed = [
+    "runId",
+    ...required,
+    "size",
+    "callId",
+    "toolCallId",
+    "sequence",
+    "stage",
+    "childSessionId",
+    "source",
+    "replaySourceRunId",
+  ];
   if (hasUnexpectedFields(value, allowed)) throw new Error("Workflow artifact record has unexpected fields.");
   if (!Number.isSafeInteger(value.size) || (value.size as number) < 0)
     throw new Error("Workflow artifact record has invalid size.");
@@ -626,9 +695,17 @@ function parseRecord(value: unknown, runId: string): WorkflowArtifactRecord {
     throw new Error("Workflow artifact record has invalid kind/provenance.");
   const relativePath = normalizeRelativePath(value.relativePath as string);
   const callId = optionalSafeComponent(value.callId, "callId");
+  const toolCallId = optionalNonEmptyString(value.toolCallId, "toolCallId");
+  const sequence = optionalPositiveSafeInteger(value.sequence, "sequence");
   const stage = optionalNonEmptyString(value.stage, "stage");
   const childSessionId = optionalNonEmptyString(value.childSessionId, "childSessionId");
   const replaySourceRunId = optionalSafeComponent(value.replaySourceRunId, "replaySourceRunId");
+  if (value.kind === "operator-ask" && (callId === undefined || toolCallId === undefined || sequence === undefined)) {
+    throw new Error("Workflow operator-ask artifact record is missing its stable identity.");
+  }
+  if (value.kind !== "operator-ask" && (toolCallId !== undefined || sequence !== undefined)) {
+    throw new Error("Workflow non-operator artifact record has operator-ask identity fields.");
+  }
   if (value.source !== undefined) validateRef(value.source as WorkflowArtifactRef);
   return {
     runId,
@@ -642,6 +719,8 @@ function parseRecord(value: unknown, runId: string): WorkflowArtifactRecord {
     provenance: value.provenance as WorkflowArtifactProvenance,
     createdAt: value.createdAt as string,
     ...(callId !== undefined ? { callId } : {}),
+    ...(toolCallId !== undefined ? { toolCallId } : {}),
+    ...(sequence !== undefined ? { sequence } : {}),
     ...(stage !== undefined ? { stage } : {}),
     ...(childSessionId !== undefined ? { childSessionId } : {}),
     ...(value.source !== undefined ? { source: cloneRef(value.source as WorkflowArtifactRef) } : {}),
@@ -722,6 +801,14 @@ function optionalNonEmptyString(value: unknown, field: string): string | undefin
     throw new Error(`Workflow artifact record has invalid ${field}.`);
   }
   return value;
+}
+
+function optionalPositiveSafeInteger(value: unknown, field: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
+    throw new Error(`Workflow artifact record has invalid ${field}.`);
+  }
+  return value as number;
 }
 
 function hasUnexpectedFields(value: Record<string, unknown>, allowed: readonly string[]): boolean {
@@ -875,7 +962,8 @@ function isArtifactKind(value: unknown): value is WorkflowArtifactKind {
     value === "result" ||
     value === "published" ||
     value === "primary" ||
-    value === "input"
+    value === "input" ||
+    value === "operator-ask"
   );
 }
 

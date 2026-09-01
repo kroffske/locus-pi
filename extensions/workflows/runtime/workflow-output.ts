@@ -29,15 +29,18 @@ import {
   workflowRootDir,
   WORKFLOW_PLANS_DIRNAME,
   WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_WORKSPACES_DIRNAME,
 } from "./workflow-run-layout.js";
 
 const OUTPUT_COMPONENT_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]{0,199}";
 const OUTPUT_COMPONENT = new RegExp(`^${OUTPUT_COMPONENT_SOURCE}$`, "u");
-const WORKFLOW_PLANS_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
+const WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
+const WORKFLOW_WORKSPACES_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_WORKSPACES_DIRNAME].join("/");
 /** TypeBox-compatible grammar for the same confined path accepted by the runtime. */
 export const WORKFLOW_OUTPUT_DIR_PATTERN =
   `^(?:(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*|` +
-  `\\${WORKFLOW_ROOT_DIRNAME}/${WORKFLOW_PLANS_DIRNAME}/(?:${OUTPUT_COMPONENT_SOURCE}))$`;
+  `\\${WORKFLOW_ROOT_DIRNAME}/(?:${WORKFLOW_WORKSPACES_DIRNAME}|${WORKFLOW_PLANS_DIRNAME})/` +
+  `(?:${OUTPUT_COMPONENT_SOURCE}))$`;
 /** Shared aggregate bound for tool, command, and direct runtime callers. */
 export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
 export const WORKFLOW_RUN_NAME_MAX_CHARS = 200;
@@ -141,7 +144,7 @@ function defaultWorkflowOutputDir(
   const leaf = OUTPUT_COMPONENT.test(readableLeaf)
     ? readableLeaf
     : `${workspaceRunId}-workflow-${createHash("sha256").update(workflowName).digest("hex")}`;
-  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${leaf}`;
+  return `${WORKFLOW_WORKSPACES_RELATIVE_ROOT}/${leaf}`;
 }
 
 export interface WorkflowOutputDirectoryPath {
@@ -169,12 +172,45 @@ export function resolveWorkflowOutputDirectoryPath(
   return { relativePath, absolutePath };
 }
 
-/** Expand a short run name into its project-local workflow workspace. */
-export function workflowWorkspaceRelativePathForRunName(runName: unknown): string {
+function workflowWorkspaceLeaf(runName: unknown): string {
   if (typeof runName !== "string" || !OUTPUT_COMPONENT.test(runName)) {
     throw new Error("workflow runName must be one safe folder name");
   }
-  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${runName}`;
+  return runName;
+}
+
+/**
+ * Select one named workspace without moving its physical target.
+ *
+ * Existing legacy workspaces stay under `.locus-pi/plans/`, preserving the
+ * physical identity that owns their checkpoint namespace. A name present in
+ * both roots is ambiguous and fails before workflow code can run.
+ */
+export function resolveNamedWorkflowWorkspacePath(projectRoot: string, runName: unknown): string {
+  const leaf = workflowWorkspaceLeaf(runName);
+  const root = path.resolve(projectRoot);
+  const currentRelativePath = `${WORKFLOW_WORKSPACES_RELATIVE_ROOT}/${leaf}`;
+  const legacyRelativePath = `${WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT}/${leaf}`;
+  const currentPath = path.resolve(root, ...currentRelativePath.split("/"));
+  const legacyPath = path.resolve(root, ...legacyRelativePath.split("/"));
+  const currentExists = lstatSync(currentPath, { throwIfNoEntry: false }) !== undefined;
+  const legacyExists = lstatSync(legacyPath, { throwIfNoEntry: false }) !== undefined;
+  if (currentExists && legacyExists) {
+    throw new Error(
+      `workflow runName ${JSON.stringify(leaf)} is ambiguous: both ${currentRelativePath} and ${legacyRelativePath} exist`,
+    );
+  }
+  return legacyExists ? legacyRelativePath : currentRelativePath;
+}
+
+/** Validate one run name without selecting or touching either workspace root. */
+export function assertWorkflowRunName(runName: unknown): string {
+  return workflowWorkspaceLeaf(runName);
+}
+
+/** True only for the retired workspace namespace; callers must never create it. */
+export function isLegacyWorkflowWorkspacePath(relativePath: string): boolean {
+  return relativePath.startsWith(`${WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT}/`);
 }
 
 function normalizeRequestedOutputDir(projectRoot: string, workingDirectory: string, requested: string): string {
@@ -712,10 +748,13 @@ export function assertWorkflowOutputDirPath(value: unknown): string {
   if (value.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
     throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
   }
-  if (value.startsWith(`${WORKFLOW_PLANS_RELATIVE_ROOT}/`)) {
-    const planName = value.slice(WORKFLOW_PLANS_RELATIVE_ROOT.length + 1);
-    if (!OUTPUT_COMPONENT.test(planName)) {
-      throw new Error(`workflow outputDir contains an unsafe planning path component: ${JSON.stringify(value)}`);
+  const workspaceRoot = [WORKFLOW_WORKSPACES_RELATIVE_ROOT, WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT].find(
+    (candidate) => value.startsWith(`${candidate}/`),
+  );
+  if (workspaceRoot !== undefined) {
+    const workspaceName = value.slice(workspaceRoot.length + 1);
+    if (!OUTPUT_COMPONENT.test(workspaceName)) {
+      throw new Error(`workflow outputDir contains an unsafe workspace path component: ${JSON.stringify(value)}`);
     }
     return value;
   }
