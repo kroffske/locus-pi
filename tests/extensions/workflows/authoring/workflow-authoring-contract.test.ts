@@ -509,7 +509,7 @@ ${authoring[1] ?? ""}
       "extensions/workflows/REFERENCE.md",
     ]) {
       const text = source(relativePath);
-      expect(text).toContain(".pi/workflows/<name>/<name>.design.md");
+      expect(text).toContain(".locus-pi/workflows/<name>/<name>.design.md");
       expect(text).toContain("runnable root");
       expect(text).toContain("group-only");
       expect(text).toMatch(/<(?:name|root)>\/<child>/u);

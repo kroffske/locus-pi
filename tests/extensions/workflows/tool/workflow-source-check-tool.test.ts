@@ -14,7 +14,7 @@ afterEach(() => {
 function temporaryRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-source-check-"));
   roots.push(root);
-  mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+  mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
   return root;
 }
 
@@ -25,24 +25,24 @@ function standardSource(body = 'return agent("Review the change");'): string {
 describe("workflow_check_source", () => {
   it("registers under the workflows owner and accepts a valid standard source", async () => {
     const root = temporaryRoot();
-    writeFileSync(path.join(root, ".pi", "workflows", "sample.workflow.mjs"), standardSource());
+    writeFileSync(path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"), standardSource());
     const harness = createHarness(root);
     workflows(harness.pi);
 
     expect(harness.tools.has("workflow_check_source")).toBe(true);
     expect(harness.tools.get("workflow_check_source")?.approval).toBe("read");
     const result = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
     });
 
     expect(result.isError).not.toBe(true);
     expect(result.content[0]).toMatchObject({
       type: "text",
-      text: ".pi/workflows/sample.workflow.mjs: standard workflow source shape passed",
+      text: ".locus-pi/workflows/sample.workflow.mjs: standard workflow source shape passed",
     });
     expect(result.details).toEqual({
       owner: "workflows",
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
       errorCount: 0,
       warningCount: 0,
       diagnostics: [],
@@ -53,14 +53,14 @@ describe("workflow_check_source", () => {
     const root = temporaryRoot();
     const marker = path.join(root, "executed.txt");
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       `import { writeFileSync } from "node:fs";\n${standardSource('if (process.env.DEPLOY === "yes") return agent("Deploy"); return agent("Hold");')}\nwriteFileSync(${JSON.stringify(marker)}, "ran");\n`,
     );
     const harness = createHarness(root);
     workflows(harness.pi);
 
     const result = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
     });
 
     expect(result.isError).toBe(true);
@@ -72,7 +72,7 @@ describe("workflow_check_source", () => {
     const output = String((result.content[0] as { text: string }).text);
     expect(output).toContain("standard workflow source shape failed");
     expect(output).toContain(
-      ".pi/workflows/sample.workflow.mjs:1:1 [WF_IMPORT] standard profile imports no node: modules",
+      ".locus-pi/workflows/sample.workflow.mjs:1:1 [WF_IMPORT] standard profile imports no node: modules",
     );
     expect(existsSync(marker)).toBe(false);
   });
@@ -80,7 +80,7 @@ describe("workflow_check_source", () => {
   it("machine-enforces the orchestration-only workflow-create subset", async () => {
     const root = temporaryRoot();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       standardSource("const root = projectRoot(); return agent(`Inspect the project at ${root}`);").replace(
         "run({ agent })",
         "run({ agent, projectRoot })",
@@ -90,10 +90,10 @@ describe("workflow_check_source", () => {
     workflows(harness.pi);
 
     const compatibility = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
     });
     const strict = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
       mode: "orchestration-only",
     });
 
@@ -117,7 +117,7 @@ describe("workflow_check_source", () => {
   it("requires a literal agent label in the strict mode, so a generated workflow can be repaired", async () => {
     const root = temporaryRoot();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       standardSource('return agent("Review the change");'),
     );
     const harness = createHarness(root);
@@ -126,10 +126,10 @@ describe("workflow_check_source", () => {
     // The compatibility mode still accepts every reviewed workflow written before
     // the rule; only the strict mode generated sources must pass gains it.
     const compatibility = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
     });
     const strict = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
       mode: "orchestration-only",
     });
 
@@ -150,7 +150,7 @@ describe("workflow_check_source", () => {
   it("rejects two agent calls sharing one label, the only reachable answer substitution", async () => {
     const root = temporaryRoot();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       standardSource(
         'const first = await agent("same prompt", { label: "dup" });\n' +
           '  const second = await agent("same prompt", { label: "dup" });\n' +
@@ -161,7 +161,7 @@ describe("workflow_check_source", () => {
     workflows(harness.pi);
 
     const strict = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
       mode: "orchestration-only",
     });
 
@@ -184,7 +184,7 @@ describe("workflow_check_source", () => {
   it("accepts a strict source whose agent calls all carry unique literal labels", async () => {
     const root = temporaryRoot();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       standardSource(
         'const draft = await agent("draft it", { label: "draft" });\n' +
           '  return await agent("review it: " + draft, { label: "review" });',
@@ -194,7 +194,7 @@ describe("workflow_check_source", () => {
     workflows(harness.pi);
 
     const strict = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
       mode: "orchestration-only",
     });
 
@@ -205,7 +205,7 @@ describe("workflow_check_source", () => {
   it("keeps errorCount as the unique legacy-message count when structured occurrences repeat", async () => {
     const root = temporaryRoot();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       [
         'export const meta = { name: "sample", profile: "standard" };',
         'import fs from "node:fs";',
@@ -217,7 +217,7 @@ describe("workflow_check_source", () => {
     const harness = createHarness(root);
     workflows(harness.pi);
 
-    const result = await runTool(harness, "workflow_check_source", { path: ".pi/workflows/sample.workflow.mjs" });
+    const result = await runTool(harness, "workflow_check_source", { path: ".locus-pi/workflows/sample.workflow.mjs" });
     const diagnostics = result.details?.diagnostics as readonly unknown[];
 
     expect(result.isError).toBe(true);
@@ -229,18 +229,18 @@ describe("workflow_check_source", () => {
   it("returns warning diagnostics without failing the tool", async () => {
     const root = temporaryRoot();
     writeFileSync(
-      path.join(root, ".pi", "workflows", "sample.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "sample.workflow.mjs"),
       'export const meta = { name: "sample", profile: "standard", phases: [{ title: "unused" }] };\nexport default function run({ phase }) { return { ok: true }; }\n',
     );
     const harness = createHarness(root);
     workflows(harness.pi);
 
-    const result = await runTool(harness, "workflow_check_source", { path: ".pi/workflows/sample.workflow.mjs" });
+    const result = await runTool(harness, "workflow_check_source", { path: ".locus-pi/workflows/sample.workflow.mjs" });
 
     expect(result.isError).not.toBe(true);
     expect(result.details).toEqual({
       owner: "workflows",
-      path: ".pi/workflows/sample.workflow.mjs",
+      path: ".locus-pi/workflows/sample.workflow.mjs",
       errorCount: 0,
       warningCount: 1,
       diagnostics: [
@@ -258,8 +258,8 @@ describe("workflow_check_source", () => {
       outputRedacted: false,
     });
     expect(String((result.content[0] as { text: string }).text)).toBe(
-      ".pi/workflows/sample.workflow.mjs: standard workflow source shape passed with 1 warning(s):\n" +
-        '.pi/workflows/sample.workflow.mjs:1:78 [WF_PHASE_UNUSED_DECLARATION] meta.phases title "unused" has no literal phase("unused") call',
+      ".locus-pi/workflows/sample.workflow.mjs: standard workflow source shape passed with 1 warning(s):\n" +
+        '.locus-pi/workflows/sample.workflow.mjs:1:78 [WF_PHASE_UNUSED_DECLARATION] meta.phases title "unused" has no literal phase("unused") call',
     );
   });
 
@@ -268,13 +268,13 @@ describe("workflow_check_source", () => {
     const outside = temporaryRoot();
     const outsideFile = path.join(outside, "outside.workflow.mjs");
     writeFileSync(outsideFile, standardSource());
-    symlinkSync(outsideFile, path.join(root, ".pi", "workflows", "linked.workflow.mjs"));
+    symlinkSync(outsideFile, path.join(root, ".locus-pi", "workflows", "linked.workflow.mjs"));
     const harness = createHarness(root);
     workflows(harness.pi);
 
     const lexical = await runTool(harness, "workflow_check_source", { path: "../outside.workflow.mjs" });
     const symlink = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/linked.workflow.mjs",
+      path: ".locus-pi/workflows/linked.workflow.mjs",
     });
 
     expect(lexical.isError).toBe(true);
@@ -285,12 +285,12 @@ describe("workflow_check_source", () => {
 
   it("rejects an oversized source before parsing it", async () => {
     const root = temporaryRoot();
-    writeFileSync(path.join(root, ".pi", "workflows", "large.workflow.mjs"), "x".repeat(512 * 1024 + 1));
+    writeFileSync(path.join(root, ".locus-pi", "workflows", "large.workflow.mjs"), "x".repeat(512 * 1024 + 1));
     const harness = createHarness(root);
     workflows(harness.pi);
 
     const result = await runTool(harness, "workflow_check_source", {
-      path: ".pi/workflows/large.workflow.mjs",
+      path: ".locus-pi/workflows/large.workflow.mjs",
     });
 
     expect(result.isError).toBe(true);

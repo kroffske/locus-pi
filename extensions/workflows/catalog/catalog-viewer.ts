@@ -17,7 +17,11 @@ import {
 } from "./workflow-catalog.js";
 import { workflowCopyDestinations, type WorkflowCopyDestination } from "./workflow-copy.js";
 import { packagedExamplesDir } from "../runtime/workflow-discovery.js";
-import { workflowRunsRootDir } from "../runtime/workflow-run-layout.js";
+import {
+  WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_SAVED_SOURCE_DIRNAME,
+  workflowRunsRootDir,
+} from "../runtime/workflow-run-layout.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 // Keep two rows of breathing room above the one-row Locus footer so focused
@@ -740,9 +744,9 @@ function catalogDirectories(model: WorkflowCatalogModel, tab: CatalogTabId, proj
     ),
   ];
   if (directories.length > 0) return directories;
-  if (tab === "personal") return [path.join(homedir(), ".pi", "workflows")];
+  if (tab === "personal") return [path.join(homedir(), WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME)];
   if (tab === "package") return [packagedExamplesDir()];
-  return [path.join(projectRoot, ".pi", "workflows")];
+  return [path.join(projectRoot, WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME)];
 }
 
 function catalogDirectoryForRow(row: WorkflowCatalogCurrentRow): string {

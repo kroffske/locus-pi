@@ -11,6 +11,7 @@ import path from "node:path";
 import type { WorkflowCatalogCurrentRow } from "./workflow-catalog.js";
 import { readSelectedWorkflowSource } from "./workflow-catalog.js";
 import { WORKFLOW_ENTRY_SUFFIX } from "../runtime/workflow-discovery.js";
+import { WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME } from "../runtime/workflow-run-layout.js";
 
 export type WorkflowCopyDestination = "project" | "personal";
 
@@ -50,7 +51,7 @@ export function copyWorkflowNamespace(
     );
   }
   const boundaryRoot = destination === "project" ? path.resolve(projectRoot) : path.resolve(homedir());
-  const catalogDirectory = path.join(boundaryRoot, ".pi", "workflows");
+  const catalogDirectory = path.join(boundaryRoot, WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME);
   const destinationPath = path.join(catalogDirectory, selected.rootName);
   const flatConflictPath = path.join(catalogDirectory, `${selected.rootName}${WORKFLOW_ENTRY_SUFFIX}`);
   for (const conflictPath of [destinationPath, flatConflictPath]) {
@@ -76,7 +77,7 @@ export function copyWorkflowNamespace(
   }
   assertNamespaceSymlinksConfined(sourceDirectory);
 
-  assertSafeDestinationChain(boundaryRoot, [".pi", "workflows"]);
+  assertSafeDestinationChain(boundaryRoot, [WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME]);
   mkdirSync(catalogDirectory, { recursive: true });
   assertPathWithinBoundary(realpathSync(catalogDirectory), realpathSync(boundaryRoot));
 

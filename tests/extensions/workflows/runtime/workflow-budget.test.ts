@@ -216,7 +216,7 @@ function scratchProject(): string {
 }
 
 function saveWorkflow(root: string, name: string, body: string): void {
-  const dir = path.join(root, ".pi", "workflows");
+  const dir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${name}.workflow.mjs`), body, "utf8");
 }

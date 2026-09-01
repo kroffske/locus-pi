@@ -9,6 +9,7 @@
 
 import path from "node:path";
 import { realpathSync } from "node:fs";
+import { WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT } from "./workflow-run-layout.js";
 
 export const WORKFLOW_SAVED_NAME_MAX_CHARS = 200;
 export const WORKFLOW_SAVED_NAME_PATTERN =
@@ -55,16 +56,8 @@ export interface WorkflowTargetIdentityProjectionOptions {
   projectRoot?: string | undefined;
 }
 
-const POST_CODE_REVIEW_PROJECT_REFS = new Set([
-  ".pi/workflows/post-code-review.workflow.mjs",
-  ".claude/workflows/post-code-review.workflow.mjs",
-  ".agents/workflows/post-code-review.workflow.mjs",
-]);
-const POST_CODE_REVIEW_PROJECT_DIRS = [
-  ".pi/workflows/post-code-review/",
-  ".claude/workflows/post-code-review/",
-  ".agents/workflows/post-code-review/",
-] as const;
+const POST_CODE_REVIEW_PROJECT_REFS = new Set([`${WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT}/post-code-review.workflow.mjs`]);
+const POST_CODE_REVIEW_PROJECT_DIRS = [`${WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT}/post-code-review/`] as const;
 
 /** Owner identity for the post-code-review namespace policy. */
 export function isPostCodeReviewTargetIdentity(target: WorkflowTargetIdentity, projectRoot?: string): boolean {

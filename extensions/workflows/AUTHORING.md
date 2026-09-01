@@ -8,7 +8,7 @@ The complete runtime, trust, replay, and artifact reference is
 ## Contract: Design, review, Build
 
 A plain request to create, design, write, or author a workflow runs one ordered
-authoring sequence: create `.pi/workflows/<name>/`, write
+authoring sequence: create `.locus-pi/workflows/<name>/`, write
 `<name>/<name>.design.md`, review and revise that design against the request and
 standard source profile, then write exactly the direct `.workflow.mjs` entries
 declared by the design. A `runnable root` design includes
@@ -34,8 +34,8 @@ user explicitly asks for `design only`, `pause after design`, `do not build`, or
 equivalent wording. Build-only compatibility requests remain available:
 
 ```text
-Build design: .pi/workflows/<name>/<name>.design.md
-Build approved design: .pi/workflows/<name>/<name>.design.md
+Build design: .locus-pi/workflows/<name>/<name>.design.md
+Build approved design: .locus-pi/workflows/<name>/<name>.design.md
 ```
 
 Both Build-only forms use the current design bytes at the exact path; there is no
@@ -379,7 +379,7 @@ project-relative path of the exact file Build produced:
 
 ```json
 {
-  "path": ".pi/workflows/<name>/<name>.workflow.mjs",
+  "path": ".locus-pi/workflows/<name>/<name>.workflow.mjs",
   "mode": "orchestration-only"
 }
 ```
@@ -557,7 +557,7 @@ export default async function runWorkflow(dsl, input) {
 }
 ```
 
-The filename is exactly `<name>.workflow.mjs`. `.pi/workflows/` is the canonical
+The filename is exactly `<name>.workflow.mjs`. `.locus-pi/workflows/` is the canonical
 project target. Source identity and authoring profile are separate gates. The
 general `self-contained-static` identity accepts static `node:` imports, and
 `legacy`, `integration`, or explicitly reviewed non-standard source may use

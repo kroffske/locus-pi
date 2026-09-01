@@ -56,8 +56,11 @@ describe("/workflows run launch gate", () => {
 
   it("launches a project post-code-review command without an explicit output namespace", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-launch-"));
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
+      'export default () => "ok";\n',
+    );
     const h = registerCommandHarness(root);
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
       runId: "run-project-review",
@@ -80,8 +83,11 @@ describe("/workflows run launch gate", () => {
 
   it("runs a fresh post-code-review tool call in a generated planning workspace", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "workflow-post-review-tool-"));
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    writeFileSync(path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs"), 'export default () => "ok";\n');
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
+      'export default () => "ok";\n',
+    );
     const h = registerCommandHarness(root);
     try {
       const result = await h.tools
@@ -259,8 +265,8 @@ describe("/workflows run launch gate", () => {
   });
 
   it.each([
-    "/outside/.pi/workflows/post-code-review.workflow.mjs",
-    path.join(process.cwd(), ".pi", "workflows", "post-code-review.workflow.mjs"),
+    "/outside/.locus-pi/workflows/post-code-review.workflow.mjs",
+    path.join(process.cwd(), ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
   ])("shows the generated planning workspace for an absolute legacy script: %s", (script) => {
     const h = registerHarness();
     const details = h.tools.get("workflow")!.formatApprovalDetails?.({ script }) ?? [];
@@ -269,14 +275,10 @@ describe("/workflows run launch gate", () => {
   });
 
   it.each([
-    { scriptPath: ".pi/workflows/post-code-review.workflow.mjs" },
-    { scriptPath: "./.pi/workflows/post-code-review.workflow.mjs" },
-    { scriptPath: "nested/../.pi/workflows/post-code-review.workflow.mjs" },
-    { scriptPath: ".claude/workflows/post-code-review.workflow.mjs" },
-    { scriptPath: "./.claude/workflows/post-code-review.workflow.mjs" },
-    { scriptPath: ".agents/workflows/post-code-review.workflow.mjs" },
-    { scriptPath: "nested/../.agents/workflows/post-code-review.workflow.mjs" },
-    { script: ".pi/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: ".locus-pi/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: "./.locus-pi/workflows/post-code-review.workflow.mjs" },
+    { scriptPath: "nested/../.locus-pi/workflows/post-code-review.workflow.mjs" },
+    { script: ".locus-pi/workflows/post-code-review.workflow.mjs" },
   ])("shows the generated planning workspace for resolved owner path %j", (args) => {
     const h = registerHarness();
     const details = h.tools.get("workflow")!.formatApprovalDetails?.(args) ?? [];
@@ -288,7 +290,7 @@ describe("/workflows run launch gate", () => {
     const h = registerHarness();
     const details =
       h.tools.get("workflow")!.formatApprovalDetails?.({
-        scriptPath: "../.pi/workflows/post-code-review.workflow.mjs",
+        scriptPath: "../.locus-pi/workflows/post-code-review.workflow.mjs",
       }) ?? [];
 
     expect(details[2]).toBe("Workflow workspace: .locus-pi/workspaces/<generated-run-name>");
@@ -855,15 +857,15 @@ describe("/workflows run launch gate", () => {
   it("resolves saved workflows nearest the working directory through /workflows run", async () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "wf-launch-"));
     try {
-      mkdirSync(path.join(root, ".claude", "workflows"), { recursive: true });
-      mkdirSync(path.join(root, "nested", ".claude", "workflows"), { recursive: true });
+      mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+      mkdirSync(path.join(root, "nested", ".locus-pi", "workflows"), { recursive: true });
       writeFileSync(
-        path.join(root, ".claude", "workflows", "same.workflow.mjs"),
+        path.join(root, ".locus-pi", "workflows", "same.workflow.mjs"),
         "export default () => 'root';\n",
         "utf8",
       );
       writeFileSync(
-        path.join(root, "nested", ".claude", "workflows", "same.workflow.mjs"),
+        path.join(root, "nested", ".locus-pi", "workflows", "same.workflow.mjs"),
         "export default () => 'nested';\n",
         "utf8",
       );

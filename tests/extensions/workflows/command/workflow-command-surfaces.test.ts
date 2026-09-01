@@ -100,7 +100,7 @@ function compactHarness(root: string): Harness {
 describe("/workflows help and unknown commands", () => {
   it("uses a workflow target chooser for run", async () => {
     const root = makeRoot();
-    const workflowDir = path.join(root, ".pi", "workflows");
+    const workflowDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(
       path.join(workflowDir, "alpha.workflow.mjs"),
@@ -120,7 +120,7 @@ describe("/workflows help and unknown commands", () => {
 
   it("prefills post-code-review without a manual workspace", async () => {
     const root = makeRoot();
-    const workflowDir = path.join(root, ".pi", "workflows");
+    const workflowDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(
       path.join(workflowDir, "post-code-review.workflow.mjs"),
@@ -138,7 +138,7 @@ describe("/workflows help and unknown commands", () => {
 
   it("waits for the native selector teardown before filling the editor", async () => {
     const root = makeRoot();
-    const workflowDir = path.join(root, ".pi", "workflows");
+    const workflowDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(
       path.join(workflowDir, "alpha.workflow.mjs"),
@@ -206,7 +206,7 @@ describe("/workflows help and unknown commands", () => {
 
   it("routes info, result, and continue through contextual menu paths", async () => {
     const root = makeRoot();
-    const workflowDir = path.join(root, ".pi", "workflows");
+    const workflowDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(
       path.join(workflowDir, "alpha.workflow.mjs"),
@@ -251,7 +251,7 @@ describe("/workflows help and unknown commands", () => {
   it("quotes an interior-whitespace workflow ref and parses it without an input tail", async () => {
     const root = makeRoot();
     const targetRef = "alpha workflow";
-    const workflowDir = path.join(root, ".pi", "workflows");
+    const workflowDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(
       path.join(workflowDir, `${targetRef}.workflow.mjs`),
@@ -435,7 +435,7 @@ describe("/workflows help and unknown commands", () => {
 
   it("limits stop-menu choices to unsettled runs owned by the current session lease", async () => {
     const root = makeRoot();
-    const workflowDir = path.join(root, ".pi", "workflows");
+    const workflowDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(workflowDir, { recursive: true });
     writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), "export default async()=>null;\n", "utf8");
     const finishedId = "20260726-212752-finished";

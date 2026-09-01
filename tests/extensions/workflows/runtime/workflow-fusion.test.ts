@@ -737,7 +737,7 @@ describe("dsl.fusion", () => {
   it("is callable from a real workflow script through the public runner", async () => {
     const root = temporaryRoot("workflow-fusion-script-");
     const agentsDir = path.join(root, ".agents", "agents");
-    const workflowsDir = path.join(root, ".pi", "workflows");
+    const workflowsDir = path.join(root, ".locus-pi", "workflows");
     mkdirSync(agentsDir, { recursive: true });
     mkdirSync(workflowsDir, { recursive: true });
     writeFileSync(

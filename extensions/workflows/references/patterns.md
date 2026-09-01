@@ -7,9 +7,9 @@
 > so existing reviewed workflows can understand their historical techniques.
 
 These are authoring skeletons, not additional Package workflows. Save a reviewed
-copy under `.pi/workflows/`, `.claude/workflows/`, `.agents/workflows/`, or
-`~/.pi/workflows/` before running it. Workflow JavaScript executes with full
-Node.js host access and is not sandboxed.
+copy under project `.locus-pi/workflows/` or user `~/.locus-pi/workflows/` before
+running it. Workflow JavaScript executes with full Node.js host access and is not
+sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
 currently `live-smoke`, `post-code-review` and its children, plus `task/draft`

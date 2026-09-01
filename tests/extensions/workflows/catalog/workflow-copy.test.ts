@@ -34,7 +34,7 @@ describe("workflow namespace copy", () => {
     const result = copyWorkflowNamespace(selected, "project", project, project);
 
     expect(result).toMatchObject({ status: "copied", destination: "project", rootName: "post-code-review" });
-    const destination = path.join(project, ".pi", "workflows", "post-code-review");
+    const destination = path.join(project, ".locus-pi", "workflows", "post-code-review");
     expect(existsSync(path.join(destination, "post-code-review.workflow.mjs"))).toBe(true);
     expect(existsSync(path.join(destination, "necessity.workflow.mjs"))).toBe(true);
     expect(existsSync(path.join(destination, "README.md"))).toBe(true);
@@ -46,7 +46,7 @@ describe("workflow namespace copy", () => {
   it.each(["folder", "flat"] as const)("refuses an existing Project %s namespace without changing it", (shape) => {
     const { project } = temporaryEnvironment();
     const selected = buildWorkflowCatalogModel(project, project).current.find((row) => row.name === "live-smoke")!;
-    const catalog = path.join(project, ".pi", "workflows");
+    const catalog = path.join(project, ".locus-pi", "workflows");
     mkdirSync(catalog, { recursive: true });
     const conflict =
       shape === "folder" ? path.join(catalog, "live-smoke") : path.join(catalog, "live-smoke.workflow.mjs");
@@ -72,7 +72,7 @@ describe("workflow namespace copy", () => {
     const result = copyWorkflowNamespace(selected, "project", project, project);
 
     expect(result).toMatchObject({ status: "copied", destination: "project", rootName: "task" });
-    const destination = path.join(project, ".pi", "workflows", "task");
+    const destination = path.join(project, ".locus-pi", "workflows", "task");
     expect(existsSync(path.join(destination, "task.workflow.mjs"))).toBe(false);
     expect(existsSync(path.join(destination, "draft.workflow.mjs"))).toBe(true);
     expect(existsSync(path.join(destination, "plan.workflow.mjs"))).toBe(true);
@@ -118,7 +118,7 @@ describe("workflow namespace copy", () => {
   ] as const)("materializes a confined %s symlink when copying to %s", (source, destination) => {
     const { project, home } = temporaryEnvironment();
     const sourceRoot = source === "project" ? project : home;
-    const namespace = path.join(sourceRoot, ".pi", "workflows", "alpha");
+    const namespace = path.join(sourceRoot, ".locus-pi", "workflows", "alpha");
     const resource = path.join(namespace, "resources", "alpha-source.mjs");
     mkdirSync(path.dirname(resource), { recursive: true });
     writeFileSync(
@@ -134,7 +134,7 @@ describe("workflow namespace copy", () => {
 
     expect(result.status).toBe("copied");
     const destinationRoot = destination === "project" ? project : home;
-    const copiedEntry = path.join(destinationRoot, ".pi", "workflows", "alpha", "alpha.workflow.mjs");
+    const copiedEntry = path.join(destinationRoot, ".locus-pi", "workflows", "alpha", "alpha.workflow.mjs");
     expect(lstatSync(copiedEntry).isFile()).toBe(true);
     expect(lstatSync(copiedEntry).isSymbolicLink()).toBe(false);
     const verificationProject =
@@ -145,7 +145,7 @@ describe("workflow namespace copy", () => {
 
   it("rejects a namespace resource symlink that escapes the namespace", () => {
     const { project, home } = temporaryEnvironment();
-    const namespace = path.join(project, ".pi", "workflows", "alpha");
+    const namespace = path.join(project, ".locus-pi", "workflows", "alpha");
     mkdirSync(path.join(namespace, "resources"), { recursive: true });
     writeFileSync(
       path.join(namespace, "alpha.workflow.mjs"),
@@ -158,7 +158,7 @@ describe("workflow namespace copy", () => {
     const selected = buildWorkflowCatalogModel(project, project).current.find((row) => row.name === "alpha")!;
 
     expect(() => copyWorkflowNamespace(selected, "personal", project, project)).toThrow(/escapes its allowed root/u);
-    expect(existsSync(path.join(home, ".pi", "workflows", "alpha"))).toBe(false);
+    expect(existsSync(path.join(home, ".locus-pi", "workflows", "alpha"))).toBe(false);
   });
 });
 

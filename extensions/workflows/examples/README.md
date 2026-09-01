@@ -72,7 +72,7 @@ Only `/workflow-stop` remains as an emergency flat alias.
 
 Standard authoring is one continuous Design → review → Build sequence. A raw
 request first writes and reviews
-`.pi/workflows/<name>/<name>.design.md`, then creates exactly the root and direct
+`.locus-pi/workflows/<name>/<name>.design.md`, then creates exactly the root and direct
 children declared by that design. Explicit design-only wording may pause after
 design. `Build design: <path>` and `Build approved design: <path>` remain
 Build-only compatibility forms.

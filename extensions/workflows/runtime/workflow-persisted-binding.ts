@@ -16,6 +16,8 @@ import { projectWorkflowDisposition } from "./workflow-result.js";
 import {
   assertWorkflowRunId,
   readWorkflowRunFile,
+  WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_SAVED_SOURCE_DIRNAME,
   workflowRunDir,
   workflowRunRuntimeDir,
 } from "./workflow-run-layout.js";
@@ -306,7 +308,7 @@ function validatePersistedWorkflowPath(
   if (!path.isAbsolute(value)) throw new Error(`${label} must be absolute.`);
   const root =
     target.source === "personal"
-      ? path.join(os.homedir(), ".pi", "workflows")
+      ? path.join(os.homedir(), WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME)
       : target.source === "package"
         ? WORKFLOW_PACKAGE_ROOT
         : path.resolve(projectRoot);
@@ -380,8 +382,8 @@ function validatePersistedNamedWorkflowLayout(
     const parts = relative.split(path.sep).filter(Boolean);
     const matches = parts.some(
       (part, index) =>
-        [".pi", ".claude", ".agents"].includes(part) &&
-        parts[index + 1] === "workflows" &&
+        part === WORKFLOW_ROOT_DIRNAME &&
+        parts[index + 1] === WORKFLOW_SAVED_SOURCE_DIRNAME &&
         (samePathParts(parts.slice(index + 2), folderTail) ||
           (legacyTail !== undefined && samePathParts(parts.slice(index + 2), legacyTail))),
     );
