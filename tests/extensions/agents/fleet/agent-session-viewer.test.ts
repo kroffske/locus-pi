@@ -1402,4 +1402,90 @@ describe("AgentSessionViewer", () => {
     expect(unknown.render(80)).toHaveLength(49);
     unknown.dispose();
   });
+  it("does not promise key scrolling in fullscreen, where Pi consumes those keys first", () => {
+    // `TuiAltScreen` registers its viewport listener in its own constructor and
+    // consumes PageUp/PageDown/Home/End before any component is reached, so this
+    // screen cannot scroll by key there. The footer says only what is true.
+    const row = agentLiveStore.begin({ id: "fullscreen-footer-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+
+    const fullscreen = new AgentSessionViewer(
+      execution,
+      { mode: "fullscreen" as const, terminal: { rows: 20, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      undefined,
+      { matches: () => false },
+    );
+    const fullscreenFooter = fullscreen.render(80).at(-1) ?? "";
+    expect(fullscreenFooter).not.toContain("pgup");
+    expect(fullscreenFooter).not.toContain("history");
+    expect(fullscreenFooter).toContain("esc close · enter send");
+    fullscreen.dispose();
+
+    const regular = new AgentSessionViewer(
+      execution,
+      { mode: "regular" as const, terminal: { rows: 20, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      undefined,
+      { matches: () => false },
+    );
+    expect(regular.render(80).at(-1) ?? "").toContain("pgup/pgdn history");
+    regular.dispose();
+    unregister();
+  });
+
+  it("offers the wheel wherever it captures it, not only beside an editor", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
+    const row = agentLiveStore.begin({ id: "settled-wheel-row", agentName: "reviewer", label: "Review" });
+    agentLiveStore.patch(row.id, { status: "done" });
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { mode: "regular" as const, terminal: { rows: 14, columns: 80, write: vi.fn() }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const footer = viewer.render(80).at(-1) ?? "";
+    // No editor is mounted on a settled row, but the wheel is still captured.
+    expect(footer).not.toContain("enter send");
+    expect(footer).toContain("wheel/pgup/pgdn history");
+    viewer.dispose();
+  });
+
+  it("drops the queued-message notice once the child stops taking input", async () => {
+    const row = agentLiveStore.begin({ id: "stale-notice-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    let accepting = true;
+    const unregister = agentLiveStore.registerInputForExecution(execution, send, () => accepting);
+    const viewer = new AgentSessionViewer(
+      execution,
+      { mode: "regular" as const, terminal: { rows: 14, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      undefined,
+      { matches: () => false },
+    );
+
+    viewer.render(80);
+    viewer.handleInput("h");
+    viewer.handleInput("enter");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("h"));
+    await vi.waitFor(() => expect(viewer.render(80).at(-1) ?? "").toContain("message queued"));
+
+    // The child settles: the editor is withdrawn, and the notice about a message
+    // it was going to read must go with it.
+    accepting = false;
+    agentLiveStore.patch(row.id, { status: "done" });
+    const settled = viewer.render(80).at(-1) ?? "";
+    expect(settled).not.toContain("message queued");
+    expect(settled).not.toContain("enter send");
+    expect(settled).toMatch(/^╰─ esc close · pgup\/pgdn history/u);
+
+    unregister();
+    viewer.dispose();
+  });
 });

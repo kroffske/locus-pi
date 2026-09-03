@@ -120,7 +120,8 @@ type NativeComponentEntry =
  * scroll to; it was simply gone. Reserving the row costs one line of transcript
  * and keeps the footer on screen.
  */
-const PI_HOST_ROWS_BY_MODE = { regular: 1, fullscreen: 2 } as const satisfies Record<ViewerTuiMode, number>; /**
+const PI_HOST_ROWS_BY_MODE = { regular: 1, fullscreen: 2 } as const satisfies Record<ViewerTuiMode, number>;
+/**
  * Rows the viewer's own frame always costs: the breadcrumb divider, the live
  * status line beneath it, and the footer divider. Every geometry threshold below
  * is expressed against this constant rather than a literal, so the frame can
@@ -595,6 +596,10 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#input?.dispose?.();
       this.#input = undefined;
       this.#inputSuppressedAtRows = undefined;
+      // The notice describes an editor that is no longer there. `message queued`
+      // outliving the child that was going to read it told the operator a message
+      // was still in flight after the row had settled.
+      this.#inputNotice = undefined;
       return undefined;
     }
     if (this.#inputSuppressedAtRows !== undefined) {
@@ -654,12 +659,42 @@ export class AgentSessionViewer implements CustomUiComponent {
   /** Controls only. The agent's state moved to the status line under the header. */
   #footerLabel(hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
-    const controls = hasInput
-      ? `${this.#mouseScrollOwned ? "wheel/" : ""}pgup/pgdn history · enter send`
-      : this.#inputSuppressedAtRows === undefined
-        ? "pgup/pgdn history"
-        : "resize terminal for input";
-    return `${notice}esc close · ${controls} · ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`;
+    const history = this.#historyControls();
+    const controls = [
+      "esc close",
+      ...(history === "" ? [] : [history]),
+      ...(hasInput ? ["enter send"] : []),
+      ...(!hasInput && this.#inputSuppressedAtRows !== undefined ? ["resize terminal for input"] : []),
+      `ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`,
+    ];
+    return `${notice}${controls.join(" · ")}`;
+  }
+
+  /**
+   * What actually moves this screen's history, which is not the same in both host
+   * modes and does not depend on whether an editor is mounted.
+   *
+   * The wheel half was previously offered only next to an editor, so a settled row
+   * under `LOCUS_DRILL_MOUSE=1` captured wheel reports while advertising keys alone.
+   *
+   * The key half is absent in fullscreen because it does not work there, and this
+   * component cannot make it work. `TuiAltScreen` registers `handleViewportInput`
+   * as a TUI-wide input listener in its own constructor
+   * (`@earendil-works/pi-tui/dist/tui-alt-screen.js:77`), and that listener answers
+   * `{ consume: true }` for `tui.altScreen.pageUp`, `pageDown`, `top` and `bottom` —
+   * bound by default to PageUp, PageDown, Home and End
+   * (`@earendil-works/pi-tui/dist/keybindings.js:91-116`), with the upstream comment
+   * saying they "intentionally shadow the unmodified editor bindings in fullscreen
+   * mode". Input listeners run to completion before `handleTerminalInput` ever
+   * reaches the focused component (`@earendil-works/pi-tui/dist/tui.js:557-563`), and
+   * the alt-screen listener is registered before any component exists, so no
+   * ordering, focus or overlay trick puts this viewer in front of it. The keys are
+   * still handled below: an operator who rebinds those four `tui.altScreen.*`
+   * actions gets them back, and regular mode never had the problem.
+   */
+  #historyControls(): string {
+    if (this.#mouseScrollOwned) return "wheel/pgup/pgdn history";
+    return this.tui.mode === "fullscreen" ? "" : "pgup/pgdn history";
   }
 }
 
@@ -867,6 +902,7 @@ function finiteTerminalRows(value: number | undefined): number | undefined {
 function piHostReservedRows(mode: ViewerTuiMode | undefined): number {
   return mode === "fullscreen" ? PI_HOST_ROWS_BY_MODE.fullscreen : PI_HOST_ROWS_BY_MODE.regular;
 }
+
 /**
  * Home and End as terminals actually send them, not as one terminal sends them.
  *
