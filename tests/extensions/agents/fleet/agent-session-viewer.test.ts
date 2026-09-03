@@ -1322,4 +1322,37 @@ describe("AgentSessionViewer", () => {
       vi.useRealTimers();
     }
   });
+  it("accepts Home and End in every encoding a terminal sends, not only CSI H and CSI F", () => {
+    const row = agentLiveStore.begin({ id: "home-end-encodings-row", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 40; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `encoded-${index}` }], stopReason: "stop" },
+      });
+    }
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { mode: "regular" as const, terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(viewer.render(80).join("\n")).toContain("encoded-39");
+
+    // `tmux-256color` khome/kend, `xterm-256color` khome/kend, the CSI pair the
+    // viewer already knew, and the rxvt forms pi-tui also lists.
+    const homeEndPairs = [
+      ["\u001b[1~", "\u001b[4~"],
+      ["\u001bOH", "\u001bOF"],
+      ["\u001b[H", "\u001b[F"],
+      ["\u001b[7~", "\u001b[8~"],
+      ["home", "end"],
+    ] as const;
+    for (const [home, end] of homeEndPairs) {
+      viewer.handleInput(home);
+      expect(viewer.render(80).join("\n"), `home ${JSON.stringify(home)}`).toContain("├─ REQUEST");
+      viewer.handleInput(end);
+      expect(viewer.render(80).join("\n"), `end ${JSON.stringify(end)}`).toContain("encoded-39");
+    }
+    viewer.dispose();
+  });
 });

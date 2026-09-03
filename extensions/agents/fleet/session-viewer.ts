@@ -1,4 +1,11 @@
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+  type Component,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -412,12 +419,12 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#scrollHistory(-Math.max(1, this.#lastBodyHeight - 1));
       return;
     }
-    if (this.#input === undefined && (data === "home" || data === "\u001b[H")) {
+    if (this.#input === undefined && isNamedKey(data, "home")) {
       this.#historyOffset = Math.max(0, this.#lastHistoryLineCount - this.#lastBodyHeight);
       this.tui.requestRender();
       return;
     }
-    if (this.#input === undefined && (data === "end" || data === "\u001b[F")) {
+    if (this.#input === undefined && isNamedKey(data, "end")) {
       this.#historyOffset = 0;
       this.tui.requestRender();
       return;
@@ -838,6 +845,26 @@ function formatAgentSessionStart(row: AgentLiveRow): string {
 
 function finiteTerminalRows(value: number | undefined): number | undefined {
   return value === undefined || !Number.isFinite(value) ? undefined : Math.max(1, Math.floor(value));
+}
+
+/**
+ * Home and End as terminals actually send them, not as one terminal sends them.
+ *
+ * Matching only `ESC[H` / `ESC[F` left both keys dead under `tmux-256color`, whose
+ * terminfo says `khome=\E[1~` and `kend=\E[4~`, and under `xterm-256color`, which
+ * sends `ESC O H` / `ESC O F`. `matchesKey` carries pi-tui's whole legacy and Kitty
+ * table for the key (`@earendil-works/pi-tui/dist/keys.js:241-242`), so every
+ * encoding a host may hand over resolves the same way. The bare name stays first
+ * for hosts and tests that pass a parsed key name rather than bytes.
+ */
+function isNamedKey(data: string, key: "home" | "end"): boolean {
+  if (data === key) return true;
+  try {
+    return matchesKey(data, key);
+  } catch {
+    // A host with a different key table must not take the screen down over a keypress.
+    return false;
+  }
 }
 
 function writeTerminalControl(tui: ViewerTui, sequence: string): boolean {
