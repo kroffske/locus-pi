@@ -440,57 +440,6 @@ function stripInlineMarkdown(value: string): string {
     .trim();
 }
 
-/**
- * Verbose key=value dump for the drill overlay's `details:` line — a debug view,
- * NOT a fleet row, so the compact-grammar bans (REQ-001) do not apply here.
- */
-export function formatAgentLiveRowDetails(row: AgentLiveRow): string[] {
-  const details: string[] = [];
-  details.push(...formatLiveModelDetails(row));
-  if (row.activityState !== undefined) details.push(`activity=${row.activityState}`);
-  if (row.currentPath !== undefined) details.push(`path=${JSON.stringify(row.currentPath)}`);
-  if (row.currentTools.length > 0) details.push(`tools=${row.currentTools.join(",")}`);
-  if (row.currentToolArgs !== undefined) details.push(`args=${JSON.stringify(row.currentToolArgs)}`);
-  details.push(formatStepsDetail(row.stepCount));
-  if (row.turnCount !== undefined) details.push(formatTurnsDetail(row.turnCount));
-  if (row.tokenCount !== undefined) details.push(`tokens=in${row.tokenCount.input}/out${row.tokenCount.output}`);
-  if (row.childSessionId !== undefined) details.push(`childSession=${row.childSessionId}`);
-  if (row.resultArtifact !== undefined) details.push(`artifact=${JSON.stringify(row.resultArtifact)}`);
-  if (row.finalAnswer !== undefined) details.push(`answer=${JSON.stringify(row.finalAnswer)}`);
-  if (row.groupTotal !== undefined) {
-    const completed = row.groupCompleted ?? 0;
-    const failed = row.groupFailed ?? 0;
-    details.push(`group=${completed}/${row.groupTotal}${failed > 0 ? ` failed=${failed}` : ""}`);
-  }
-  const flags = formatFlagsDetail(row);
-  if (flags !== undefined) details.push(flags);
-  if (row.errors.length > 0) details.push(`errors=${row.errors.join("; ")}`);
-  return details;
-}
-
-function formatLiveModelDetails(row: AgentLiveRow): string[] {
-  const details: string[] = [];
-  if (row.model !== undefined) details.push(`model=${row.model}`);
-  if (row.thinking !== undefined) details.push(`/effort=${row.thinking}`);
-  return details;
-}
-
-function formatStepsDetail(stepCount: number): string {
-  return `steps=${stepCount}(events)`;
-}
-
-function formatTurnsDetail(turnCount: number): string {
-  return `turns=${turnCount}(model turns)`;
-}
-
-function formatFlagsDetail(row: AgentLiveRow): string | undefined {
-  const flags = [
-    row.isolated ? "isolated(worktree)" : undefined,
-    row.noMcp ? "no-mcp(no MCP tools)" : undefined,
-  ].filter((value): value is string => value !== undefined);
-  return flags.length > 0 ? `flags=${flags.join(",")}` : undefined;
-}
-
 // ── Tool-activity action sub-line (REQ-004, T-196) ───────────────────────────
 //
 // adapted from @oh-my-pi/pi-coding-agent (MIT, Can Boluk)
