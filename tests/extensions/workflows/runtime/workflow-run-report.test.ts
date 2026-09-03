@@ -778,11 +778,15 @@ describe("workflow run report", () => {
   });
 
   it("keeps two interleaved calls apart when agent, label, phase and group all agree", () => {
-    // `parallel()` can run two calls that agree on every descriptive field, and their
-    // attempts then interleave in the journal. Grouping by those fields would put three of
-    // these four attempts in one group and leave the other looking like it never retried —
-    // a section that reads as evidence while attributing one stage's second bill to another.
-    // Only the runtime's own logical-call identity separates them.
+    // Two calls can agree on every descriptive field — a loop's second round, or two
+    // sequential calls on one slot — and once they overlap in the journal their attempts
+    // interleave. (Two CONCURRENT branches holding one slot no longer reach this shape:
+    // the runtime's slot guard refuses the second. The report still has to read journals
+    // written before that guard, and the sequential case stands either way.) Grouping by
+    // those fields would put three of these four attempts in one group and leave the other
+    // looking like it never retried — a section that reads as evidence while attributing
+    // one stage's second bill to another. Only the runtime's own logical-call identity
+    // separates them.
     const root = project();
     const shared = { runId: RUN_ID, kind: "agent_end" as const, agent: "default", label: "advise", phase: "advise" };
     const outcome = writeWorkflowRunReport(

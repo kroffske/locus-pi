@@ -5,7 +5,7 @@ import {
   AgentLivePanel,
   compactWorkflowParentRows,
   orderAgentLiveRows,
-  withWorkflowGroupTokenTotals,
+  withWorkflowGroupTotals,
   type AgentLiveThemeLike,
 } from "./agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
@@ -35,7 +35,21 @@ class FleetMenuState {
   readonly emitter = new EventEmitter();
   #focused = false;
   #selectedRowId: string | undefined;
-  #visibleRowIds: string[] = [];
+  /**
+   * The frozen membership of the focused list, held as SOURCE row ids — the raw
+   * store rows the projection consumes, workflow journal anchors included.
+   *
+   * Holding the projected ids instead is what broke `/ps` on a real fan-out: the
+   * projection had already collapsed each anchor into its SDK child, so the
+   * anchors were missing from the frozen set while the children resolved back
+   * out of the store still carrying `parentRowId = <anchor id>`. Re-projecting
+   * that set found no anchor to collapse, so no child was re-parented onto its
+   * group, and every rule that reads the group's members — the heading's
+   * `k/n done · f failed`, the working→failed→queued→done member ranking, and
+   * the heading pinned above a window shorter than the fan-out — read a tree
+   * that was not there.
+   */
+  #sourceRowIds: string[] = [];
   #emptyEditorFocusAvailable = false;
   #fallbackFocusAvailable = false;
   #projectionOwners = new Map<symbol, { priority: number; order: number }>();
@@ -88,18 +102,37 @@ class FleetMenuState {
     this.emitter.emit("change");
   }
 
-  beginFocus(rows: AgentLiveRow[]): void {
-    this.#visibleRowIds = projectFleetMenuSnapshotRows(rows).map((row) => row.id);
-    this.#normalizeSelection(this.visibleRows());
+  /**
+   * `initialRowId` is the seed a reopened menu asks for — the row the operator
+   * drilled into. It is honoured only while that row is still a selectable leaf;
+   * a row retired during the drill falls back to the usual preferred row.
+   */
+  beginFocus(rows: AgentLiveRow[], initialRowId?: string): void {
+    this.#sourceRowIds = rows.map((row) => row.id);
+    const visibleRows = this.visibleRows();
+    if (initialRowId !== undefined && selectFleetMenuLeafRows(visibleRows).some((row) => row.id === initialRowId)) {
+      this.#selectedRowId = initialRowId;
+    }
+    this.#normalizeSelection(visibleRows);
   }
 
   setVisibleRows(rows: AgentLiveRow[]): void {
-    this.#visibleRowIds = rows.map((row) => row.id);
-    this.#normalizeSelection(rows);
+    this.#sourceRowIds = rows.map((row) => row.id);
+    this.#normalizeSelection(this.visibleRows());
   }
 
+  /**
+   * The rows the focused list shows: the frozen membership, read live out of the
+   * store and put through the shared projection. Focus freezes WHICH rows the
+   * list owns, never the shape they project into, so every consumer — the cursor,
+   * the renderer, the heading — sees one tree.
+   */
   visibleRows(): AgentLiveRow[] {
-    return this.#visibleRowIds
+    return projectFleetMenuSnapshotRows(this.#sourceRows());
+  }
+
+  #sourceRows(): AgentLiveRow[] {
+    return this.#sourceRowIds
       .map((id) => agentLiveStore.rows.get(id))
       .filter((row): row is AgentLiveRow => row !== undefined);
   }
@@ -117,13 +150,11 @@ class FleetMenuState {
   }
 
   reconcileVisibleRows(): void {
-    const rows = this.visibleRows();
-    const ids = rows.map((row) => row.id);
-    const membershipChanged =
-      ids.length !== this.#visibleRowIds.length || ids.some((id, index) => id !== this.#visibleRowIds[index]);
-    const selectionChanged = this.#normalizeSelection(rows);
+    const liveIds = this.#sourceRows().map((row) => row.id);
+    const membershipChanged = liveIds.length !== this.#sourceRowIds.length;
+    if (membershipChanged) this.#sourceRowIds = liveIds;
+    const selectionChanged = this.#normalizeSelection(this.visibleRows());
     if (!membershipChanged && !selectionChanged) return;
-    this.#visibleRowIds = ids;
     this.emitter.emit("change");
   }
 
@@ -321,16 +352,41 @@ export function renderFleetMenuRows(
 
 function projectFleetMenuRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
   return partitionEarlierWorkflowRunRows(
-    selectFleetMenuRows(withWorkflowGroupTokenTotals(compactWorkflowParentRows(sourceRows))),
+    selectFleetMenuRows(withWorkflowGroupTotals(compactWorkflowParentRows(sourceRows))),
   );
 }
 
+/**
+ * The focused `/ps` row set. Idempotent, and it has to be: the focused state
+ * projects its frozen membership here, and `renderFleetMenuRows` projects again
+ * on whatever it is handed, so a caller that passes an already-projected set
+ * must get it back unchanged.
+ */
 function projectFleetMenuSnapshotRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
   return partitionEarlierWorkflowRunRows(
-    orderAgentLiveRows(withWorkflowGroupTokenTotals(compactWorkflowParentRows(sourceRows))),
+    orderAgentLiveRows(withWorkflowGroupTotals(compactWorkflowParentRows(sourceRows))),
   );
 }
 
+/**
+ * The window of rows the focused list shows, plus what it left off each end.
+ *
+ * The window is anchored on the cursor, and only leaf rows take the cursor, so
+ * a fan-out longer than the window would scroll its own group heading off the
+ * top and leave the operator looking at a wall of `↳` rows belonging to nothing
+ * visible. The heading is not selectable, so no key can bring it back. It is
+ * therefore pinned: when the first row of the window is a member of a group
+ * whose heading sits above the window, the heading is re-shown on the line
+ * above it.
+ *
+ * It is added to the window rather than taken out of it, the way the "earlier
+ * workflow runs" label below is: `/ps` gives up no agent row (that is the
+ * passive progress panel's job), and a heading nobody can select must not cost
+ * an operator a row they can.
+ *
+ * Only the nearest ancestor heading is pinned — one line of context, so a
+ * deeply nested fan-out cannot spend the whole viewport on headings.
+ */
 function focusedFleetViewport(
   rows: AgentLiveRow[],
   selectedRowId: string | undefined,
@@ -341,11 +397,31 @@ function focusedFleetViewport(
   const selectedIndex = rows.findIndex((row) => row.id === selectedRowId);
   const start = Math.max(0, Math.min(selectedIndex < 0 ? 0 : selectedIndex, rows.length - limit));
   const end = Math.min(rows.length, start + limit);
+  const window = rows.slice(start, end);
+  const heading = groupHeadingAboveWindow(rows, start);
   return {
-    rows: rows.slice(start, end),
+    rows: heading === undefined ? window : [heading, ...window],
     hiddenBefore: selectFleetMenuLeafRows(rows.slice(0, start)).length,
     hiddenAfter: selectFleetMenuLeafRows(rows.slice(end)).length,
   };
+}
+
+/** The nearest group heading of the row at `start`, when it is above the window. */
+function groupHeadingAboveWindow(rows: AgentLiveRow[], start: number): AgentLiveRow | undefined {
+  const first = rows[start];
+  if (first === undefined) return undefined;
+  const indexById = new Map(rows.map((row, index) => [row.id, index]));
+  const seen = new Set<string>([first.id]);
+  let parentRowId = first.parentRowId;
+  while (parentRowId !== undefined && !seen.has(parentRowId)) {
+    seen.add(parentRowId);
+    const index = indexById.get(parentRowId);
+    if (index === undefined) return undefined;
+    const parent = rows[index]!;
+    if (parent.groupKind !== undefined) return index < start ? parent : undefined;
+    parentRowId = parent.parentRowId;
+  }
+  return undefined;
 }
 
 /**

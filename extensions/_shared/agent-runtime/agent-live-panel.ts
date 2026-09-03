@@ -33,7 +33,7 @@ export class AgentLivePanel {
   renderRows(rows: AgentLiveRow[], width: number): string[] {
     // Each row is one line, plus an optional `└ <tool-action>` sub-line BENEATH it
     // while a tool is executing (REQ-004): `[rowLine, subLine?]` flattened.
-    return orderAgentLiveRows(withWorkflowGroupTokenTotals(rows)).flatMap((row) => {
+    return orderAgentLiveRows(withWorkflowGroupTotals(rows)).flatMap((row) => {
       const rowLine = this.renderRow(row, width);
       const latestLine = this.#renderLatestMessageSubLine(row, width);
       const subLine = this.#renderToolActivitySubLine(row, width);
@@ -76,31 +76,130 @@ export class AgentLivePanel {
   }
 }
 
+/**
+ * THE shared row-set projection. Both surfaces that show live agents run their
+ * whole row set through this before any line is composed: the workflow progress
+ * panel (`progress-widget.ts:renderRoster`) and `/ps`
+ * (`fleet-menu.ts:projectFleetMenuRows` / `projectFleetMenuSnapshotRows`). The
+ * rules below therefore cannot live in `renderRow` — the panel renders one row
+ * per call, and "is this group worth a heading" and "which leaf comes first" are
+ * facts about the SET, not about a row.
+ *
+ * Three rules, in order:
+ *
+ * 1. Tree order: a child follows its parent, roots keep insertion order.
+ * 2. Group heading threshold: a group summary row earns its line only when it
+ *    aggregates two or more agents (`groupTotal >= 2`). A one-item group is a
+ *    heading over a single row, so it is dropped and its children are lifted to
+ *    the group's own parent — the leaf is never hidden, only its redundant
+ *    heading.
+ * 3. Group membership order: the children of a group row are ranked
+ *    working → failed → queued → done, stable inside each rank. Fan-out over
+ *    items has no chronology worth preserving, so the operator reads the live
+ *    work first and the failures next. This is deliberately scoped to group
+ *    children: a linear run's rows keep the order the run produced them, which
+ *    is the no-jump invariant of T-188 W4 (a row must not move when it finishes).
+ *
+ * Collapsing and the line budget are NOT here — they belong to the passive
+ * progress panel alone (`clampRosterLines`), because in `/ps` every leaf has to
+ * stay reachable by the cursor.
+ */
 export function orderAgentLiveRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const kept = dropSubThresholdGroupRows(rows);
   const byParent = new Map<string, AgentLiveRow[]>();
-  for (const row of rows) {
+  for (const row of kept) {
     if (row.parentRowId === undefined) continue;
     const siblings = byParent.get(row.parentRowId) ?? [];
     siblings.push(row);
     byParent.set(row.parentRowId, siblings);
   }
-  const byId = new Map(rows.map((row) => [row.id, row]));
+  const byId = new Map(kept.map((row) => [row.id, row]));
   const ordered: AgentLiveRow[] = [];
   const seen = new Set<string>();
+
+  function childrenOf(row: AgentLiveRow): AgentLiveRow[] {
+    const children = byParent.get(row.id) ?? [];
+    return row.groupKind === undefined ? children : orderGroupMembers(children);
+  }
 
   function appendTree(row: AgentLiveRow): void {
     if (seen.has(row.id)) return;
     ordered.push(row);
     seen.add(row.id);
-    for (const child of byParent.get(row.id) ?? []) appendTree(child);
+    for (const child of childrenOf(row)) appendTree(child);
   }
 
-  for (const row of rows) {
+  for (const row of kept) {
     if (row.parentRowId !== undefined && byId.has(row.parentRowId)) continue;
     appendTree(row);
   }
-  for (const row of rows) appendTree(row);
+  for (const row of kept) appendTree(row);
   return ordered;
+}
+
+/** Rank a group member by what the operator needs to see first (rule 3 above). */
+const GROUP_MEMBER_RANK: Record<AgentLiveStatus, number> = {
+  working: 0,
+  error: 1,
+  queued: 2,
+  done: 3,
+  cancelled: 3,
+};
+
+/**
+ * The display rank of a group member: 0 is what the operator sees first.
+ *
+ * Exported because a surface that has to GIVE UP rows (the passive progress
+ * roster) must give them up in the reverse of this order — a panel that puts
+ * live work on top and then collapses live work first would defeat its own
+ * ordering rule. Reading the rank instead of re-listing the statuses keeps the
+ * two from drifting apart.
+ */
+export function agentGroupMemberDisplayRank(status: AgentLiveStatus): number {
+  return GROUP_MEMBER_RANK[status] ?? 3;
+}
+
+function orderGroupMembers(members: AgentLiveRow[]): AgentLiveRow[] {
+  return members
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const rank = agentGroupMemberDisplayRank(a.row.status) - agentGroupMemberDisplayRank(b.row.status);
+      return rank !== 0 ? rank : a.index - b.index;
+    })
+    .map((entry) => entry.row);
+}
+
+/**
+ * Drop group summary rows that aggregate fewer than two agents and re-parent
+ * their children onto the nearest ancestor that SURVIVED, so the tree stays
+ * intact and no leaf disappears with the heading. The walk is a loop, not one
+ * hop: a sub-threshold group nested inside another sub-threshold group would
+ * otherwise leave its child pointing at a row nobody holds any more, and the
+ * child would silently detach from its real ancestor and render as a root.
+ */
+function dropSubThresholdGroupRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const droppedIds = new Set(
+    rows.filter((row) => row.groupKind !== undefined && (row.groupTotal ?? 0) < 2).map((row) => row.id),
+  );
+  if (droppedIds.size === 0) return rows;
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const survivingAncestorId = (parentRowId: string): string | undefined => {
+    let candidate: string | undefined = parentRowId;
+    const seen = new Set<string>();
+    while (candidate !== undefined && droppedIds.has(candidate) && !seen.has(candidate)) {
+      seen.add(candidate);
+      candidate = byId.get(candidate)?.parentRowId;
+    }
+    return candidate;
+  };
+  return rows
+    .filter((row) => !droppedIds.has(row.id))
+    .map((row) => {
+      if (row.parentRowId === undefined || !droppedIds.has(row.parentRowId)) return row;
+      const nextParentRowId = survivingAncestorId(row.parentRowId);
+      const { parentRowId: _droppedParent, ...rest } = row;
+      return nextParentRowId === undefined ? rest : { ...rest, parentRowId: nextParentRowId };
+    });
 }
 
 /**
@@ -349,8 +448,24 @@ function formatAgentGroupRowLine(row: AgentLiveRow, meta: StatusMeta, width: num
   return clampLine(`${prefix}${meta.icon} ${row.label}${right}`, width);
 }
 
-/** Sum token-bearing descendants into workflow parallel/pipeline summary rows. */
-export function withWorkflowGroupTokenTotals(rows: AgentLiveRow[]): AgentLiveRow[] {
+/**
+ * Fold what a workflow group's members already show into its summary row:
+ * token totals, and — while the group is still running — its `k/n done ·
+ * f failed` counters.
+ *
+ * The counters need folding because the journal only carries them on
+ * `group_end` (`workflow-runtime.ts:runGrouped`): until the whole fan-out
+ * settles, the group row holds no `groupCompleted` at all, so the heading read
+ * `0/9 done` next to eight member rows that already carried `✓` or `✗`. The
+ * heading is the summary of the rows under it, so it is computed from those
+ * rows whenever the run has not yet stated the answer itself.
+ *
+ * The group row's OWN counters win whenever it has them: `group_end` is
+ * authoritative about branches that never produced a live row (its
+ * `completed = total - failed`), and a surface that patches the group row
+ * directly is stating a fact about the group, not about the members on screen.
+ */
+export function withWorkflowGroupTotals(rows: AgentLiveRow[]): AgentLiveRow[] {
   const byParent = new Map<string, AgentLiveRow[]>();
   for (const row of rows) {
     if (row.parentRowId === undefined) continue;
@@ -360,9 +475,50 @@ export function withWorkflowGroupTokenTotals(rows: AgentLiveRow[]): AgentLiveRow
   }
   return rows.map((row) => {
     if (row.groupKind === undefined) return row;
-    const total = sumDescendantTokens(row.id, byParent, new Set());
-    return total === undefined ? row : { ...row, tokenCount: total };
+    const tokens = sumDescendantTokens(row.id, byParent, new Set());
+    const counts = liveGroupMemberCounts(row, byParent);
+    if (tokens === undefined && counts === undefined) return row;
+    return {
+      ...row,
+      ...(tokens === undefined ? {} : { tokenCount: tokens }),
+      ...(counts === undefined ? {} : counts),
+    };
   });
+}
+
+/**
+ * `{ groupCompleted, groupFailed }` counted off the group's own member rows, or
+ * `undefined` when the group row already answers for itself or has no members
+ * yet. Rendering a single row through the panel re-runs this projection on a
+ * one-row set, so "no members" has to leave the row untouched.
+ *
+ * A member is a leaf: a non-group descendant with no descendants of its own.
+ * The workflow journal anchor and the SDK child it launches are two rows for one
+ * agent (`compactWorkflowParentRows`), and only the deeper one is counted.
+ */
+function liveGroupMemberCounts(
+  row: AgentLiveRow,
+  byParent: Map<string, AgentLiveRow[]>,
+): { groupCompleted: number; groupFailed: number } | undefined {
+  if (row.groupCompleted !== undefined || row.groupFailed !== undefined) return undefined;
+  const members = groupMemberRows(row.id, byParent, new Set());
+  if (members.length === 0) return undefined;
+  return {
+    groupCompleted: members.filter((member) => member.status === "done").length,
+    groupFailed: members.filter((member) => member.status === "error").length,
+  };
+}
+
+function groupMemberRows(parentId: string, byParent: Map<string, AgentLiveRow[]>, seen: Set<string>): AgentLiveRow[] {
+  const members: AgentLiveRow[] = [];
+  for (const child of byParent.get(parentId) ?? []) {
+    if (seen.has(child.id)) continue;
+    seen.add(child.id);
+    const nested = groupMemberRows(child.id, byParent, seen);
+    if (nested.length > 0) members.push(...nested);
+    else if (child.groupKind === undefined) members.push(child);
+  }
+  return members;
 }
 
 function sumDescendantTokens(
@@ -438,57 +594,6 @@ function stripInlineMarkdown(value: string): string {
     .replace(/\*\*/gu, "")
     .replace(/`/gu, "")
     .trim();
-}
-
-/**
- * Verbose key=value dump for the drill overlay's `details:` line — a debug view,
- * NOT a fleet row, so the compact-grammar bans (REQ-001) do not apply here.
- */
-export function formatAgentLiveRowDetails(row: AgentLiveRow): string[] {
-  const details: string[] = [];
-  details.push(...formatLiveModelDetails(row));
-  if (row.activityState !== undefined) details.push(`activity=${row.activityState}`);
-  if (row.currentPath !== undefined) details.push(`path=${JSON.stringify(row.currentPath)}`);
-  if (row.currentTools.length > 0) details.push(`tools=${row.currentTools.join(",")}`);
-  if (row.currentToolArgs !== undefined) details.push(`args=${JSON.stringify(row.currentToolArgs)}`);
-  details.push(formatStepsDetail(row.stepCount));
-  if (row.turnCount !== undefined) details.push(formatTurnsDetail(row.turnCount));
-  if (row.tokenCount !== undefined) details.push(`tokens=in${row.tokenCount.input}/out${row.tokenCount.output}`);
-  if (row.childSessionId !== undefined) details.push(`childSession=${row.childSessionId}`);
-  if (row.resultArtifact !== undefined) details.push(`artifact=${JSON.stringify(row.resultArtifact)}`);
-  if (row.finalAnswer !== undefined) details.push(`answer=${JSON.stringify(row.finalAnswer)}`);
-  if (row.groupTotal !== undefined) {
-    const completed = row.groupCompleted ?? 0;
-    const failed = row.groupFailed ?? 0;
-    details.push(`group=${completed}/${row.groupTotal}${failed > 0 ? ` failed=${failed}` : ""}`);
-  }
-  const flags = formatFlagsDetail(row);
-  if (flags !== undefined) details.push(flags);
-  if (row.errors.length > 0) details.push(`errors=${row.errors.join("; ")}`);
-  return details;
-}
-
-function formatLiveModelDetails(row: AgentLiveRow): string[] {
-  const details: string[] = [];
-  if (row.model !== undefined) details.push(`model=${row.model}`);
-  if (row.thinking !== undefined) details.push(`/effort=${row.thinking}`);
-  return details;
-}
-
-function formatStepsDetail(stepCount: number): string {
-  return `steps=${stepCount}(events)`;
-}
-
-function formatTurnsDetail(turnCount: number): string {
-  return `turns=${turnCount}(model turns)`;
-}
-
-function formatFlagsDetail(row: AgentLiveRow): string | undefined {
-  const flags = [
-    row.isolated ? "isolated(worktree)" : undefined,
-    row.noMcp ? "no-mcp(no MCP tools)" : undefined,
-  ].filter((value): value is string => value !== undefined);
-  return flags.length > 0 ? `flags=${flags.join(",")}` : undefined;
 }
 
 // ── Tool-activity action sub-line (REQ-004, T-196) ───────────────────────────

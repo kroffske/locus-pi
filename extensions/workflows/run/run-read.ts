@@ -40,8 +40,8 @@
  *     extension take it from the journal rather than from here. Moving it into the
  *     read door would put the layout definition in the facade and leave its owner
  *     importing its own contract back.
- *   - `listWorkflowRunIds`, `readWorkflowRunSummary`,
- *     `listWorkflowRoundsForSlot`, and `readWorkflowRoundBody` all resolve through
+ *   - `listWorkflowRunIds`, `readWorkflowRunSummary`, `listWorkflowRoundsForSlot`,
+ *     `readWorkflowRoundBody`, and `readWorkflowSlotPhase` all resolve through
  *     private journal internals — the start-timestamp proof that orders runs, the
  *     per-line structural validator that separates valid rows from diagnostics,
  *     and the persisted-result disposition projection. Copying any of them here
@@ -56,6 +56,7 @@ export {
   listWorkflowRunIds,
   readWorkflowRoundBody,
   readWorkflowRunSummary,
+  readWorkflowSlotPhase,
   workflowRunDir,
   workflowRunIdFromRowId,
 } from "../runtime/workflow-journal.js";

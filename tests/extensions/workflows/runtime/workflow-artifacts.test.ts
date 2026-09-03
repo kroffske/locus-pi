@@ -838,8 +838,8 @@ describe("workflow run artifact store", () => {
     });
 
     await runtime.dsl.parallel([
-      () => runtime.dsl.agent("one", { label: "same" }),
-      () => runtime.dsl.agent("two", { label: "same" }),
+      () => runtime.dsl.agent("one", { label: "one" }),
+      () => runtime.dsl.agent("two", { label: "two" }),
     ]);
     await assert.rejects(runtime.dsl.agent("bad"), WorkflowAgentExecutionError);
 

@@ -1,4 +1,11 @@
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  matchesKey,
+  truncateToWidth,
+  visibleWidth,
+  wrapTextWithAnsi,
+  type Component,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -11,13 +18,27 @@ import type {
 } from "../../_shared/agent-runtime/agent-live-transcript.js";
 import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
 import { RenderScheduler } from "../../_shared/host/render-scheduler.js";
-import { agentLiveDisplayName, agentLiveTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
+import {
+  agentLiveDisplayName,
+  agentLiveTitle,
+  elapsedSinceStart,
+  formatDuration,
+  formatDurationCoarse,
+  statusMeta,
+} from "../../_shared/agent-runtime/agent-live-panel.js";
+import { startAgentLiveTicker, type AgentLiveTicker } from "../../_shared/agent-runtime/agent-live-tick.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { padLine, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
-type ViewerTui = CustomUiTui & { terminal?: { rows: number; columns: number; write?(data: string): void } };
+/** Pi's own TUI mode; host wrappers that omit it are treated as unknown. */
+type ViewerTuiMode = "regular" | "fullscreen";
+
+type ViewerTui = CustomUiTui & {
+  mode?: ViewerTuiMode;
+  terminal?: { rows: number; columns: number; write?(data: string): void };
+};
 
 interface NativeComponentModule {
   AssistantMessageComponent: new (
@@ -56,7 +77,6 @@ interface NativeComponentModule {
 }
 
 interface NativeInputComponent extends Component {
-  children?: Component[];
   focused: boolean;
   handleInput(data: string): void;
   dispose?(): void;
@@ -84,11 +104,63 @@ type NativeComponentEntry =
       expanded: boolean;
     };
 
-// Pi renders the default-loaded Locus footer beneath custom views.
-const PI_HOST_FOOTER_ROWS = 1;
+/**
+ * Rows Pi keeps outside the custom component, by the host's own TUI mode.
+ *
+ * Regular mode costs one: the default-loaded Locus footer drawn beneath custom
+ * views. Fullscreen costs two, and the second row is not optional. Pi mounts a
+ * custom editor component into `editorContainer`, which sits in a dock stacked
+ * under the transcript `ScrollView`, and that ScrollView is declared
+ * `{ basis: 0, grow: 1, shrink: 1, minSize: 1 }`
+ * (`@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js:624`
+ * and `:640`). The dock shrinks before the ScrollView surrenders its last row,
+ * so a component that asked for `rows - 1` had its final line clipped — and the
+ * final line is the footer carrying every control hint. Pi's own viewport was
+ * already at its bottom, so the clipped row was not somewhere the operator could
+ * scroll to; it was simply gone. Reserving the row costs one line of transcript
+ * and keeps the footer on screen.
+ */
+const PI_HOST_ROWS_BY_MODE = { regular: 1, fullscreen: 2 } as const satisfies Record<ViewerTuiMode, number>;
+/**
+ * Rows the viewer's own frame always costs: the breadcrumb divider, the live
+ * status line beneath it, and the footer divider. Every geometry threshold below
+ * is expressed against this constant rather than a literal, so the frame can
+ * gain or lose a line in one place.
+ */
+const VIEWER_CHROME_ROWS = 3;
+/** Body rows an editor must leave behind to be worth mounting in the first place. */
+const MIN_BODY_ROWS_WITH_INPUT = 2;
+/** Bound on the `parentRowId` walk behind the header breadcrumb. */
+const MAX_LOCATION_ANCESTORS = 4;
 const MOUSE_SCROLL_LINES = 3;
 const ENABLE_MOUSE_SCROLL = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE_SCROLL = "\u001b[?1000l\u001b[?1006l";
+const MOUSE_SCROLL_ENV = "LOCUS_DRILL_MOUSE";
+
+/**
+ * How the agent screen ended, for the caller that has somewhere to go back to.
+ *
+ * - `back` — the operator stepped out of this screen (Esc, or cancelling the
+ *   input editor) and expects to land where they came from. Opened from `/ps`,
+ *   that is `/ps` again on the same row.
+ * - `quit` — the screen is done rather than stepped out of: `q` leaves the agent
+ *   surface altogether and hands the editor back, and so does every close the
+ *   operator did not ask for (the viewed row retired underneath the screen).
+ *   Reopening a fleet nobody asked for would be a surprise, and with no live
+ *   rows left it would also raise a "found no live agent rows" warning.
+ */
+export type AgentViewerCloseReason = "back" | "quit";
+
+/**
+ * The part of the drill heading the live store cannot answer for. Today that is the
+ * stage: the phase lives on the run journal's `agent_start` line, not on any live row,
+ * so the caller reads it once when it opens the screen and the viewer prints it. Absent
+ * for a row with no slot, no journal, or no declared phase — the heading then omits the
+ * segment rather than inventing one.
+ */
+export interface AgentViewerLocation {
+  phase?: string;
+}
 
 export type AgentViewerCapabilityResult =
   { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
@@ -109,21 +181,26 @@ export class AgentViewerCapability {
     for (const entry of this.#components.values()) entry.component.invalidate();
   }
 
+  /**
+   * Pi's own editor, mounted whole.
+   *
+   * It used to be dismantled here: four of its nine children were kept by index
+   * and the seventh had its `render` replaced with a hand-written `↵ send`
+   * hint. That tied the drill to one Pi build's child order — a reordered or
+   * resized editor would have silently lost its input line — and printed key
+   * names the operator's keybindings may never have had. The component now goes
+   * on screen exactly as Pi draws it, hints and all; the rows that costs are
+   * paid for in the viewer's geometry instead.
+   */
   createInput(
     tui: ViewerTui,
     keybindings: ViewerKeybindings | undefined,
     onSubmit: (value: string) => void,
     onCancel: () => void,
-    theme: unknown,
   ): NativeInputComponent | undefined {
     const Input = this.module.ExtensionEditorComponent;
     if (typeof Input !== "function" || keybindings === undefined) return undefined;
     const input = new Input(tui as TUI, keybindings, "", undefined, onSubmit, onCancel, { autocompleteMaxVisible: 4 });
-    const chrome = input.children;
-    if (chrome?.length === 9) {
-      chrome[6]!.render = (width) => [padLine(themeText(theme, "muted", "↵ send · ⇧↵ newline"), width)];
-      input.children = [chrome[0]!, chrome[4]!, chrome[6]!, chrome[8]!];
-    }
     input.focused = true;
     return input;
   }
@@ -205,6 +282,8 @@ export class AgentSessionViewer implements CustomUiComponent {
   readonly #unsubscribe: () => void;
   readonly #scheduler = new RenderScheduler(() => this.tui.requestRender());
   #storeAttached = true;
+  readonly #ticker: AgentLiveTicker;
+  readonly #mouseScrollOwned: boolean;
   #releaseMouseScroll = () => {};
   #releaseFleetViewedRow = () => {};
   #unregisterGlobal = () => {};
@@ -212,30 +291,43 @@ export class AgentSessionViewer implements CustomUiComponent {
   constructor(
     private readonly execution: AgentLiveExecutionHandle,
     private readonly tui: ViewerTui,
-    private readonly done: () => void,
+    private readonly done: (reason: AgentViewerCloseReason) => void,
     private readonly capability: AgentViewerCapability,
     private readonly rounds?: DrillRoundsConfig,
     private readonly keybindings?: ViewerKeybindings,
     private readonly theme?: unknown,
+    private readonly location?: AgentViewerLocation,
   ) {
     const row = agentLiveStore.rowForExecution(execution);
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
     if (row !== undefined) this.#releaseFleetViewedRow = acquireFleetViewedRow(row.id);
     this.#selection = rounds?.active ?? 1;
-    this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
+    // Read the flag per viewer, not per module: a test or a live session can flip
+    // it between drills, and a module-level read would freeze the first value.
+    this.#mouseScrollOwned = viewerOwnsMouseScroll(this.tui.mode, process.env[MOUSE_SCROLL_ENV]);
+    if (this.#mouseScrollOwned) this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
     // Row-lifecycle handling stays synchronous and unthrottled — a vanished row
     // must close or detach the overlay at once. Only the repaint is coalesced.
     const requestRender = () => {
       if (this.#disposed) return;
       if (agentLiveStore.rowForExecution(this.execution) === undefined) {
         if (this.#isHistoricalRound()) this.#detachStore();
-        else this.#close();
+        else this.#close("quit");
         return;
       }
       this.#scheduler.request();
     };
     agentLiveStore.emitter.on("change", requestRender);
     this.#unsubscribe = () => agentLiveStore.emitter.off("change", requestRender);
+    // The store emits on state, not on time: without a heartbeat the status line's
+    // spinner and elapsed text would stand still through a long tool call. The cadence
+    // is the progress panel's own 1 Hz, so the two surfaces animate a row alike.
+    this.#ticker = startAgentLiveTicker({
+      onTick: () => {
+        if (this.#disposed) return;
+        this.#scheduler.request();
+      },
+    });
     const dispose = () => this.dispose();
     activeSessionViewers().add(dispose);
     this.#unregisterGlobal = () => activeSessionViewers().delete(dispose);
@@ -245,32 +337,66 @@ export class AgentSessionViewer implements CustomUiComponent {
     if (this.#disposed) return [];
     const safeWidth = Math.max(1, Math.floor(width));
     const row = agentLiveStore.rowForExecution(this.execution);
-    if (!this.#isHistoricalRound() && row === undefined) {
-      this.#close();
+    // A historical round is read back from the journal and needs no live row. A live
+    // round without one has nothing left to draw, so the screen closes here instead —
+    // which is why `#statusLine` below is only ever handed a row that exists.
+    let statusLine: string;
+    if (this.#isHistoricalRound()) {
+      statusLine = padLine(themeText(this.theme, "muted", `⊙ History · round ${this.#selection}`), safeWidth);
+    } else if (row === undefined) {
+      this.#close("quit");
       return [];
+    } else {
+      statusLine = this.#statusLine(row, safeWidth);
     }
     const rounds = this.roundsLabel();
-    const header = this.#dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth, "top");
+    const header = this.#dividerLine(
+      `${this.#headerLabel(row)}${rounds === "" ? "" : `  ${rounds}`}`,
+      safeWidth,
+      "top",
+    );
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
       : this.#nativeLines(row, snapshot, safeWidth);
     const hostRows = finiteTerminalRows(this.tui.terminal?.rows);
     const terminalRows =
-      hostRows === undefined ? undefined : Math.max(1, hostRows - PI_HOST_FOOTER_ROWS - viewerExternalRows());
+      hostRows === undefined
+        ? undefined
+        : Math.max(1, hostRows - piHostReservedRows(this.tui.mode) - viewerExternalRows());
+    const hadInput = this.#input !== undefined;
     let input = this.#syncInput(terminalRows);
     let inputLines = input?.render(safeWidth).map((line) => padLine(line, safeWidth)) ?? [];
-    if (terminalRows !== undefined && inputLines.length > Math.max(0, terminalRows - 4)) {
+    // What the input costs was recomputed when the editor stopped being cut down
+    // to four of its children: an empty Pi editor is 12 rows — its own frame,
+    // spacers, title, hint and one text row — and it grows from there until Pi's
+    // editor caps its own text at 30% of the terminal. So the smallest terminal
+    // that still offers input is 18 rows, not the 9 the sliced editor fit into;
+    // below that the operator gets "resize terminal for input".
+    //
+    // The floor differs by moment. Mounting an editor is only worth it when a
+    // readable body survives beside it, so the first render demands those two
+    // body rows. Once it is on screen the operator may be mid-sentence, and
+    // dropping the component would drop what they typed: from then on the body
+    // gives up its rows first, and only an editor taller than the whole grant is
+    // suppressed.
+    const minBodyRows = hadInput ? 0 : MIN_BODY_ROWS_WITH_INPUT;
+    if (
+      terminalRows !== undefined &&
+      inputLines.length > Math.max(0, terminalRows - VIEWER_CHROME_ROWS - minBodyRows)
+    ) {
       this.#suppressInputForRows(terminalRows);
       input = undefined;
       inputLines = [];
     }
-    const footer = this.#dividerLine(this.#footerLabel(row, input !== undefined), safeWidth, "bottom");
+    const footer = this.#dividerLine(this.#footerLabel(input !== undefined), safeWidth, "bottom");
     if (terminalRows === undefined) {
-      return [header, ...content.map((line) => padLine(line, safeWidth)), ...inputLines, footer];
+      return [header, statusLine, ...content.map((line) => padLine(line, safeWidth)), ...inputLines, footer];
     }
-    if (terminalRows === 1) return [header];
-    const bodyHeight = Math.max(0, terminalRows - inputLines.length - 2);
+    // Below the frame's own height there is nothing to lay out: hand back the rows
+    // that were granted, outermost first, rather than overflowing the grant.
+    if (terminalRows < VIEWER_CHROME_ROWS) return [header, statusLine].slice(0, terminalRows);
+    const bodyHeight = Math.max(0, terminalRows - inputLines.length - VIEWER_CHROME_ROWS);
     if (this.#historyOffset > 0 && this.#lastHistoryLineCount > 0) {
       this.#historyOffset +=
         content.length - this.#lastHistoryLineCount + (this.#lastBodyHeight - Math.max(1, bodyHeight));
@@ -279,20 +405,29 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#lastHistoryLineCount = content.length;
     this.#lastBodyHeight = Math.max(1, bodyHeight);
     const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => padLine(line, safeWidth));
-    return [header, ...visible, ...inputLines, footer];
+    return [header, statusLine, ...visible, ...inputLines, footer];
   }
 
   handleInput(data: string): void {
     if (this.#disposed) return;
-    if (isClose(data) || (data === "q" && this.#input === undefined)) {
-      this.#close();
+    // Esc steps back to whatever opened this screen; `q` leaves the agent surface
+    // for the editor. Both still close, so the split is only in the reason.
+    if (isClose(data)) {
+      this.#close("back");
       return;
     }
-    const mouse = mouseEvent(data);
-    if (mouse !== undefined) {
-      if (mouse === "wheel-up") this.#scrollHistory(MOUSE_SCROLL_LINES);
-      if (mouse === "wheel-down") this.#scrollHistory(-MOUSE_SCROLL_LINES);
+    if (data === "q" && this.#input === undefined) {
+      this.#close("quit");
       return;
+    }
+    if (this.#mouseScrollOwned) {
+      // Only a viewer that turned reporting on decodes and swallows the reports.
+      const mouse = mouseEvent(data);
+      if (mouse !== undefined) {
+        if (mouse === "wheel-up") this.#scrollHistory(MOUSE_SCROLL_LINES);
+        if (mouse === "wheel-down") this.#scrollHistory(-MOUSE_SCROLL_LINES);
+        return;
+      }
     }
     if (this.#matches(data, "app.tools.expand", ["ctrl+o"])) {
       this.#expandedTools = !this.#expandedTools;
@@ -308,12 +443,12 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#scrollHistory(-Math.max(1, this.#lastBodyHeight - 1));
       return;
     }
-    if (this.#input === undefined && (data === "home" || data === "\u001b[H")) {
+    if (this.#input === undefined && isNamedKey(data, "home")) {
       this.#historyOffset = Math.max(0, this.#lastHistoryLineCount - this.#lastBodyHeight);
       this.tui.requestRender();
       return;
     }
-    if (this.#input === undefined && (data === "end" || data === "\u001b[F")) {
+    if (this.#input === undefined && isNamedKey(data, "end")) {
       this.#historyOffset = 0;
       this.tui.requestRender();
       return;
@@ -321,7 +456,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     const selectedRound = this.#selectRound(data, this.#input === undefined);
     if (selectedRound !== undefined) {
       if (selectedRound === this.rounds?.active && agentLiveStore.rowForExecution(this.execution) === undefined) {
-        this.#close();
+        // The live round the operator asked for is gone: nothing to step back to.
+        this.#close("quit");
         return;
       }
       this.#selection = selectedRound;
@@ -346,6 +482,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#ticker.stop();
     this.#releaseMouseScroll();
     this.#releaseMouseScroll = () => {};
     this.#releaseFleetViewedRow();
@@ -364,11 +501,11 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#scheduler.cancel();
   }
 
-  #close(): void {
+  #close(reason: AgentViewerCloseReason): void {
     if (this.#closed) return;
     this.#closed = true;
     this.dispose();
-    this.done();
+    this.done(reason);
   }
 
   get expandedTools(): boolean {
@@ -393,6 +530,37 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#dividerLine("RUNTIME", width),
       ...transcript,
     ];
+  }
+
+  /**
+   * Where this agent sits: the workflow run, the stage its caller declared, every
+   * live ancestor from the outermost inwards, then the agent itself. Everything but
+   * the stage is read from the store rather than from any text the agent wrote; the
+   * stage is the one segment no live row carries, so the caller resolves it from the
+   * run journal and hands it in (`drill-command.ts:buildDrillLocation`). A row outside
+   * a workflow has no location to report, so it keeps the short one-segment heading it
+   * has always had, and a workflow row whose stage cannot be resolved simply omits it.
+   */
+  #headerLabel(row: AgentLiveRow | undefined): string {
+    if (row === undefined) return this.#title;
+    return [...workflowLocationSegments(row, this.location?.phase), formatAgentSessionStart(row)].join(" · ");
+  }
+
+  /**
+   * The one line that answers "is it alive": the shared `statusMeta` icon/word for
+   * this row's state plus how long it has been in flight. Both halves move on the
+   * 1 Hz ticker — the spinner frame while it is working, the elapsed text as it
+   * crosses a bucket — and calm freezes only the frame, which is why the elapsed
+   * text coarsens with it instead of counting seconds nobody is watching.
+   */
+  #statusLine(row: AgentLiveRow, width: number): string {
+    const meta = statusMeta(row.status, this.#ticker.spinnerIndex);
+    // A finished row reports its recorded duration; a live one is measured from its
+    // start, so the number keeps moving exactly while the work does.
+    const elapsedMs = row.elapsedMs ?? elapsedSinceStart(row);
+    const elapsed = this.#ticker.calm ? formatDurationCoarse(elapsedMs) : formatDuration(elapsedMs);
+    const text = `${meta.icon} ${meta.word}${elapsed === "" ? "" : ` · ${elapsed}`}`;
+    return padLine(themeText(this.theme, meta.color, text), width);
   }
 
   #dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
@@ -431,6 +599,10 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#input?.dispose?.();
       this.#input = undefined;
       this.#inputSuppressedAtRows = undefined;
+      // The notice describes an editor that is no longer there. `message queued`
+      // outliving the child that was going to read it told the operator a message
+      // was still in flight after the row had settled.
+      this.#inputNotice = undefined;
       return undefined;
     }
     if (this.#inputSuppressedAtRows !== undefined) {
@@ -441,8 +613,9 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.tui,
       this.keybindings,
       (value) => this.#submitInput(value),
-      () => this.#close(),
-      this.theme,
+      // Cancelling the editor is the same Esc the operator would press with no
+      // editor on screen, so it steps back the same way.
+      () => this.#close("back"),
     );
     return this.#input;
   }
@@ -486,15 +659,45 @@ export class AgentSessionViewer implements CustomUiComponent {
     return fallbacks.includes(data);
   }
 
-  #footerLabel(row: AgentLiveRow | undefined, hasInput: boolean): string {
+  /** Controls only. The agent's state moved to the status line under the header. */
+  #footerLabel(hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
-    const controls = hasInput
-      ? "wheel/pgup/pgdn history · enter send"
-      : this.#inputSuppressedAtRows === undefined
-        ? "pgup/pgdn history"
-        : "resize terminal for input";
-    const status = this.#isHistoricalRound() ? "history" : (row?.status ?? "unavailable");
-    return `STATUS: ${status} · ${notice}esc close · ${controls} · ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`;
+    const history = this.#historyControls();
+    const controls = [
+      "esc close",
+      ...(history === "" ? [] : [history]),
+      ...(hasInput ? ["enter send"] : []),
+      ...(!hasInput && this.#inputSuppressedAtRows !== undefined ? ["resize terminal for input"] : []),
+      `ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`,
+    ];
+    return `${notice}${controls.join(" · ")}`;
+  }
+
+  /**
+   * What actually moves this screen's history, which is not the same in both host
+   * modes and does not depend on whether an editor is mounted.
+   *
+   * The wheel half was previously offered only next to an editor, so a settled row
+   * under `LOCUS_DRILL_MOUSE=1` captured wheel reports while advertising keys alone.
+   *
+   * The key half is absent in fullscreen because it does not work there, and this
+   * component cannot make it work. `TuiAltScreen` registers `handleViewportInput`
+   * as a TUI-wide input listener in its own constructor
+   * (`@earendil-works/pi-tui/dist/tui-alt-screen.js:77`), and that listener answers
+   * `{ consume: true }` for `tui.altScreen.pageUp`, `pageDown`, `top` and `bottom` —
+   * bound by default to PageUp, PageDown, Home and End
+   * (`@earendil-works/pi-tui/dist/keybindings.js:91-116`), with the upstream comment
+   * saying they "intentionally shadow the unmodified editor bindings in fullscreen
+   * mode". Input listeners run to completion before `handleTerminalInput` ever
+   * reaches the focused component (`@earendil-works/pi-tui/dist/tui.js:557-563`), and
+   * the alt-screen listener is registered before any component exists, so no
+   * ordering, focus or overlay trick puts this viewer in front of it. The keys are
+   * still handled below: an operator who rebinds those four `tui.altScreen.*`
+   * actions gets them back, and regular mode never had the problem.
+   */
+  #historyControls(): string {
+    if (this.#mouseScrollOwned) return "wheel/pgup/pgdn history";
+    return this.tui.mode === "fullscreen" ? "" : "pgup/pgdn history";
   }
 }
 
@@ -640,7 +843,50 @@ function dividerLine(label: string, width: number, style: DividerStyle = "sectio
   return `${left}${fitted} ${fill.repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}`;
 }
 
-function themeText(theme: unknown, tone: "muted", text: string): string {
+/**
+ * The run location of one live row, outermost segment first: `workflow <run>`, the
+ * declared stage, then each live ancestor's own heading. The chain walks `parentRowId`
+ * through `agentLiveStore.rows` and stops at the first row carrying a `groupKind` — a
+ * group is the outermost live ancestor a workflow child has, and stopping there
+ * keeps the walk bounded even if a future producer nests rows more deeply.
+ *
+ * Three deliberate choices:
+ *
+ * - Ancestors are read as ROWS (their own title/label), never by decomposing a
+ *   `slotKey` or a row id. The phase is embedded in both as a string joined by an
+ *   unprintable unit separator (`workflow-runtime.ts:workflowSlotKey`); a heading
+ *   built by splitting those keys breaks silently the day the key format moves.
+ * - The stage therefore arrives as an argument, resolved from the run journal by the
+ *   caller. No live row states it: the group row is named `<kind> (<total>)`, the
+ *   anchor row's label unwraps to exactly the child's own label (and is skipped here
+ *   as a repetition), and the bridge gives a child no title at all.
+ * - The store is the authority, not the panel projection:
+ *   `compactWorkflowParentRows` re-parents a child onto the group for rendering,
+ *   but it is a pure projection — here the anchor is still the child's parent and
+ *   is worth naming when it says something the leaf does not.
+ */
+function workflowLocationSegments(row: AgentLiveRow, phase?: string): string[] {
+  if (row.workflowRunId === undefined) return [];
+  const leafTitle = agentLiveTitle(row);
+  const stage = phase !== undefined && phase.trim() !== "" ? phase.trim() : undefined;
+  const ancestors: string[] = [];
+  const visited = new Set<string>([row.id]);
+  let parentId = row.parentRowId;
+  while (parentId !== undefined && !visited.has(parentId) && ancestors.length < MAX_LOCATION_ANCESTORS) {
+    visited.add(parentId);
+    const parent = agentLiveStore.rows.get(parentId);
+    if (parent === undefined) break;
+    const title = agentLiveTitle(parent);
+    // An anchor row repeats its child's own name; one segment per distinct name,
+    // and never a second spelling of the stage the caller already named.
+    if (title !== "" && title !== leafTitle && title !== stage && !ancestors.includes(title)) ancestors.push(title);
+    if (parent.groupKind !== undefined) break;
+    parentId = parent.parentRowId;
+  }
+  return [`workflow ${row.workflowRunId}`, ...(stage === undefined ? [] : [stage]), ...ancestors.reverse()];
+}
+
+function themeText(theme: unknown, tone: string, text: string): string {
   if (!isRecord(theme) || typeof theme.fg !== "function") return text;
   return String(theme.fg.call(theme, tone, text));
 }
@@ -655,6 +901,31 @@ function finiteTerminalRows(value: number | undefined): number | undefined {
   return value === undefined || !Number.isFinite(value) ? undefined : Math.max(1, Math.floor(value));
 }
 
+/** Rows Pi keeps for itself; an unreported mode is laid out like regular, as before. */
+function piHostReservedRows(mode: ViewerTuiMode | undefined): number {
+  return mode === "fullscreen" ? PI_HOST_ROWS_BY_MODE.fullscreen : PI_HOST_ROWS_BY_MODE.regular;
+}
+
+/**
+ * Home and End as terminals actually send them, not as one terminal sends them.
+ *
+ * Matching only `ESC[H` / `ESC[F` left both keys dead under `tmux-256color`, whose
+ * terminfo says `khome=\E[1~` and `kend=\E[4~`, and under `xterm-256color`, which
+ * sends `ESC O H` / `ESC O F`. `matchesKey` carries pi-tui's whole legacy and Kitty
+ * table for the key (`@earendil-works/pi-tui/dist/keys.js:241-242`), so every
+ * encoding a host may hand over resolves the same way. The bare name stays first
+ * for hosts and tests that pass a parsed key name rather than bytes.
+ */
+function isNamedKey(data: string, key: "home" | "end"): boolean {
+  if (data === key) return true;
+  try {
+    return matchesKey(data, key);
+  } catch {
+    // A host with a different key table must not take the screen down over a keypress.
+    return false;
+  }
+}
+
 function writeTerminalControl(tui: ViewerTui, sequence: string): boolean {
   const terminal = tui.terminal;
   if (terminal?.write === undefined) return false;
@@ -664,6 +935,16 @@ function writeTerminalControl(tui: ViewerTui, sequence: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The drill leaves the terminal's mouse alone by default, so native selection and
+ * the host scrollback keep working; `LOCUS_DRILL_MOUSE=1` restores wheel capture.
+ * Fail-closed: fullscreen (Pi owns the mouse there) and an unknown or missing mode
+ * write nothing even with the flag set.
+ */
+function viewerOwnsMouseScroll(mode: ViewerTuiMode | undefined, flag: string | undefined): boolean {
+  return flag === "1" && mode === "regular";
 }
 
 function acquireTerminalMouseScroll(tui: ViewerTui): () => void {
