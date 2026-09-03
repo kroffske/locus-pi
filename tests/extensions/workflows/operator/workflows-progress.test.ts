@@ -14,6 +14,7 @@ import {
   renderAgentLiveRowsText,
 } from "../../../../extensions/workflows/operator/progress-widget.js";
 import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import { acquireFleetViewedRow, fleetMenuState } from "../../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import {
@@ -588,6 +589,60 @@ describe("workflow progress widget", () => {
       expect(text).toContain("2/3 done");
       expect(text).toContain("1 failed");
       expect(text).toContain("broken item");
+      component.dispose();
+    });
+
+    it("counts the group heading up while the fan-out is still running", () => {
+      // The journal states `groupCompleted` only on `group_end`, so a heading that
+      // waited for it sat at `0/9 done` for the whole run while eight of its nine
+      // member rows already carried `✓` or `✗` right underneath it — and the
+      // failed count did not appear at all until the group settled. The heading is
+      // the summary of those rows, so it counts them.
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-running", 40);
+      const labels = Array.from({ length: 9 }, (_unused, index) => `running item ${index}`);
+      const ids = startFanOut(component, "card-running", labels);
+      ids.forEach((id, index) => {
+        const status: AgentLiveStatus = index === 0 ? "error" : index < 7 ? "done" : "working";
+        agentLiveStore.patch(id, { status });
+      });
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("parallel (9)");
+      expect(text).toContain("6/9 done");
+      expect(text).toContain("1 failed");
+      // The group row itself is still running: nothing has settled it.
+      expect(text).not.toContain("9/9 done");
+      component.dispose();
+    });
+
+    it("keeps the settled group counters the run reported over the member rows", () => {
+      // `group_end` answers for branches that never produced a live row at all
+      // (`completed = total - failed`), so once the run has stated the outcome the
+      // heading repeats it instead of recounting the rows on screen.
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-settled");
+      const ids = startFanOut(component, "card-settled", ["kept item", "lost item"]);
+      agentLiveStore.patch(ids[0]!, { status: "working" });
+      agentLiveStore.patch(ids[1]!, { status: "working" });
+      pushProgress(
+        component,
+        line({
+          kind: "group_end",
+          status: "completed",
+          groupId: "fan-1",
+          groupKind: "parallel",
+          groupTotal: 2,
+          groupCompleted: 2,
+          groupFailed: 0,
+          durationMs: 3_000,
+          ts: 90,
+          runId: "card-settled",
+        }),
+      );
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("2/2 done");
       component.dispose();
     });
 

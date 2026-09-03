@@ -5,7 +5,7 @@ import {
   AgentLivePanel,
   compactWorkflowParentRows,
   orderAgentLiveRows,
-  withWorkflowGroupTokenTotals,
+  withWorkflowGroupTotals,
   type AgentLiveThemeLike,
 } from "./agent-live-panel.js";
 import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
@@ -330,16 +330,35 @@ export function renderFleetMenuRows(
 
 function projectFleetMenuRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
   return partitionEarlierWorkflowRunRows(
-    selectFleetMenuRows(withWorkflowGroupTokenTotals(compactWorkflowParentRows(sourceRows))),
+    selectFleetMenuRows(withWorkflowGroupTotals(compactWorkflowParentRows(sourceRows))),
   );
 }
 
 function projectFleetMenuSnapshotRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
   return partitionEarlierWorkflowRunRows(
-    orderAgentLiveRows(withWorkflowGroupTokenTotals(compactWorkflowParentRows(sourceRows))),
+    orderAgentLiveRows(withWorkflowGroupTotals(compactWorkflowParentRows(sourceRows))),
   );
 }
 
+/**
+ * The window of rows the focused list shows, plus what it left off each end.
+ *
+ * The window is anchored on the cursor, and only leaf rows take the cursor, so
+ * a fan-out longer than the window would scroll its own group heading off the
+ * top and leave the operator looking at a wall of `↳` rows belonging to nothing
+ * visible. The heading is not selectable, so no key can bring it back. It is
+ * therefore pinned: when the first row of the window is a member of a group
+ * whose heading sits above the window, the heading is re-shown on the line
+ * above it.
+ *
+ * It is added to the window rather than taken out of it, the way the "earlier
+ * workflow runs" label below is: `/ps` gives up no agent row (that is the
+ * passive progress panel's job), and a heading nobody can select must not cost
+ * an operator a row they can.
+ *
+ * Only the nearest ancestor heading is pinned — one line of context, so a
+ * deeply nested fan-out cannot spend the whole viewport on headings.
+ */
 function focusedFleetViewport(
   rows: AgentLiveRow[],
   selectedRowId: string | undefined,
@@ -350,11 +369,31 @@ function focusedFleetViewport(
   const selectedIndex = rows.findIndex((row) => row.id === selectedRowId);
   const start = Math.max(0, Math.min(selectedIndex < 0 ? 0 : selectedIndex, rows.length - limit));
   const end = Math.min(rows.length, start + limit);
+  const window = rows.slice(start, end);
+  const heading = groupHeadingAboveWindow(rows, start);
   return {
-    rows: rows.slice(start, end),
+    rows: heading === undefined ? window : [heading, ...window],
     hiddenBefore: selectFleetMenuLeafRows(rows.slice(0, start)).length,
     hiddenAfter: selectFleetMenuLeafRows(rows.slice(end)).length,
   };
+}
+
+/** The nearest group heading of the row at `start`, when it is above the window. */
+function groupHeadingAboveWindow(rows: AgentLiveRow[], start: number): AgentLiveRow | undefined {
+  const first = rows[start];
+  if (first === undefined) return undefined;
+  const indexById = new Map(rows.map((row, index) => [row.id, index]));
+  const seen = new Set<string>([first.id]);
+  let parentRowId = first.parentRowId;
+  while (parentRowId !== undefined && !seen.has(parentRowId)) {
+    seen.add(parentRowId);
+    const index = indexById.get(parentRowId);
+    if (index === undefined) return undefined;
+    const parent = rows[index]!;
+    if (parent.groupKind !== undefined) return index < start ? parent : undefined;
+    parentRowId = parent.parentRowId;
+  }
+  return undefined;
 }
 
 /**

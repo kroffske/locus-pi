@@ -673,9 +673,9 @@ describe("agent fleet menu", () => {
   });
 
   it("keeps the group heading on screen in /ps while the fan-out fits the viewport", () => {
-    // The heading is rendered by the focused selector too — with eight items it
-    // is the ninth row and the eight-row viewport scrolls it off, which is the
-    // viewport's own limit and not a projection that drops group rows.
+    // The heading is rendered by the focused selector too, straight from the
+    // shared projection while the whole group fits the viewport. A fan-out that
+    // does NOT fit is the next test: there the heading is pinned back on.
     const group = agentLiveStore.begin({
       id: "workflow:ps-small:group:parallel-3",
       agentName: "workflow-group",
@@ -711,6 +711,74 @@ describe("agent fleet menu", () => {
     expect(rendered.some((frameLine) => frameLine.startsWith("> "))).toBe(true);
     // The heading itself is never the selected row.
     expect(rendered.find((frameLine) => frameLine.startsWith("> "))).not.toContain("parallel (3)");
+    component.dispose();
+  });
+
+  it("pins the group heading in /ps when the fan-out is longer than the viewport", () => {
+    // Nine leaves against an eight-row viewport. The window is anchored on the
+    // cursor and only leaves take the cursor, so the heading — the row that says
+    // WHICH fan-out these `↳` rows belong to and how it is going — scrolled off
+    // the top and no key could bring it back: `/ps` showed a wall of members
+    // under nothing. It is pinned above the window instead, and pinning it costs
+    // no member row.
+    const group = agentLiveStore.begin({
+      id: "workflow:ps-long:group:parallel-9",
+      agentName: "workflow-group",
+      label: "parallel (9)",
+      groupKind: "parallel",
+      groupTotal: 9,
+      workflowRunId: "ps-long",
+    });
+    agentLiveStore.patch(group.id, { status: "working" });
+    const members = Array.from({ length: 9 }, (_unused, index) => {
+      const member = agentLiveStore.begin({
+        id: `ps-long-item-${index}`,
+        parentRowId: group.id,
+        agentName: "worker",
+        label: `long item ${index} of 9`,
+        title: `long item ${index} of 9`,
+        workflowRunId: "ps-long",
+      });
+      const status: AgentLiveStatus = index === 0 ? "error" : index < 4 ? "done" : "working";
+      return agentLiveStore.patch(member.id, { status })!;
+    });
+
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    // The heading is on screen wherever the cursor stands, including the top of
+    // the list and the bottom of it, and it counts the members the operator can
+    // see: three done, one failed, while the group itself is still running.
+    const visited = new Set<string>([fleetMenuState.selectedRowId!]);
+    for (let step = 0; step < members.length + 2; step += 1) {
+      const frame = component.render(120).join("\n");
+      expect(frame).toContain("parallel (9)");
+      expect(frame).toContain("3/9 done");
+      expect(frame).toContain("1 failed");
+      component.handleInput("down");
+      visited.add(fleetMenuState.selectedRowId!);
+    }
+    for (let step = 0; step < members.length + 2; step += 1) {
+      component.handleInput("up");
+      expect(component.render(120).join("\n")).toContain("parallel (9)");
+      visited.add(fleetMenuState.selectedRowId!);
+      expect(fleetMenuState.selectedRowId).not.toBe(group.id);
+    }
+    // Every leaf is still reachable, and the heading is never selected.
+    expect([...visited].sort()).toEqual(members.map((member) => member.id).sort());
+
+    // The selected row is inside the window the heading was pinned onto: the
+    // heading is extra chrome, not a member row given up to make room.
+    const frame = component.render(120);
+    expect(frame.find((frameLine) => frameLine.startsWith("> "))).toBeDefined();
+    expect(frame.find((frameLine) => frameLine.startsWith("> "))).not.toContain("parallel (9)");
+    expect(frame.filter((frameLine) => frameLine.includes("long item"))).toHaveLength(8);
     component.dispose();
   });
 

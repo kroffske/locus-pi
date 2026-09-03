@@ -33,7 +33,7 @@ export class AgentLivePanel {
   renderRows(rows: AgentLiveRow[], width: number): string[] {
     // Each row is one line, plus an optional `└ <tool-action>` sub-line BENEATH it
     // while a tool is executing (REQ-004): `[rowLine, subLine?]` flattened.
-    return orderAgentLiveRows(withWorkflowGroupTokenTotals(rows)).flatMap((row) => {
+    return orderAgentLiveRows(withWorkflowGroupTotals(rows)).flatMap((row) => {
       const rowLine = this.renderRow(row, width);
       const latestLine = this.#renderLatestMessageSubLine(row, width);
       const subLine = this.#renderToolActivitySubLine(row, width);
@@ -448,8 +448,24 @@ function formatAgentGroupRowLine(row: AgentLiveRow, meta: StatusMeta, width: num
   return clampLine(`${prefix}${meta.icon} ${row.label}${right}`, width);
 }
 
-/** Sum token-bearing descendants into workflow parallel/pipeline summary rows. */
-export function withWorkflowGroupTokenTotals(rows: AgentLiveRow[]): AgentLiveRow[] {
+/**
+ * Fold what a workflow group's members already show into its summary row:
+ * token totals, and — while the group is still running — its `k/n done ·
+ * f failed` counters.
+ *
+ * The counters need folding because the journal only carries them on
+ * `group_end` (`workflow-runtime.ts:runGrouped`): until the whole fan-out
+ * settles, the group row holds no `groupCompleted` at all, so the heading read
+ * `0/9 done` next to eight member rows that already carried `✓` or `✗`. The
+ * heading is the summary of the rows under it, so it is computed from those
+ * rows whenever the run has not yet stated the answer itself.
+ *
+ * The group row's OWN counters win whenever it has them: `group_end` is
+ * authoritative about branches that never produced a live row (its
+ * `completed = total - failed`), and a surface that patches the group row
+ * directly is stating a fact about the group, not about the members on screen.
+ */
+export function withWorkflowGroupTotals(rows: AgentLiveRow[]): AgentLiveRow[] {
   const byParent = new Map<string, AgentLiveRow[]>();
   for (const row of rows) {
     if (row.parentRowId === undefined) continue;
@@ -459,9 +475,50 @@ export function withWorkflowGroupTokenTotals(rows: AgentLiveRow[]): AgentLiveRow
   }
   return rows.map((row) => {
     if (row.groupKind === undefined) return row;
-    const total = sumDescendantTokens(row.id, byParent, new Set());
-    return total === undefined ? row : { ...row, tokenCount: total };
+    const tokens = sumDescendantTokens(row.id, byParent, new Set());
+    const counts = liveGroupMemberCounts(row, byParent);
+    if (tokens === undefined && counts === undefined) return row;
+    return {
+      ...row,
+      ...(tokens === undefined ? {} : { tokenCount: tokens }),
+      ...(counts === undefined ? {} : counts),
+    };
   });
+}
+
+/**
+ * `{ groupCompleted, groupFailed }` counted off the group's own member rows, or
+ * `undefined` when the group row already answers for itself or has no members
+ * yet. Rendering a single row through the panel re-runs this projection on a
+ * one-row set, so "no members" has to leave the row untouched.
+ *
+ * A member is a leaf: a non-group descendant with no descendants of its own.
+ * The workflow journal anchor and the SDK child it launches are two rows for one
+ * agent (`compactWorkflowParentRows`), and only the deeper one is counted.
+ */
+function liveGroupMemberCounts(
+  row: AgentLiveRow,
+  byParent: Map<string, AgentLiveRow[]>,
+): { groupCompleted: number; groupFailed: number } | undefined {
+  if (row.groupCompleted !== undefined || row.groupFailed !== undefined) return undefined;
+  const members = groupMemberRows(row.id, byParent, new Set());
+  if (members.length === 0) return undefined;
+  return {
+    groupCompleted: members.filter((member) => member.status === "done").length,
+    groupFailed: members.filter((member) => member.status === "error").length,
+  };
+}
+
+function groupMemberRows(parentId: string, byParent: Map<string, AgentLiveRow[]>, seen: Set<string>): AgentLiveRow[] {
+  const members: AgentLiveRow[] = [];
+  for (const child of byParent.get(parentId) ?? []) {
+    if (seen.has(child.id)) continue;
+    seen.add(child.id);
+    const nested = groupMemberRows(child.id, byParent, seen);
+    if (nested.length > 0) members.push(...nested);
+    else if (child.groupKind === undefined) members.push(child);
+  }
+  return members;
 }
 
 function sumDescendantTokens(

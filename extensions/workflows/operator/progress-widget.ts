@@ -14,7 +14,7 @@ import {
   orderAgentLiveRows,
   selectAgentLiveRowsForParents,
   truncate,
-  withWorkflowGroupTokenTotals,
+  withWorkflowGroupTotals,
 } from "../../_shared/agent-runtime/agent-live-panel.js";
 import {
   fleetMenuState,
@@ -436,10 +436,10 @@ export class WorkflowProgressComponent implements CustomUiComponent {
    * roster collapsed to fit a budget, because only here is nothing selectable.
    */
   private renderRoster(rows: AgentLiveRow[], width: number, budget: number): string[] {
-    // `withWorkflowGroupTokenTotals` before the ordering, exactly as `/ps` and
+    // `withWorkflowGroupTotals` before the ordering, exactly as `/ps` and
     // `AgentLivePanel.renderRows` do it: without it the same group heading would
     // report tokens on one surface and `tok —` on the other.
-    const projected = orderAgentLiveRows(withWorkflowGroupTokenTotals(rows));
+    const projected = orderAgentLiveRows(withWorkflowGroupTotals(rows));
     const leaves = selectFleetMenuLeafRows(projected);
     const sourceRunId = this.options.continuationSourceRunId;
     const previousLeaves = sourceRunId === undefined ? [] : leaves.filter((row) => row.workflowRunId === sourceRunId);
