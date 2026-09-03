@@ -88,9 +88,18 @@ class FleetMenuState {
     this.emitter.emit("change");
   }
 
-  beginFocus(rows: AgentLiveRow[]): void {
+  /**
+   * `initialRowId` is the seed a reopened menu asks for — the row the operator
+   * drilled into. It is honoured only while that row is still a selectable leaf;
+   * a row retired during the drill falls back to the usual preferred row.
+   */
+  beginFocus(rows: AgentLiveRow[], initialRowId?: string): void {
     this.#visibleRowIds = projectFleetMenuSnapshotRows(rows).map((row) => row.id);
-    this.#normalizeSelection(this.visibleRows());
+    const visibleRows = this.visibleRows();
+    if (initialRowId !== undefined && selectFleetMenuLeafRows(visibleRows).some((row) => row.id === initialRowId)) {
+      this.#selectedRowId = initialRowId;
+    }
+    this.#normalizeSelection(visibleRows);
   }
 
   setVisibleRows(rows: AgentLiveRow[]): void {

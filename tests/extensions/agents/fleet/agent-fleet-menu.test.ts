@@ -964,4 +964,102 @@ describe("agent fleet menu", () => {
     expect(h.customOptions).toEqual([]);
     panel.dispose();
   });
+
+  it("reopens /ps on the drilled row after Escape closes the agent screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const first = row("drill-return-a", "first fleet row");
+    const second = row("drill-return-b", "second fleet row");
+    const customCallFrameStart: number[] = [];
+    const baseCustom = h.ctx.ui.custom!;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCallFrameStart.push(h.customRenderFrames.length);
+      return baseCustom.call(h.ctx.ui, factory, options) as Promise<T>;
+    };
+    // fleet: down, enter → agent screen: escape → fleet again: escape.
+    h.customInputQueue.push("down", "enter", "escape", "escape");
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(customCallFrameStart).toHaveLength(3);
+    const reopened = h.customRenderFrames[customCallFrameStart[2]!];
+    // The cursor is on the row the operator drilled, not on the first working row.
+    expect(reopened?.find((line) => line.startsWith("> "))).toContain(second.displayName!);
+    // Membership is a fresh snapshot, so the rest of the fleet comes back too.
+    expect(reopened?.join("\n")).toContain(first.displayName!);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+  });
+
+  it("reopens on the usual preferred row when the drilled row retires during the drill", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const first = row("retire-return-a", "surviving fleet row");
+    const second = row("retire-return-b", "retiring fleet row");
+    const customCallFrameStart: number[] = [];
+    const baseCustom = h.ctx.ui.custom!;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCallFrameStart.push(h.customRenderFrames.length);
+      const result = (await baseCustom.call(h.ctx.ui, factory, options)) as T;
+      // The agent screen has just closed; its row is gone before the fleet reopens.
+      if (customCallFrameStart.length === 2) agentLiveStore.removeRows([second.id]);
+      return result;
+    };
+    h.customInputQueue.push("down", "enter", "escape", "escape");
+
+    await expect(h.commands.get("ps")!.handler("", h.ctx)).resolves.toBeUndefined();
+
+    expect(customCallFrameStart).toHaveLength(3);
+    const reopened = h.customRenderFrames[customCallFrameStart[2]!];
+    expect(reopened?.find((line) => line.startsWith("> "))).toContain(first.displayName!);
+    expect(reopened?.join("\n")).not.toContain(second.displayName!);
+  });
+
+  it("returns /ps <target> to the editor without opening the fleet", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const target = row("direct-target-row", "direct drill target");
+    h.customInputQueue.push("escape");
+
+    await h.commands.get("ps")!.handler(target.id, h.ctx);
+
+    // One surface only: the agent screen. A named target never came from the fleet.
+    expect(h.customOptions).toHaveLength(1);
+    expect(h.customRenderFrames.at(-1)?.[0]).toContain(target.displayName!);
+    expect(fleetMenuState.focused).toBe(false);
+  });
+
+  it("does not reopen /ps when the session resets during the drill", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    row("epoch-return-a", "first epoch row");
+    row("epoch-return-b", "second epoch row");
+    let customCalls = 0;
+    const baseCustom = h.ctx.ui.custom!;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCalls += 1;
+      const result = (await baseCustom.call(h.ctx.ui, factory, options)) as T;
+      if (customCalls === 2) {
+        // A reload while the agent screen was open: the menu it came from is gone,
+        // and rows of the replacement session are not a reason to bring it back.
+        await emit(h, "session_start");
+        row("epoch-return-c", "row after reload");
+      }
+      return result;
+    };
+    // No third Escape: a reopened menu would exhaust the queue and throw.
+    h.customInputQueue.push("down", "enter", "escape");
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(customCalls).toBe(2);
+    expect(h.customInputQueue).toHaveLength(0);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+  });
 });

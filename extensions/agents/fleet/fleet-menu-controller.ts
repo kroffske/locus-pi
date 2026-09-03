@@ -1,7 +1,7 @@
 /**
  * extensions/agents/fleet/fleet-menu-controller.ts — the interactive fleet (`/ps` with no
  * target). Owns the per-session ownership epoch that keeps a late menu result from
- * acting on a reloaded session, and the open → select → drill/stop/close flow.
+ * acting on a reloaded session, and the open → select → drill → back → select loop.
  */
 import { agentLiveStore } from "../../_shared/agent-runtime/agent-sdk-host.js";
 import {
@@ -43,7 +43,7 @@ export function createAgentFleetMenuController(agentSessionAuthority: AgentSessi
     fleetMenuState.setFocused(false);
     fleetMenuState.setVisibleRows([]);
   };
-  const open = (ctx: ExtensionContext): Promise<void> => {
+  const open = async (ctx: ExtensionContext): Promise<void> => {
     invalidateFleetMenuOwnership();
     const owner = Symbol("fleet-menu-owner");
     const epoch = fleetMenuEpoch;
@@ -62,9 +62,29 @@ export function createAgentFleetMenuController(agentSessionAuthority: AgentSessi
       isCurrent: () => currentFleetMenuOwner === owner && fleetMenuEpoch === epoch,
       finish,
     };
-    return openFleetMenu(ctx, fleetFocusComponents, ownership, agentSessionAuthority).finally(finish);
+    try {
+      let initialRowId: string | undefined;
+      for (;;) {
+        const outcome = await openFleetMenu(ctx, fleetFocusComponents, ownership, agentSessionAuthority, initialRowId);
+        if (outcome === undefined) return;
+        // The drill released ownership before it opened (the agent screen must
+        // own the passive panel alone), so the loop reclaims it here. A reload
+        // or a competing `/ps` moved the epoch on: that session is gone and the
+        // operator gets no menu back.
+        if (fleetMenuEpoch !== epoch) return;
+        currentFleetMenuOwner = owner;
+        initialRowId = outcome.drilledRowId;
+      }
+    } finally {
+      finish();
+    }
   };
   return { open, invalidate: invalidateFleetMenuOwnership };
+}
+
+/** What the caller must do next: nothing, or reopen the menu on the row just drilled. */
+interface FleetMenuOutcome {
+  drilledRowId: string;
 }
 
 async function openFleetMenu(
@@ -72,7 +92,8 @@ async function openFleetMenu(
   fleetFocusComponents: Set<FleetFocusComponent>,
   ownership: { isCurrent(): boolean; finish(): void },
   agentSessionAuthority: AgentSessionAuthority,
-): Promise<void> {
+  initialRowId?: string,
+): Promise<FleetMenuOutcome | undefined> {
   if (ctx.mode !== "tui") {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
       type: "WARN",
@@ -107,7 +128,7 @@ async function openFleetMenu(
     ctx.ui.notify("/ps found no live agent rows.", "warning");
     return;
   }
-  fleetMenuState.beginFocus(rows());
+  fleetMenuState.beginFocus(rows(), initialRowId);
   fleetMenuState.setFocused(true);
   let component: FleetFocusComponent | undefined;
   const disposeComponent = (): void => {
@@ -166,8 +187,12 @@ async function openFleetMenu(
       return;
     }
     if (action.kind === "drill") {
+      // Ownership is dropped before the agent screen opens: its passive panel
+      // must show the viewed agent alone, and dropping ownership is what clears
+      // the fleet cursor — so the row to come back to travels in the outcome.
       ownership.finish();
       await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: action.rowId }, agentSessionAuthority);
+      return { drilledRowId: action.rowId };
     }
   } finally {
     disposeComponent();
