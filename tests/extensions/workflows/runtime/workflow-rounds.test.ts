@@ -177,6 +177,123 @@ describe("REQ-009 W1 — store slot dedupe", () => {
     expect(ends[1]?.usage).toEqual({ input: 100, output: 40, totalTokens: 140, costTotal: 0 });
   });
 
+  it("bridge: three mapped members keep one authored label but use three live rows", async () => {
+    const root = tempProject();
+    const { createHarness } = await import("../../../test-harness.js");
+    const h = createHarness(root, { sessionId: "wf-parent-mapped" });
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      workflowRunId: "mapped-live-rows",
+      createExecutor: (opts) =>
+        createAgentSdkSessionExecutor({
+          createSession: async () => ({ session: fakeSession({ input: 100, output: 40 }) }),
+          turnTimeoutMs: 5000,
+          ...(opts.live !== undefined ? { live: opts.live } : {}),
+          ...(opts.onLiveExecution !== undefined ? { onLiveExecution: opts.onLiveExecution } : {}),
+        }),
+    });
+    const runtime = createWorkflowRuntime({ runId: "mapped-live-rows", agentRunner: runner });
+
+    await expect(
+      runtime.dsl.parallel(
+        ["a", "b", "c"].map(
+          (item) => () =>
+            runtime.dsl.agent(`verify ${item}`, { agent: "reviewer", label: "verify mapped", phase: "verify" }),
+        ),
+      ),
+    ).resolves.toEqual(["done", "done", "done"]);
+
+    const childRows = [...agentLiveStore.rows.values()].filter((row) =>
+      row.id.startsWith("workflow-agent:mapped-live-rows:"),
+    );
+    expect(childRows).toHaveLength(3);
+    expect(childRows.every((row) => row.label === "verify mapped")).toBe(true);
+    expect(childRows.map((row) => row.round)).toEqual([1, 1, 1]);
+    expect(new Set(childRows.map((row) => row.slotKey)).size).toBe(3);
+    expect(new Set(childRows.map((row) => row.id)).size).toBe(3);
+
+    const starts = runtime.getJournal().filter((line) => line.kind === "agent_start");
+    const ends = runtime.getJournal().filter((line) => line.kind === "agent_end");
+    expect(new Set(starts.map((line) => line.slotKey)).size).toBe(3);
+    expect(new Set(ends.map((line) => line.slotKey)).size).toBe(3);
+    expect(ends.map((line) => line.round)).toEqual([1, 1, 1]);
+  });
+
+  it("bridge: duplicate callsites in one mapped member cannot replace its first live row", async () => {
+    const root = tempProject();
+    const { createHarness } = await import("../../../test-harness.js");
+    const h = createHarness(root, { sessionId: "wf-parent-duplicate" });
+    let releaseFirst: (() => void) | undefined;
+    const conflictObserved = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let announceChildStart: (() => void) | undefined;
+    const childStarted = new Promise<void>((resolve) => {
+      announceChildStart = resolve;
+    });
+    let childStarts = 0;
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      workflowRunId: "mapped-duplicate-live-row",
+      createExecutor: (opts) => ({
+        async run(request) {
+          childStarts += 1;
+          announceChildStart?.();
+          if (opts.live?.rowId === undefined) throw new Error("Expected stable workflow slot row.");
+          const execution = agentLiveStore.beginExecution({
+            id: opts.live.rowId,
+            agentName: request.agent?.name ?? "sub-agent",
+            label: opts.live.label ?? request.agent?.name ?? "sub-agent",
+            ...(opts.live.slotKey === undefined ? {} : { slotKey: opts.live.slotKey }),
+            ...(opts.live.round === undefined ? {} : { round: opts.live.round }),
+          });
+          opts.onLiveExecution?.(execution);
+          await conflictObserved;
+          return {
+            status: "completed",
+            agentName: request.agent?.name ?? "sub-agent",
+            reason: "done",
+            text: "done",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+    const runtime = createWorkflowRuntime({
+      runId: "mapped-duplicate-live-row",
+      agentRunner: runner,
+      onEvent(line) {
+        if (line.kind === "error" && line.message?.includes("slot is already running") === true) releaseFirst?.();
+      },
+    });
+
+    await expect(
+      runtime.dsl.parallel([
+        async () => {
+          const first = runtime.dsl.agent("first", { agent: "reviewer", label: "same", phase: "verify" });
+          await childStarted;
+          return Promise.all([
+            first,
+            runtime.dsl.agent("second", { agent: "reviewer", label: "same", phase: "verify" }),
+          ]);
+        },
+      ]),
+    ).rejects.toThrow(/phase "verify", label "same"/u);
+
+    expect(childStarts).toBe(1);
+    expect(runtime.getJournal().filter((line) => line.kind === "agent_start")).toHaveLength(1);
+    const childRows = [...agentLiveStore.rows.values()].filter((row) =>
+      row.id.startsWith("workflow-agent:mapped-duplicate-live-row:"),
+    );
+    expect(childRows).toHaveLength(1);
+    expect(childRows[0]).toMatchObject({ label: "same", round: 1 });
+  });
+
   it("omits usage when a later execution replaces the call's stable slot before boundary mapping", async () => {
     const root = tempProject();
     const { createHarness } = await import("../../../test-harness.js");

@@ -10,6 +10,7 @@
 // Public types
 // ---------------------------------------------------------------------------
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DEFAULT_WORKFLOW_BUDGET,
   WORKFLOW_AGENT_MAX_TURNS,
@@ -84,6 +85,16 @@ export interface WorkflowAgentPreflightRequest {
 }
 
 export type WorkflowAgentPreflight = (requests: readonly WorkflowAgentPreflightRequest[]) => Promise<void>;
+
+interface WorkflowAgentRowOccurrence {
+  readonly groupId: string;
+  readonly memberIndex: number;
+}
+
+interface WorkflowAgentSlotDescriptor {
+  readonly key: string;
+  readonly rowOccurrence?: WorkflowAgentRowOccurrence;
+}
 
 /** The machine-readable cause carried from the host through the bridge. Re-exported so a
  *  workflow-side caller never has to reach into the agent envelope for the same closed list. */
@@ -299,6 +310,8 @@ export interface WorkflowAgentRequest {
   workspaceHandle?: string;
   /** Runtime-owned stable identity allocated before this attempt is scheduled. */
   callId?: string;
+  /** @internal Runtime/bridge transport for live-row identity. Workflow source cannot set it. */
+  workflowSlot?: WorkflowAgentSlotDescriptor;
   /** Runtime-owned and reachable only from Fusion's internal invocation path. */
   capabilityMode?: WorkflowFusionMode;
 }
@@ -339,7 +352,7 @@ export interface WorkflowAgentResult {
    * config that was read. Quiet fallback, loud record.
    */
   modelRoleFallback?: string;
-  /** Workflow loop slot descriptor (phase,label); set by the bridge for slotted agents (REQ-009). */
+  /** Opaque effective slot key set by the runtime/bridge; readers compare the whole value and never parse it (REQ-009). */
   slotKey?: string;
   /** Loop round for the slot (≥1); the bridge increments it per slot re-invoke (REQ-009). */
   round?: number;
@@ -667,6 +680,11 @@ export type WorkflowStage<T> = (item: T, index: number) => Promise<unknown>;
 
 export type WorkflowGroupKind = "parallel" | "pipeline";
 
+interface WorkflowGroupContext {
+  readonly group: { id: string; kind: WorkflowGroupKind; label: string };
+  readonly member?: WorkflowAgentRowOccurrence;
+}
+
 export interface WorkflowBranchFailure {
   index: number;
   kind: "thrown" | "returned-failure";
@@ -811,7 +829,7 @@ export interface WorkflowJournalLine {
   answerArtifact?: WorkflowArtifactRef;
   transcriptArtifact?: WorkflowArtifactRef;
   resultEnvelopeArtifact?: WorkflowArtifactRef;
-  /** Workflow loop slot descriptor (phase,label) on agent lines (REQ-009); absent = no-rounds journal. */
+  /** Opaque effective slot key on agent lines; readers compare the whole value and never parse it; absent = no rounds (REQ-009). */
   slotKey?: string;
   /** Loop round (≥1) on agent_end lines (REQ-009); the drill reads past rounds by (slotKey,round). */
   round?: number;
@@ -2518,11 +2536,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   let totalLogicalAgentCalls = 0;
   /** Per-run `(phase,label)` -> how many calls that slot has already opened. */
   const agentNodeOccurrences = new Map<string, number>();
-  /**
-   * The `(phase,label)` slots this run is executing RIGHT NOW. Membership is what makes a
-   * second concurrent occupant of one slot refusable; it is not a history, so a slot is
-   * free again the moment its call ends.
-   */
+  /** Effective live-row slots this run is executing RIGHT NOW. */
   const activeAgentSlots = new Set<string>();
   let totalFusionCalls = 0;
   const journal = options.journal;
@@ -2536,7 +2550,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    *  nested child call there has no defined position in either sequence. */
   let insideValidate = false;
   let groupCounter = 0;
-  const groupStack: Array<{ id: string; kind: "parallel" | "pipeline"; label: string }> = [];
+  const groupContext = new AsyncLocalStorage<WorkflowGroupContext>();
 
   function emit(line: WorkflowJournalLine): void {
     journalMirror.push(line);
@@ -2632,6 +2646,18 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
     const permissionMode = defaultWorkflowPermissionMode();
     const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
+    const baseSlotKey =
+      opts?.label === undefined ? undefined : workflowSlotKey({ phase: effectivePhase, label: opts.label });
+    const groupMember = groupContext.getStore()?.member;
+    const workflowSlot =
+      baseSlotKey === undefined
+        ? undefined
+        : groupMember === undefined
+          ? { key: baseSlotKey }
+          : {
+              key: `${baseSlotKey}\u001e${groupMember.groupId}\u001f${groupMember.memberIndex}`,
+              rowOccurrence: groupMember,
+            };
     const req: WorkflowAgentRequest = {
       prompt,
       executionMode: agentName === undefined ? "bare" : "named",
@@ -2655,6 +2681,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       maxToolCalls,
       ...(opts?.[FUSION_CAPABILITY_MODE] === undefined ? {} : { capabilityMode: opts[FUSION_CAPABILITY_MODE] }),
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
+      ...(workflowSlot === undefined ? {} : { workflowSlot }),
     };
     // T-192 W6 — one slot, one RUNNING call. A `(phase, label)` slot names one live row and
     // one journal correlation key, so two calls occupying it at the same time would collapse
@@ -2669,10 +2696,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // claim around each physical attempt instead would make a transport retry of one call
     // look concurrent with itself. Only a labelled call anchors a slot, so an unlabelled one
     // falls outside the guard rather than being exempted from it.
-    const activeSlot =
-      req.label === undefined
-        ? undefined
-        : { key: workflowSlotKey({ phase: req.phase, label: req.label }), label: req.label };
+    const activeSlot = workflowSlot === undefined ? undefined : { key: workflowSlot.key, label: req.label! };
     if (activeSlot !== undefined) {
       if (activeAgentSlots.has(activeSlot.key)) {
         throw new WorkflowAgentSlotConflictError(req.phase, activeSlot.label);
@@ -2826,7 +2850,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...attemptFields,
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
       // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
-      ...(req.label !== undefined ? { slotKey: workflowSlotKey({ phase: req.phase, label: req.label }) } : {}),
+      ...(req.workflowSlot !== undefined ? { slotKey: req.workflowSlot.key } : {}),
     });
     let executionStartedAtMs = Date.now();
     let finalResult: WorkflowAgentResult;
@@ -3399,10 +3423,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   }
 
   async function runGroupBranches<T>(kind: WorkflowGroupKind, thunks: Array<() => Promise<T>>): Promise<T[]> {
-    const groupId = activeGroupFields().groupId ?? `${kind}-unknown`;
+    const groupId = groupContext.getStore()!.group.id;
     const wrapped: Array<() => Promise<WorkflowGroupSlot<T>>> = thunks.map((thunk, index) => async () => {
+      const currentContext = groupContext.getStore();
+      const memberContext: WorkflowGroupContext = {
+        group: currentContext!.group,
+        member: { groupId, memberIndex: index },
+      };
       try {
-        const value = await thunk();
+        const value = await groupContext.run(memberContext, thunk);
         const returnedFailure = classifyReturnedGroupFailure(value, index);
         if (returnedFailure === undefined) return { index, status: "completed", value };
         emitGroupBranchFailure(returnedFailure);
@@ -3544,55 +3573,54 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       groupTotal: total,
       ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
     });
-    groupStack.push({ id, kind, label });
-    const start = Date.now();
-    try {
-      const results = await run();
-      emit({
-        ts: nowFn(),
-        runId,
-        kind: "group_end",
-        status: "completed",
-        groupId: id,
-        groupKind: kind,
-        groupLabel: label,
-        groupTotal: total,
-        groupCompleted: total,
-        groupFailed: 0,
-        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
-        durationMs: Date.now() - start,
-      });
-      return results;
-    } catch (err) {
-      const groupFailure = err instanceof WorkflowGroupFailureError ? err : undefined;
-      emit({
-        ts: nowFn(),
-        runId,
-        kind: "group_end",
-        status: "failed",
-        groupId: id,
-        groupKind: kind,
-        groupLabel: label,
-        groupTotal: total,
-        groupCompleted: groupFailure?.completed ?? 0,
-        groupFailed: groupFailure?.failed ?? total,
-        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
-        message: workflowErrorMessage(err),
-        durationMs: Date.now() - start,
-      });
-      throw err;
-    } finally {
-      const top = groupStack.at(-1);
-      if (top?.id === id) groupStack.pop();
-      else {
-        const index = groupStack.findIndex((entry) => entry.id === id);
-        if (index >= 0) groupStack.splice(index, 1);
+    const parentContext = groupContext.getStore();
+    const currentContext: WorkflowGroupContext = {
+      group: { id, kind, label },
+      ...(parentContext?.member === undefined ? {} : { member: parentContext.member }),
+    };
+    return groupContext.run(currentContext, async () => {
+      const start = Date.now();
+      try {
+        const results = await run();
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "group_end",
+          status: "completed",
+          groupId: id,
+          groupKind: kind,
+          groupLabel: label,
+          groupTotal: total,
+          groupCompleted: total,
+          groupFailed: 0,
+          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+          durationMs: Date.now() - start,
+        });
+        return results;
+      } catch (err) {
+        const groupFailure = err instanceof WorkflowGroupFailureError ? err : undefined;
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "group_end",
+          status: "failed",
+          groupId: id,
+          groupKind: kind,
+          groupLabel: label,
+          groupTotal: total,
+          groupCompleted: groupFailure?.completed ?? 0,
+          groupFailed: groupFailure?.failed ?? total,
+          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+          message: workflowErrorMessage(err),
+          durationMs: Date.now() - start,
+        });
+        throw err;
       }
-    }
+    });
   }
 
   function activeGroupFields(): Pick<WorkflowJournalLine, "groupId" | "groupKind" | "groupLabel"> {
-    const group = groupStack.at(-1);
+    const group = groupContext.getStore()?.group;
     if (group === undefined) return {};
     return { groupId: group.id, groupKind: group.kind, groupLabel: group.label };
   }
@@ -3763,9 +3791,9 @@ export function workflowSlotKey(input: { phase?: string | undefined; label?: str
  * occurrence)`, where `occurrence` counts the earlier calls sharing that slot in
  * THIS run. A slot is legitimately re-entered — a later round of a loop, or any
  * sequential second call on the same `(phase, label)` — and the counter is what
- * keeps those rounds of one node apart. Two branches holding the same slot AT THE
- * SAME TIME is not that case: the runtime's slot guard refuses the second one
- * (REQ-009), so concurrent `parallel()` branches never share an occurrence counter.
+ * keeps those rounds of one node apart. Mapped group members keep distinct live
+ * rows through a separate runtime-only descriptor; that descriptor deliberately
+ * does not enter this base replay identity or its positional occurrence counter.
  *
  * A call without a label gets no name, and the replay controller fails closed on
  * it once the source bytes changed: naming a call is the author's job, and the
@@ -3801,6 +3829,8 @@ function workflowNodeName(
  * `withSchemaContract`.
  */
 function canonicalAgentRequest(req: WorkflowAgentRequest): string {
+  // `workflowSlot` is live-row identity only. Including its generated group id here would
+  // make an unchanged mapped call miss replay whenever surrounding group numbering moved.
   return JSON.stringify({
     prompt: req.prompt,
     executionMode: workflowExecutionIdentity(req).executionMode,

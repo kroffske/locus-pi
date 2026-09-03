@@ -29,7 +29,9 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import { workflowRunArtifactsDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
+  WorkflowRunDeadlineError,
   createWorkflowRuntime,
+  type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
@@ -1076,11 +1078,45 @@ describe("agent attempts — retry behaviour", () => {
     expect(new Set([...byLogicalCall.values()].flat()).size).toBe(4);
   });
 
-  it("refuses a second concurrent call on one (phase,label), naming both, before any child", async () => {
+  it("runs three mapped members from one labelled callsite with distinct runtime slots", async () => {
+    const requests: WorkflowAgentRequest[] = [];
+    const { dsl, getJournal } = createWorkflowRuntime({
+      runId: "slot-guard-mapped-three",
+      agentRunner: async (request): Promise<WorkflowAgentResult> => {
+        requests.push(request);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return completed(`answer(${request.prompt})`);
+      },
+    });
+
+    await expect(
+      dsl.parallel(
+        ["one", "two", "three"].map(
+          (item) => () => dsl.agent(`classify ${item}`, { label: "classify-candidate", phase: "classify" }),
+        ),
+      ),
+    ).resolves.toEqual(["answer(classify one)", "answer(classify two)", "answer(classify three)"]);
+
+    expect(requests).toHaveLength(3);
+    expect(requests.map((request) => [request.phase, request.label])).toEqual([
+      ["classify", "classify-candidate"],
+      ["classify", "classify-candidate"],
+      ["classify", "classify-candidate"],
+    ]);
+    expect(new Set(requests.map((request) => request.workflowSlot?.key)).size).toBe(3);
+    expect(requests.map((request) => request.workflowSlot?.rowOccurrence)).toEqual([
+      { groupId: "parallel-1", memberIndex: 0 },
+      { groupId: "parallel-1", memberIndex: 1 },
+      { groupId: "parallel-1", memberIndex: 2 },
+    ]);
+    const starts = getJournal().filter((line) => line.kind === "agent_start");
+    expect(starts).toHaveLength(3);
+    expect(new Set(starts.map((line) => line.slotKey)).size).toBe(3);
+  });
+
+  it("refuses duplicate callsites inside one mapped member before a second child", async () => {
     // The slot is the live row. Two branches holding it at once would write one row between
-    // them, so the second is refused — and refused BEFORE the journal opens a colliding
-    // agent_start, which is the whole point of guarding the logical call rather than
-    // deduplicating rows after the fact.
+    // them, so the second is refused even though sibling members get their own occurrence.
     let started = 0;
     let releaseFirst: (() => void) | undefined;
     // The first branch stays in flight until the refusal has been journalled, so the two
@@ -1102,8 +1138,11 @@ describe("agent attempts — retry behaviour", () => {
 
     await expect(
       dsl.parallel([
-        () => dsl.agent("advise A", { label: "advise", phase: "advise" }),
-        () => dsl.agent("advise B", { label: "advise", phase: "advise" }),
+        () =>
+          Promise.all([
+            dsl.agent("advise A", { label: "advise", phase: "advise" }),
+            dsl.agent("advise B", { label: "advise", phase: "advise" }),
+          ]),
       ]),
     ).rejects.toThrow(/phase "advise", label "advise"/u);
 
@@ -1113,6 +1152,34 @@ describe("agent attempts — retry behaviour", () => {
     const starts = getJournal().filter((line) => line.kind === "agent_start");
     expect(starts).toHaveLength(1);
     expect(starts[0]?.label).toBe("advise");
+  });
+
+  it("still refuses duplicate callsites outside a mapped context", async () => {
+    let started = 0;
+    let releaseFirst: (() => void) | undefined;
+    const secondWasRefused = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({
+      runId: "slot-guard-refuses-root",
+      onEvent(line) {
+        if (line.kind === "error" && line.message?.includes("slot is already running") === true) releaseFirst?.();
+      },
+      agentRunner: async (): Promise<WorkflowAgentResult> => {
+        started += 1;
+        await secondWasRefused;
+        return completed("answer");
+      },
+    });
+
+    await expect(
+      Promise.all([
+        dsl.agent("advise A", { label: "advise", phase: "advise" }),
+        dsl.agent("advise B", { label: "advise", phase: "advise" }),
+      ]),
+    ).rejects.toThrow(/phase "advise", label "advise"/u);
+    expect(started).toBe(1);
+    expect(getJournal().filter((line) => line.kind === "agent_start")).toHaveLength(1);
   });
 
   it("frees the slot for the next round, so a loop re-enters it", async () => {
@@ -1143,6 +1210,52 @@ describe("agent attempts — retry behaviour", () => {
       /budget and was aborted/u,
     );
     await expect(dsl.agent("summarize", { label: "summary", phase: "wrap" })).resolves.toBe("recovered");
+  });
+
+  it("releases one mapped member slot after throw, cancellation and transport exhaustion", async () => {
+    let call = 0;
+    const { dsl } = createWorkflowRuntime({
+      runId: "slot-guard-mapped-release",
+      agentRunner: async (): Promise<WorkflowAgentResult> => {
+        call += 1;
+        if (call === 1) throw new Error("host threw");
+        if (call === 2) {
+          return { ok: false, status: "cancelled", failureCause: "cancelled", summary: "aborted", diagnostics: [] };
+        }
+        if (call === 3 || call === 4) return transportFailure();
+        return completed("recovered");
+      },
+    });
+
+    await expect(
+      dsl.parallel([
+        async () => {
+          await expect(dsl.agent("work", { label: "worker", phase: "map" })).rejects.toThrow("host threw");
+          await expect(dsl.agent("work", { label: "worker", phase: "map" })).rejects.toThrow("aborted");
+          await expect(dsl.agent("work", { ...RETRYABLE_CALL, label: "worker", phase: "map" })).rejects.toThrow(
+            /budget and was aborted/u,
+          );
+          return dsl.agent("work", { label: "worker", phase: "map" });
+        },
+      ]),
+    ).resolves.toEqual(["recovered"]);
+    expect(call).toBe(5);
+  });
+
+  it("releases the slot when the run deadline refuses the call", async () => {
+    let nowIndex = 0;
+    const times = [0, 10, 10];
+    const { dsl } = createWorkflowRuntime({
+      runId: "slot-guard-deadline-release",
+      runtimeMs: 5,
+      nowMs: () => times[Math.min(nowIndex++, times.length - 1)]!,
+      agentRunner: async () => {
+        throw new Error("deadline must stop before child start");
+      },
+    });
+
+    await expect(dsl.agent("work", { label: "worker", phase: "map" })).rejects.toBeInstanceOf(WorkflowRunDeadlineError);
+    await expect(dsl.agent("work", { label: "worker", phase: "map" })).rejects.toBeInstanceOf(WorkflowRunDeadlineError);
   });
 
   it("leaves the retries of ONE call alone — a transport retry is not a concurrent call", async () => {
