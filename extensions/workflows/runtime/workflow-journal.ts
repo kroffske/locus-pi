@@ -1934,6 +1934,25 @@ export function listWorkflowRoundsForSlot(projectRoot: string, runId: string, sl
 }
 
 /**
+ * The declared phase a slot ran in, read from the `agent_start` line that recorded it.
+ *
+ * The drill heading needs the stage name, and no live row carries it: the group row is
+ * labelled `<groupKind> (<total>)`, the anchor row repeats its child's own label, and the
+ * bridge gives a child no title. The phase IS persisted, on every `agent_start` line beside
+ * its `slotKey`, so the run journal is where a heading can read it without decomposing the
+ * slot key string. Rounds of one slot share a phase — the phase is part of the key — so the
+ * first matching line answers for all of them. Returns undefined for an OLD journal, an
+ * unknown slot, or a call that declared no phase. Never throws.
+ */
+export function readWorkflowSlotPhase(projectRoot: string, runId: string, slotKey: string): string | undefined {
+  for (const line of readWorkflowRunJournal(projectRoot, runId)) {
+    if (line.kind !== "agent_start" || line.slotKey !== slotKey) continue;
+    if (typeof line.phase === "string" && line.phase.trim() !== "") return line.phase;
+  }
+  return undefined;
+}
+
+/**
  * Lazily read a past round's body for the drill submenu (REQ-009): a compact summary of the
  * `agent_end` record for `(slotKey, round)` — the journal is what persists across the run, so a
  * past round shows its recorded status/model/duration/tokens, not a re-hydrated transcript.

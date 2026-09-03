@@ -1143,6 +1143,86 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
+  it("names the stage between the run and the group for a production-shaped workflow child", () => {
+    // Exactly what the runtime writes: a group row labelled by kind and count, an anchor
+    // row whose label unwraps to the child's own label, and a child with a label and NO
+    // title. Nothing here states the phase — the caller reads it from the run journal and
+    // passes it in, which is what makes the stage segment appear at all.
+    const group = agentLiveStore.begin({
+      id: "workflow:run-11:group:parallel-1",
+      workflowRunId: "run-11",
+      agentName: "workflow-group",
+      label: "parallel (2)",
+      groupKind: "parallel",
+      groupTotal: 2,
+    });
+    const anchor = agentLiveStore.begin({
+      id: "workflow:run-11:sdk:reviewer:audit:review",
+      workflowRunId: "run-11",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "reviewer (audit)",
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-11:sdk:reviewer:audit:review",
+      workflowRunId: "run-11",
+      parentRowId: anchor.id,
+      agentName: "reviewer",
+      label: "audit",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 160 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+      undefined,
+      undefined,
+      undefined,
+      { phase: "review" },
+    );
+
+    const header = viewer.render(160)[0] ?? "";
+    expect(header).toContain("workflow run-11");
+    expect(header).toContain("review");
+    expect(header).toContain("parallel (2)");
+    expect(header).toContain("audit");
+    // run · stage · group · agent, outermost first.
+    expect(header.indexOf("workflow run-11")).toBeLessThan(header.indexOf("review"));
+    expect(header.indexOf("review")).toBeLessThan(header.indexOf("parallel (2)"));
+    expect(header.indexOf("parallel (2)")).toBeLessThan(header.indexOf("audit"));
+    viewer.dispose();
+  });
+
+  it("omits the stage when the caller resolved none", () => {
+    const group = agentLiveStore.begin({
+      id: "workflow:run-12:group:parallel-1",
+      workflowRunId: "run-12",
+      agentName: "workflow-group",
+      label: "parallel (2)",
+      groupKind: "parallel",
+      groupTotal: 2,
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-12:sdk:reviewer:audit:",
+      workflowRunId: "run-12",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "audit",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 160 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const header = viewer.render(160)[0] ?? "";
+    expect(header).toContain("workflow run-12");
+    expect(header).toContain("parallel (2)");
+    expect(header.indexOf("workflow run-12")).toBeLessThan(header.indexOf("parallel (2)"));
+    viewer.dispose();
+  });
+
   it("keeps the short heading for a non-workflow row and never repeats an anchor's own name", () => {
     const plain = agentLiveStore.begin({ id: "plain-row", agentName: "reviewer", label: "Review" });
     const plainViewer = new AgentSessionViewer(
@@ -1183,7 +1263,7 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
-  it("advances the status frame on the shared tick and freezes it under calm rendering", () => {
+  it("advances the status frame on the shared tick", () => {
     vi.useFakeTimers();
     try {
       const row = agentLiveStore.begin({ id: "tick-viewer", agentName: "reviewer", label: "Review" });

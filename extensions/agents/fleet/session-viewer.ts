@@ -129,6 +129,17 @@ const MOUSE_SCROLL_ENV = "LOCUS_DRILL_MOUSE";
  */
 export type AgentViewerCloseReason = "back" | "quit";
 
+/**
+ * The part of the drill heading the live store cannot answer for. Today that is the
+ * stage: the phase lives on the run journal's `agent_start` line, not on any live row,
+ * so the caller reads it once when it opens the screen and the viewer prints it. Absent
+ * for a row with no slot, no journal, or no declared phase — the heading then omits the
+ * segment rather than inventing one.
+ */
+export interface AgentViewerLocation {
+  phase?: string;
+}
+
 export type AgentViewerCapabilityResult =
   { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
 
@@ -263,6 +274,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     private readonly rounds?: DrillRoundsConfig,
     private readonly keybindings?: ViewerKeybindings,
     private readonly theme?: unknown,
+    private readonly location?: AgentViewerLocation,
   ) {
     const row = agentLiveStore.rowForExecution(execution);
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
@@ -286,8 +298,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     agentLiveStore.emitter.on("change", requestRender);
     this.#unsubscribe = () => agentLiveStore.emitter.off("change", requestRender);
     // The store emits on state, not on time: without a heartbeat the status line's
-    // spinner and elapsed text would stand still through a long tool call. Shared
-    // with the progress panel so both surfaces animate on one cadence.
+    // spinner and elapsed text would stand still through a long tool call. The cadence
+    // is the progress panel's own 1 Hz, so the two surfaces animate a row alike.
     this.#ticker = startAgentLiveTicker({
       onTick: () => {
         if (this.#disposed) return;
@@ -490,14 +502,17 @@ export class AgentSessionViewer implements CustomUiComponent {
   }
 
   /**
-   * Where this agent sits, read from the store and not from its own text: the
-   * workflow run, then every live ancestor from the outermost inwards, then the
-   * agent itself. A row outside a workflow has no location to report, so it keeps
-   * the short one-segment heading it has always had.
+   * Where this agent sits: the workflow run, the stage its caller declared, every
+   * live ancestor from the outermost inwards, then the agent itself. Everything but
+   * the stage is read from the store rather than from any text the agent wrote; the
+   * stage is the one segment no live row carries, so the caller resolves it from the
+   * run journal and hands it in (`drill-command.ts:buildDrillLocation`). A row outside
+   * a workflow has no location to report, so it keeps the short one-segment heading it
+   * has always had, and a workflow row whose stage cannot be resolved simply omits it.
    */
   #headerLabel(row: AgentLiveRow | undefined): string {
     if (row === undefined) return this.#title;
-    return [...workflowLocationSegments(row), formatAgentSessionStart(row)].join(" · ");
+    return [...workflowLocationSegments(row, this.location?.phase), formatAgentSessionStart(row)].join(" · ");
   }
 
   /**
@@ -768,27 +783,31 @@ function dividerLine(label: string, width: number, style: DividerStyle = "sectio
 }
 
 /**
- * The run location of one live row, outermost segment first: `workflow <run>`
- * then each live ancestor's own heading. The chain walks `parentRowId` through
- * `agentLiveStore.rows` and stops at the first row carrying a `groupKind` — a
+ * The run location of one live row, outermost segment first: `workflow <run>`, the
+ * declared stage, then each live ancestor's own heading. The chain walks `parentRowId`
+ * through `agentLiveStore.rows` and stops at the first row carrying a `groupKind` — a
  * group is the outermost live ancestor a workflow child has, and stopping there
  * keeps the walk bounded even if a future producer nests rows more deeply.
  *
- * Two deliberate choices:
+ * Three deliberate choices:
  *
  * - Ancestors are read as ROWS (their own title/label), never by decomposing a
  *   `slotKey` or a row id. The phase is embedded in both as a string joined by an
  *   unprintable unit separator (`workflow-runtime.ts:workflowSlotKey`); a heading
- *   built by splitting those keys breaks silently the day the key format moves,
- *   and the anchor row that carries the phase already states its own name.
+ *   built by splitting those keys breaks silently the day the key format moves.
+ * - The stage therefore arrives as an argument, resolved from the run journal by the
+ *   caller. No live row states it: the group row is named `<kind> (<total>)`, the
+ *   anchor row's label unwraps to exactly the child's own label (and is skipped here
+ *   as a repetition), and the bridge gives a child no title at all.
  * - The store is the authority, not the panel projection:
  *   `compactWorkflowParentRows` re-parents a child onto the group for rendering,
  *   but it is a pure projection — here the anchor is still the child's parent and
  *   is worth naming when it says something the leaf does not.
  */
-function workflowLocationSegments(row: AgentLiveRow): string[] {
+function workflowLocationSegments(row: AgentLiveRow, phase?: string): string[] {
   if (row.workflowRunId === undefined) return [];
   const leafTitle = agentLiveTitle(row);
+  const stage = phase !== undefined && phase.trim() !== "" ? phase.trim() : undefined;
   const ancestors: string[] = [];
   const visited = new Set<string>([row.id]);
   let parentId = row.parentRowId;
@@ -797,12 +816,13 @@ function workflowLocationSegments(row: AgentLiveRow): string[] {
     const parent = agentLiveStore.rows.get(parentId);
     if (parent === undefined) break;
     const title = agentLiveTitle(parent);
-    // An anchor row repeats its child's own name; one segment per distinct name.
-    if (title !== "" && title !== leafTitle && !ancestors.includes(title)) ancestors.push(title);
+    // An anchor row repeats its child's own name; one segment per distinct name,
+    // and never a second spelling of the stage the caller already named.
+    if (title !== "" && title !== leafTitle && title !== stage && !ancestors.includes(title)) ancestors.push(title);
     if (parent.groupKind !== undefined) break;
     parentId = parent.parentRowId;
   }
-  return [`workflow ${row.workflowRunId}`, ...ancestors.reverse()];
+  return [`workflow ${row.workflowRunId}`, ...(stage === undefined ? [] : [stage]), ...ancestors.reverse()];
 }
 
 function themeText(theme: unknown, tone: string, text: string): string {

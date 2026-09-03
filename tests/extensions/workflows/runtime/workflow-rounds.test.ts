@@ -34,6 +34,7 @@ import {
   applyWorkflowJournalLineToAgentLiveStore,
   listWorkflowRoundsForSlot,
   readWorkflowRoundBody,
+  readWorkflowSlotPhase,
   workflowRunDir,
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
@@ -320,6 +321,9 @@ describe("REQ-009 W2 — journal round records", () => {
     expect(body1?.join("\n")).toContain("test/strong high");
     expect(body1?.join("\n")).toContain("tokens in 30 / out 12");
     expect(readWorkflowRoundBody(root, runId, slotKey, 3)).toBeUndefined(); // unknown round
+    // The drill heading's stage segment: the phase is on the start line, not on any live row.
+    expect(readWorkflowSlotPhase(root, runId, slotKey)).toBe("verify");
+    expect(readWorkflowSlotPhase(root, runId, "no-such-slot")).toBeUndefined();
   });
 
   it("treats an OLD journal without round fields as no-rounds and never throws (backward compat)", () => {
@@ -345,6 +349,8 @@ describe("REQ-009 W2 — journal round records", () => {
     expect(() => listWorkflowRoundsForSlot(root, runId, "verifyverify fix")).not.toThrow();
     expect(listWorkflowRoundsForSlot(root, runId, "verifyverify fix")).toEqual([]);
     expect(readWorkflowRoundBody(root, runId, "verifyverify fix", 1)).toBeUndefined();
+    // An old journal files no slotKey, so no stage can be claimed for one either.
+    expect(readWorkflowSlotPhase(root, runId, "verifyverify fix")).toBeUndefined();
 
     // Applying old lines to the store must not throw and must leave round unset.
     agentLiveStore.reset();

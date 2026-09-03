@@ -23,9 +23,12 @@ export interface AgentLiveTicker {
 }
 
 /**
- * THE heartbeat behind every live agent surface: the workflow progress panel and
- * the agent drill screen animate the same `statusMeta` spinner and the same
- * elapsed text, so they must not each invent a cadence.
+ * The heartbeat of the agent drill screen, built to the pattern the workflow progress
+ * panel already ran: one 1 Hz cadence for the `statusMeta` spinner and the elapsed text,
+ * so a second surface animating the same row does not invent a second rhythm. The panel
+ * keeps its own timer rather than calling this one, and deliberately: it starts and stops
+ * with the working rows it can see (`progress-widget.ts:#startLiveTimer`), while a drill
+ * ticks for as long as its screen is open.
  *
  * The timer runs for as long as the surface lives, calm or not — calm freezes the
  * FRAME, not the clock. Elapsed text still rolls over its buckets, and a frame
