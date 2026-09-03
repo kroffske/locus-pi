@@ -7,7 +7,7 @@ import {
   type WorkflowArtifactRecord,
 } from "../runtime/workflow-artifacts.js";
 import {
-  listWorkflowRunIds,
+  listWorkflowRuns,
   readWorkflowRunJournalState,
   readWorkflowRunResult,
   readWorkflowRunSummary,
@@ -15,7 +15,7 @@ import {
   type WorkflowJournalDiagnostic,
   type WorkflowRunStatus,
 } from "../runtime/workflow-journal.js";
-import { assertWorkflowRunId } from "../runtime/workflow-run-layout.js";
+import { resolveWorkflowRunDir } from "../runtime/workflow-run-layout.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { clamp, clipLines, fitLine, viewerRows as sharedViewerRows } from "../../_shared/operator/viewer-geometry.js";
@@ -102,7 +102,7 @@ export class WorkflowRunViewer implements CustomUiComponent {
   ) {
     this.#theme = asTheme(theme);
     this.#done = done;
-    this.#runs = listWorkflowRunIds(projectRoot).map((runId) => runRow(projectRoot, runId));
+    this.#runs = listWorkflowRuns(projectRoot).map((run) => runRow(projectRoot, run.runId, run.runDir));
     if (initialRunId !== undefined) {
       const index = this.#runs.findIndex((run) => run.runId === initialRunId);
       if (index >= 0) this.#runIndex = index;
@@ -408,9 +408,9 @@ export class WorkflowResultViewer implements CustomUiComponent {
   }
 }
 
-function runRow(projectRoot: string, runId: string): RunRow {
-  const summary = readWorkflowRunSummary(projectRoot, runId);
-  const journal = readWorkflowRunJournalState(projectRoot, runId);
+function runRow(projectRoot: string, runId: string, runDir: string): RunRow {
+  const summary = readWorkflowRunSummary(projectRoot, runId, runDir);
+  const journal = readWorkflowRunJournalState(projectRoot, runId, runDir);
   return {
     runId,
     status: summary.status,
@@ -421,8 +421,9 @@ function runRow(projectRoot: string, runId: string): RunRow {
 }
 
 function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
+  let runDir: string;
   try {
-    assertWorkflowRunId(runId);
+    runDir = resolveWorkflowRunDir(projectRoot, runId);
   } catch (error) {
     return {
       runId,
@@ -437,11 +438,10 @@ function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
       ],
     };
   }
-  const journalState = readWorkflowRunJournalState(projectRoot, runId);
-  const journal = journalState.lines;
-  const summary = readWorkflowRunSummary(projectRoot, runId);
-  const persistedInvalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId));
-  const artifactState = readWorkflowArtifactIndex(projectRoot, runId);
+  const { lines: journal, diagnostics: journalDiagnostics } = readWorkflowRunJournalState(projectRoot, runId, runDir);
+  const summary = readWorkflowRunSummary(projectRoot, runId, runDir);
+  const persistedInvalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId, runDir));
+  const artifactState = readWorkflowArtifactIndex(projectRoot, runId, runDir);
   const records = artifactState.status === "ready" ? artifactState.index.artifacts : [];
   const stageKeys: string[] = [];
   const addStage = (value: string | undefined): void => {
@@ -453,7 +453,7 @@ function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
   if (stageKeys.length === 0) stageKeys.push("run");
 
   const artifactProblem = artifactState.status === "ready" ? undefined : artifactState.message;
-  const journalProblem = formatJournalProblem(journalState.diagnostics);
+  const journalProblem = formatJournalProblem(journalDiagnostics);
   const stages = stageKeys.map((key, stageIndex): StageRow => {
     const artifacts = records
       .filter((record) => stageKey(record.stage) === key)
@@ -471,7 +471,7 @@ function loadRunEvidence(projectRoot: string, runId: string): RunEvidenceModel {
   if (journalProblem !== undefined) {
     stages.unshift({
       key: "__journal-corruption__",
-      label: `journal corruption (${journalState.diagnostics.length})`,
+      label: `journal corruption (${journalDiagnostics.length})`,
       evidence: [{ kind: "problem", message: journalProblem }],
     });
   }

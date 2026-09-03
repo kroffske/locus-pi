@@ -2,18 +2,18 @@
 title: Workflow guide
 type: guide
 status: active
-updated: 2026-08-26T22:46:41Z
-source_commit: 292b981
-update_event: changed
-context: workflow DSL outcomes, phases, and source diagnostics
-description: Guide workflow discovery, execution, evidence, and author checks.
+updated: "2026-09-03T14:45:28Z"
+source_commit: "4e0ee253fa0b"
+update_event: "sync"
+context: "changes=L files=24 task=T-194"
+description: "Объясняет общую папку workflow, связи workspace и чтение истории без миграции."
 owner: locus-pi maintainers
 tags: [workflows, guide]
 ---
 
 # Workflow guide
 
-The `workflows` extension discovers trusted JavaScript workflow modules, runs them through Pi child sessions, and persists evidence under `.locus-pi/runs/<runId>/`.
+The `workflows` extension discovers trusted JavaScript workflow modules, runs them through Pi child sessions, and persists execution groups under `.locus-pi/runs/<storageRootRunId>/`.
 
 ## Package catalog
 
@@ -64,10 +64,11 @@ The model-callable `workflow` tool accepts a package name or trusted script path
 
 ## Run evidence
 
-Each accepted run receives a stable directory:
+Откройте README группы: он связывает исходный запуск, workspace, saved children и попытки resume.
 
 ```text
-.locus-pi/runs/<runId>/
+.locus-pi/runs/<storageRootRunId>/
+  README.md   ссылки на workspace и все виды executions
   outputs/    human-readable host projection
   runtime/    machine evidence and continuation authority
     journal.ndjson         append-only lifecycle evidence
@@ -75,9 +76,15 @@ Each accepted run receives a stable directory:
     replay.ndjson          replay records when the source is eligible
     script-<sha256>.workflow.mjs
     artifacts/             answers, transcripts, result envelopes, inputs, and publications
+  children/<runId>/         отдельные outputs/ и runtime/ каждого saved child
+  attempts/<runId>/         отдельные outputs/ и runtime/ каждой попытки resume
 ```
 
-Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent attempts therefore never overwrite one another. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
+Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Независимые root launches получают разные группы даже в одной session; resume использует исходный workspace, но пишет собственный receipt. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
+
+Workspace `.workflow-runs.md` содержит обратные ссылки. Это reserved файл runtime: пользовательский файл с таким именем не перезаписывается, запуск явно отказывает. README группы и backlink заменяются полным durable content через temp+rename и синхронизацию родительского каталога. Неполный runtime-owned README восстанавливается из метаданных root; неполный backlink получает явный recovery error, чтобы не потерять прежние ссылки. Общие страницы содержат постоянные ссылки, не «последний статус»; актуальное состояние каждого выполнения смотрите в его `runtime/result.json` и журнале. Они записываются только root под workspace lease, не после его освобождения.
+
+Старые flat runs читаются и возобновляются на месте. Каждый runId разрешается через общий confined lookup; пути с symlink и неоднозначные IDs не выбираются наугад. Безопасно найденный resume добавляет `attempts/<newRunId>/`; при раннем unsafe или отсутствующем source сохраняется отдельный rejected receipt. Никакой автоматической миграции или удаления runs/workspaces нет.
 
 `runtime/journal.ndjson` is the chronological event authority. New `runtime/result.json` envelopes do not repeat the full journal. They retain only typed bounded finalization errors that must survive an independent best-effort journal write failure. Older envelopes with an embedded journal remain readable.
 

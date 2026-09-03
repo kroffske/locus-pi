@@ -18,10 +18,10 @@ import {
   type WorkflowHandoffClaimOptions,
   type WorkflowOperatorHandoffEnvelope,
 } from "../../../../extensions/workflows/runtime/workflow-handoff.js";
-import { workflowRunDir } from "../../../../extensions/workflows/runtime/workflow-journal.js";
-import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
+  ensureWorkflowRunDir,
   workflowJournalFile,
+  workflowRunDir,
   workflowRunRuntimeDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";

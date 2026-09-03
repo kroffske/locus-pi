@@ -1,9 +1,10 @@
 /**
- * workflow-run-layout.ts — the complete path and confinement contract for one workflow run.
+ * workflow-run-layout.ts — the complete path and confinement contract for workflow execution groups.
  *
- * Automatic evidence for one workflow run lives under
- * `<projectRoot>/.locus-pi/runs/<runId>/`. This module owns the split
- * between two directories that are addressed by name:
+ * Automatic evidence for one root execution lives under
+ * `<projectRoot>/.locus-pi/runs/<storageRootRunId>/`. Saved children and
+ * resume attempts live below that group in `children/<runId>/` and
+ * `attempts/<runId>/`. Every execution directory owns the same two zones:
  *
  *   - `outputs/` — the human-readable documents and exact terminal answer the
  *     runtime materializes when the run finishes.
@@ -39,6 +40,7 @@ import {
   writeFileSync,
   type Dirent,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 export const WORKFLOW_ROOT_DIRNAME = ".locus-pi";
@@ -55,7 +57,8 @@ export const WORKFLOW_RUN_RUNTIME_DIRNAME = "runtime";
 export const WORKFLOW_RUN_ARTIFACTS_DIRNAME = "artifacts";
 export const WORKFLOW_RUN_JOURNAL_FILENAME = "journal.ndjson";
 export const WORKFLOW_SAFE_COMPONENT_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
-export const WORKFLOW_RUN_STORAGE_PATTERN = ".locus-pi/runs/<runId>/";
+export const WORKFLOW_RUN_GROUP_STORAGE_PATTERN = ".locus-pi/runs/<storageRootRunId>/";
+export const WORKFLOW_NESTED_RUN_STORAGE_PATTERN = ".locus-pi/runs/<storageRootRunId>/{children,attempts}/<runId>/";
 export const WORKFLOW_WORKSPACES_STORAGE_PREFIX = ".locus-pi/workspaces/";
 
 const WORKFLOW_RUN_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
@@ -82,8 +85,109 @@ export function assertWorkflowRunId(runId: unknown): string {
   return runId;
 }
 
-export function workflowRunDir(projectRoot: string, runId: string): string {
-  return workflowRunDirectoryWithin(workflowRunsRootDir(projectRoot), runId);
+export interface WorkflowRunLocation {
+  storageRootRunId: string;
+  kind: "child" | "attempt";
+}
+
+export interface WorkflowRunDirectory {
+  runId: string;
+  runDir: string;
+  storageRootRunId: string;
+  kind: "root" | WorkflowRunLocation["kind"];
+}
+
+/** Construct a write path. Read discovery is deliberately a separate operation. */
+export function workflowRunDir(projectRoot: string, runId: string, location?: WorkflowRunLocation): string {
+  const runsRoot = workflowRunsRootDir(projectRoot);
+  const root =
+    location === undefined
+      ? runsRoot
+      : path.join(
+          workflowRunDirectoryWithin(runsRoot, location.storageRootRunId),
+          location.kind === "child" ? "children" : "attempts",
+        );
+  return workflowRunDirectoryWithin(root, runId);
+}
+
+/** Enumerate only supported locations; never traverse arbitrary evidence directories. */
+export function listWorkflowRunDirectories(projectRoot: string): WorkflowRunDirectory[] {
+  const found: WorkflowRunDirectory[] = [];
+  let entries: Dirent[];
+  try {
+    entries = readWorkflowRunsDirectory(projectRoot);
+  } catch (error) {
+    if (isMissingPathError(error)) return found;
+    throw error;
+  }
+  const add = (runId: string, runDir: string, storageRootRunId: string, kind: WorkflowRunDirectory["kind"]): void => {
+    assertWorkflowRunId(runId);
+    found.push({ runId, runDir, storageRootRunId, kind });
+  };
+  for (const entry of entries) {
+    if (!WORKFLOW_RUN_COMPONENT_REGEX.test(entry.name)) continue;
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const group = workflowRunDir(projectRoot, entry.name);
+    add(entry.name, group, entry.name, "root");
+    // Reserve an unsafe leaf's name, but never inspect the tree it points at.
+    if (entry.isSymbolicLink()) continue;
+    for (const dirname of ["children", "attempts"]) {
+      const directory = path.join(group, dirname);
+      const stat = lstatSync(directory, { throwIfNoEntry: false });
+      if (stat === undefined || stat.isSymbolicLink() || !stat.isDirectory()) continue;
+      if (!assertWorkflowRunDirectoryPath(group, directory, false)) continue;
+      for (const nested of readdirSync(directory, { withFileTypes: true })) {
+        if (!WORKFLOW_RUN_COMPONENT_REGEX.test(nested.name)) continue;
+        if (nested.isDirectory() || nested.isSymbolicLink()) {
+          add(nested.name, path.join(directory, nested.name), entry.name, dirname === "children" ? "child" : "attempt");
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/** Resolve an ID uniquely, preserving explicit missing/unsafe/ambiguous outcomes. */
+export function resolveWorkflowRunDir(projectRoot: string, runId: string): string {
+  const directory = findWorkflowRunDir(projectRoot, runId);
+  if (directory === undefined) {
+    throw Object.assign(new Error(`Workflow run not found: ${runId}`), { code: "ENOENT" });
+  }
+  return directory;
+}
+
+/** Optional lookup for consumers that retain a distinct absent-evidence branch. */
+export function findWorkflowRunDir(projectRoot: string, runId: string): string | undefined {
+  assertWorkflowRunId(runId);
+  const matches = listWorkflowRunDirectories(projectRoot).filter((entry) => entry.runId === runId);
+  if (matches.length > 1) throw new Error(`Ambiguous workflow run id: ${runId}`);
+  const match = matches[0];
+  if (match === undefined) return undefined;
+  const layout = workflowRunLayoutFromBoundaryRoot(match.runDir);
+  if (layout === undefined) throw new Error(`Invalid workflow run location: ${match.runDir}`);
+  assertCanonicalWorkflowRunDirectory(layout);
+  return match.runDir;
+}
+
+/** Validate a claimed execution directory without choosing or creating a location. */
+export function assertWorkflowRunDir(projectRoot: string, runId: string, runDir: string): string {
+  const layout = workflowRunLayoutFromBoundaryRoot(runDir);
+  if (
+    layout === undefined ||
+    realpathSync(path.resolve(layout.lexicalProjectRoot)) !== realpathSync(path.resolve(projectRoot)) ||
+    layout.runId !== assertWorkflowRunId(runId) ||
+    path.resolve(layout.lexicalRunDir) !== path.resolve(runDir)
+  ) {
+    throw new Error("Workflow run directory does not match the claimed execution.");
+  }
+  assertCanonicalWorkflowRunDirectory(layout);
+  return runDir;
+}
+
+/** The physical group, not execution lineage, selects the destination for resume. */
+export function workflowStorageRootRunId(projectRoot: string, runId: string): string {
+  const directory = resolveWorkflowRunDir(projectRoot, runId);
+  return path.relative(workflowRunsRootDir(projectRoot), directory).split(path.sep)[0]!;
 }
 
 export function workflowLegacyRunDir(projectRoot: string, runId: string, dirname: string = "runs"): string {
@@ -208,6 +312,27 @@ export function renameWorkflowRunFile(runDir: string, sourcePath: string, destin
   renameSync(sourcePath, destinationPath);
 }
 
+/** Replace one complete run-owned projection durably; a crash leaves old or new content. */
+export function replaceWorkflowRunFileAtomically(
+  runDir: string,
+  filePath: string,
+  bytes: string,
+  options: { beforeRename?: () => void } = {},
+): void {
+  const temporary = path.join(path.dirname(filePath), `.${path.basename(filePath)}.tmp-${process.pid}-${randomUUID()}`);
+  let created = false;
+  try {
+    writeWorkflowRunFile(runDir, temporary, bytes, { durable: true, exclusive: true });
+    created = true;
+    options.beforeRename?.();
+    renameWorkflowRunFile(runDir, temporary, filePath);
+    created = false;
+    fsyncWorkflowDirectory(path.dirname(filePath));
+  } finally {
+    if (created && workflowRunFileExists(runDir, temporary)) removeWorkflowRunFile(runDir, temporary);
+  }
+}
+
 export function removeWorkflowRunFile(runDir: string, filePath: string): void {
   assertWorkflowRunFilePath(runDir, filePath, true);
   unlinkSync(filePath);
@@ -237,31 +362,12 @@ export function readWorkflowRunsDirectory(projectRoot: string): Dirent[] {
 }
 
 /** Create the canonical run root. Throws before creation through an unsafe chain. */
-export function ensureWorkflowRunDir(projectRoot: string, runId: string): string {
-  const runDir = ensureCanonicalRunDirectory(projectRoot, runId);
+export function ensureWorkflowRunDir(projectRoot: string, runId: string, location?: WorkflowRunLocation): string {
+  const runDir = ensureCanonicalRunDirectory(projectRoot, runId, location);
   for (const dirname of [WORKFLOW_RUN_OUTPUTS_DIRNAME, WORKFLOW_RUN_RUNTIME_DIRNAME]) {
-    ensureCanonicalRunSubdirectory(projectRoot, runId, dirname);
+    ensureWorkflowDirectoryNoSymlink(runDir, path.join(runDir, dirname));
   }
   return runDir;
-}
-
-export function ensureWorkflowRunOutputsDir(projectRoot: string, runId: string): string {
-  return ensureCanonicalRunSubdirectory(projectRoot, runId, WORKFLOW_RUN_OUTPUTS_DIRNAME);
-}
-
-export function ensureWorkflowRunRuntimeDir(projectRoot: string, runId: string): string {
-  return ensureCanonicalRunSubdirectory(projectRoot, runId, WORKFLOW_RUN_RUNTIME_DIRNAME);
-}
-
-function ensureCanonicalRunSubdirectory(projectRoot: string, runId: string, dirname: string): string {
-  const runDir = ensureCanonicalRunDirectory(projectRoot, runId);
-  const target = path.join(runDir, dirname);
-  const lexicalProjectRoot = path.resolve(projectRoot);
-  const physicalProjectRoot = realpathSync(lexicalProjectRoot);
-  const physicalTarget = path.join(physicalProjectRoot, path.relative(lexicalProjectRoot, target));
-  assertExistingChainIsRegular(physicalProjectRoot, physicalTarget);
-  ensureWorkflowDirectoryNoSymlink(runDir, target);
-  return target;
 }
 
 /** Create a confined directory and prove no existing or created component is a symlink. */
@@ -277,6 +383,7 @@ export function ensureWorkflowDirectoryNoSymlink(root: string, directory: string
   }
   const layout = workflowRunLayoutFromBoundaryRoot(lexicalRoot);
   if (layout !== undefined) assertCanonicalWorkflowRunDirectory(layout);
+  assertExistingChainIsRegular(lexicalRoot, lexicalDirectory);
   mkdirSync(lexicalDirectory, { recursive: true });
   assertExistingChainIsRegular(lexicalRoot, lexicalDirectory);
 }
@@ -311,17 +418,17 @@ export function assertWorkflowRunDirectoryPath(runDir: string, directory: string
   return true;
 }
 
-function ensureCanonicalRunDirectory(projectRoot: string, runId: string): string {
+function ensureCanonicalRunDirectory(projectRoot: string, runId: string, location?: WorkflowRunLocation): string {
   assertWorkflowRunId(runId);
   const physicalProjectRoot = realpathSync(path.resolve(projectRoot));
   const rootStat = lstatSync(physicalProjectRoot);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new Error("Workflow run project root is not a regular directory.");
   }
-  const target = workflowRunDir(physicalProjectRoot, runId);
+  const target = workflowRunDir(physicalProjectRoot, runId, location);
   assertExistingChainIsRegular(physicalProjectRoot, target);
   ensureWorkflowDirectoryNoSymlink(physicalProjectRoot, target);
-  return workflowRunDir(path.resolve(projectRoot), runId);
+  return workflowRunDir(path.resolve(projectRoot), runId, location);
 }
 
 /** Defense in depth: safe-component validation and root containment remain separate proofs. */
@@ -405,16 +512,48 @@ function verifyOpenedWorkflowRunFile(runDir: string, filePath: string, descripto
   }
 }
 
+function fsyncWorkflowDirectory(directory: string): void {
+  const descriptor = openSync(directory, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(descriptor);
+    if (!opened.isDirectory()) throw new Error(`Workflow directory is not a directory: ${directory}`);
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 interface WorkflowRunLayout {
   lexicalProjectRoot: string;
   lexicalRunDir: string;
   runId: string;
+  location?: WorkflowRunLocation;
 }
 
 function workflowRunLayoutFromBoundaryRoot(boundaryRoot: string): WorkflowRunLayout | undefined {
   const lexicalBoundaryRoot = path.resolve(boundaryRoot);
   let candidate = lexicalBoundaryRoot;
   for (;;) {
+    const container = path.dirname(candidate);
+    const group = path.dirname(container);
+    const nestedRunsRoot = path.dirname(group);
+    if (
+      ["children", "attempts"].includes(path.basename(container)) &&
+      path.basename(nestedRunsRoot) === WORKFLOW_RUNS_DIRNAME &&
+      path.basename(path.dirname(nestedRunsRoot)) === WORKFLOW_ROOT_DIRNAME
+    ) {
+      const runId = assertWorkflowRunId(path.basename(candidate));
+      const location: WorkflowRunLocation = {
+        storageRootRunId: assertWorkflowRunId(path.basename(group)),
+        kind: path.basename(container) === "children" ? "child" : "attempt",
+      };
+      return {
+        lexicalProjectRoot: path.dirname(path.dirname(nestedRunsRoot)),
+        lexicalRunDir: candidate,
+        runId,
+        location,
+      };
+    }
     const runsRoot = path.dirname(candidate);
     const workflowRoot = path.dirname(runsRoot);
     if (path.basename(runsRoot) === WORKFLOW_RUNS_DIRNAME && path.basename(workflowRoot) === WORKFLOW_ROOT_DIRNAME) {
@@ -452,7 +591,7 @@ function assertCanonicalWorkflowRunsRoot(projectRoot: string): string {
 function assertCanonicalWorkflowRunDirectory(layout: WorkflowRunLayout): string {
   const lexicalRunsRoot = assertCanonicalWorkflowRunsRoot(layout.lexicalProjectRoot);
   const physicalRunsRoot = realpathSync(lexicalRunsRoot);
-  const expectedPhysicalRunDir = workflowRunDirectoryWithin(physicalRunsRoot, layout.runId);
+  const expectedPhysicalRunDir = workflowRunDir(realpathSync(layout.lexicalProjectRoot), layout.runId, layout.location);
   assertExistingChainIsRegular(physicalRunsRoot, expectedPhysicalRunDir);
   const physicalRunDir = realpathSync(layout.lexicalRunDir);
   if (physicalRunDir !== expectedPhysicalRunDir) {

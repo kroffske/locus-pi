@@ -1,6 +1,6 @@
 /**
- * workflow-journal.ts — runId generation + .locus-pi/runs/<runId>/ layout
- * + file-backed journal sink (journal.ndjson) + read-side helpers for status views.
+ * workflow-journal.ts — runId generation, file-backed journal persistence,
+ * and read-side projections over resolved workflow execution directories.
  *
  * Owns journal persistence and read-side run discovery while workflow-runtime.ts
  * stays filesystem-free. Canonical path derivation lives in workflow-run-layout.ts.
@@ -8,7 +8,18 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { realpathSync, statSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -36,8 +47,12 @@ import { assertWorkflowPhysicalWorkspaceIdentity, isWorkflowPathWithinRoot } fro
 import {
   assertWorkflowRunId,
   ensureWorkflowRunDir,
+  ensureWorkflowDirectoryNoSymlink,
   appendWorkflowRunTextFile,
-  readWorkflowRunsDirectory,
+  listWorkflowRunDirectories,
+  findWorkflowRunDir,
+  resolveWorkflowRunDir,
+  type WorkflowRunLocation,
   readWorkflowRunTextFile,
   readWorkflowRunFile,
   workflowRunFileExists,
@@ -48,9 +63,10 @@ import {
   workflowRunDir,
   workflowRunRuntimeDir,
   workflowRunsRootDir,
+  type WorkflowRunDirectory,
 } from "./workflow-run-layout.js";
 
-export { workflowJournalFile, workflowRunDir, workflowRunsRootDir } from "./workflow-run-layout.js";
+export { workflowJournalFile, workflowRunsRootDir } from "./workflow-run-layout.js";
 
 const RETAINED_COMPLETED_WORKFLOW_RUNS = 5;
 const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
@@ -100,32 +116,95 @@ const WORKFLOW_RUN_ID_MINT_ATTEMPTS = 5;
 
 export interface ClaimedWorkflowRun {
   runId: string;
+  runDir: string;
   journal: WorkflowJournalFileSink;
   firstLine: WorkflowJournalLine;
 }
 
 /**
- * Mint a fresh runId and durably claim it by creating the run's journal.
+ * Mint a fresh runId, reserve its execution directory, then initialize readable evidence.
  *
  * The id is a second-resolution timestamp plus a 16-bit random suffix, so two
  * runs starting in the same second can draw the same id (observed on an
- * immediate resume after a short run). The journal create is exclusive and is
- * the claim: when it fails with EEXIST the id belongs to another run, and only
- * a NEWLY minted id is retried — an id supplied for resume is never re-minted.
+ * immediate resume after a short run). The project lock serializes global
+ * discovery, exclusive directory creation reserves the id, and journal
+ * initialization makes that reservation readable. Only a NEWLY minted id is
+ * retried after collision; an id supplied for resume is never re-minted.
  */
 export function claimNewWorkflowRun(
   projectRoot: string,
   firstLine: (runId: string) => WorkflowJournalLine,
   now?: () => Date,
+  location?: WorkflowRunLocation,
+): ClaimedWorkflowRun {
+  const runsRoot = workflowRunsRootDir(realpathSync(projectRoot));
+  ensureWorkflowDirectoryNoSymlink(realpathSync(projectRoot), runsRoot);
+  const lockPath = path.join(runsRoot, ".run-claim.lock");
+  let descriptor: number | undefined;
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (let contention = 0; contention < 200; contention += 1) {
+    try {
+      descriptor = openSync(
+        lockPath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600,
+      );
+      break;
+    } catch (error) {
+      if (!isExistingFileError(error)) throw error;
+      Atomics.wait(wait, 0, 0, 5);
+    }
+  }
+  if (descriptor === undefined) {
+    throw new Error(
+      `Workflow run claim is locked: ${lockPath}; verify the owner has stopped before removing an interrupted claim lock.`,
+    );
+  }
+  try {
+    writeFileSync(descriptor, `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`);
+    return claimRunUnderLock(projectRoot, firstLine, now, location);
+  } finally {
+    const owned = fstatSync(descriptor);
+    closeSync(descriptor);
+    const current = lstatSync(lockPath, { throwIfNoEntry: false });
+    if (current?.dev === owned.dev && current.ino === owned.ino) unlinkSync(lockPath);
+  }
+}
+
+function claimRunUnderLock(
+  projectRoot: string,
+  firstLine: (runId: string) => WorkflowJournalLine,
+  now: (() => Date) | undefined,
+  location: WorkflowRunLocation | undefined,
 ): ClaimedWorkflowRun {
   let lastError: unknown;
+  if (
+    location !== undefined &&
+    resolveWorkflowRunDir(projectRoot, location.storageRootRunId) !==
+      workflowRunDir(projectRoot, location.storageRootRunId)
+  ) {
+    throw new Error("Workflow storage root must identify a top-level run group.");
+  }
+  const claimed = new Set(listWorkflowRunDirectories(projectRoot).map((entry) => entry.runId));
   for (let attempt = 0; attempt < WORKFLOW_RUN_ID_MINT_ATTEMPTS; attempt += 1) {
     const runId = newWorkflowRunId(now);
-    const journal = createWorkflowJournalSink(projectRoot, runId);
+    if (claimed.has(runId)) {
+      lastError = new Error(`Workflow run id already exists: ${runId}`);
+      continue;
+    }
+    const runDir = workflowRunDir(projectRoot, runId, location);
+    const parent = path.dirname(runDir);
+    const physicalRoot = realpathSync(projectRoot);
+    ensureWorkflowDirectoryNoSymlink(
+      physicalRoot,
+      path.join(physicalRoot, path.relative(path.resolve(projectRoot), parent)),
+    );
+    const journal = createWorkflowJournalSink(projectRoot, runId, location);
     const line = firstLine(runId);
     try {
+      mkdirSync(runDir);
       journal.initialize(line);
-      return { runId, journal, firstLine: line };
+      return { runId, runDir, journal, firstLine: line };
     } catch (error) {
       if (!isExistingFileError(error)) throw error;
       lastError = error;
@@ -149,14 +228,18 @@ export interface WorkflowJournalFileSink extends WorkflowJournalSink {
   initialize(firstLine: WorkflowJournalLine): void;
 }
 
-export function createWorkflowJournalSink(projectRoot: string, runId: string): WorkflowJournalFileSink {
-  const runDir = workflowRunDir(projectRoot, runId);
+export function createWorkflowJournalSink(
+  projectRoot: string,
+  runId: string,
+  location?: WorkflowRunLocation,
+): WorkflowJournalFileSink {
+  const runDir = workflowRunDir(projectRoot, runId, location);
   const journalPath = workflowJournalFile(runDir);
   let initialized = false;
 
   function initialize(firstLine: WorkflowJournalLine): void {
     if (initialized) throw new Error("Workflow journal is already initialized.");
-    ensureWorkflowRunDir(projectRoot, runId);
+    ensureWorkflowRunDir(projectRoot, runId, location);
     writeWorkflowRunFile(runDir, journalPath, JSON.stringify(firstLine) + "\n", { exclusive: true });
     initialized = true;
   }
@@ -567,6 +650,8 @@ export interface WorkflowJournalRead {
 export interface WorkflowRunResultEnvelope {
   /** Present for current envelopes; absent is retained as passive legacy evidence. */
   runId?: string;
+  storageRootRunId?: string;
+  storageRootRunIdInvalid?: string;
   /** Read-side marker: a present envelope runId was malformed or selected another run. */
   runIdInvalid?: string;
   /** Read-side marker: legacy envelope has no runId and cannot prove source authority. */
@@ -634,6 +719,7 @@ export function workflowPersistedResultInvalidity(result: WorkflowRunResultEnvel
   if (result === null) return undefined;
   const invalidFields: Array<[string, string | undefined]> = [
     ["runId is malformed or does not match the selected run", result.runIdInvalid],
+    ["storage group is malformed", result.storageRootRunIdInvalid],
     ["target is malformed", result.targetInvalid],
     ["script identity is malformed", result.scriptIdentityInvalid],
     ["disposition is malformed or inconsistent", result.dispositionInvalid],
@@ -672,42 +758,83 @@ export type WorkflowRunScriptSnapshot =
       message: string;
     };
 
-/** Run ids newest-first, ordered by a proven start timestamp. */
-export function listWorkflowRunIds(projectRoot: string): string[] {
+export interface WorkflowRunListEntry extends WorkflowRunDirectory {
+  startedAt: number;
+  claimedAt: number;
+  /** True when persisted timestamps cannot order this entry against another run. */
+  chronologyTied: boolean;
+}
+
+/** Every supported execution newest-timestamp-first, resolved once for multi-row readers. */
+export function listWorkflowRuns(projectRoot: string): WorkflowRunListEntry[] {
   try {
-    return readWorkflowRunsDirectory(projectRoot)
-      .flatMap((entry) => {
-        if (!entry.isDirectory()) return [];
+    const directories = listWorkflowRunDirectories(projectRoot);
+    const counts = new Map<string, number>();
+    for (const { runId } of directories) counts.set(runId, (counts.get(runId) ?? 0) + 1);
+    const ordered = directories
+      .flatMap((directory) => {
+        const { runId, runDir } = directory;
+        if (counts.get(runId) !== 1) return [];
         try {
-          assertWorkflowRunId(entry.name);
-          const startedAt = workflowRunStartedAt(projectRoot, entry.name);
-          return startedAt === undefined ? [] : [{ runId: entry.name, startedAt }];
+          const startedAt = workflowRunStartedAt(runId, runDir);
+          const claimed = statSync(runDir);
+          return startedAt === undefined
+            ? []
+            : [
+                {
+                  ...directory,
+                  startedAt,
+                  claimedAt: Math.trunc(claimed.birthtimeMs || claimed.ctimeMs),
+                  chronologyTied: false,
+                },
+              ];
         } catch {
           return [];
         }
       })
-      .sort((left, right) => right.startedAt - left.startedAt || right.runId.localeCompare(left.runId))
-      .map((entry) => entry.runId);
+      .sort(
+        (left, right) =>
+          right.startedAt - left.startedAt ||
+          right.claimedAt - left.claimedAt ||
+          // A full timestamp tie has no chronology. This final key is only a
+          // deterministic presentation order; selectors refuse the tie below.
+          left.runDir.localeCompare(right.runDir),
+      );
+    return ordered.map((entry, index) => ({
+      ...entry,
+      chronologyTied:
+        sameWorkflowRunChronology(entry, ordered[index - 1]) || sameWorkflowRunChronology(entry, ordered[index + 1]),
+    }));
   } catch {
     return [];
   }
 }
 
-function workflowRunStartedAt(projectRoot: string, runId: string): number | undefined {
-  const runDir = workflowRunDir(projectRoot, runId);
+function sameWorkflowRunChronology(
+  left: Pick<WorkflowRunListEntry, "startedAt" | "claimedAt">,
+  right: Pick<WorkflowRunListEntry, "startedAt" | "claimedAt"> | undefined,
+): boolean {
+  return right !== undefined && left.startedAt === right.startedAt && left.claimedAt === right.claimedAt;
+}
+
+/** Compatibility history projection: includes roots, attempts, and saved children. */
+export function listWorkflowRunIds(projectRoot: string): string[] {
+  return listWorkflowRuns(projectRoot).map((entry) => entry.runId);
+}
+
+/** Root executions are stoppable/selectable; saved children remain exact-ID history only. */
+export function listWorkflowRootRunIds(projectRoot: string): string[] {
+  return listWorkflowRuns(projectRoot)
+    .filter((entry) => entry.kind !== "child")
+    .map((entry) => entry.runId);
+}
+
+function workflowRunStartedAt(runId: string, runDir: string): number | undefined {
   const journalPath = workflowJournalFile(runDir);
   const resultPath = workflowResultFile(runDir);
   if (!workflowRunFileExists(runDir, journalPath) && !workflowRunFileExists(runDir, resultPath)) return undefined;
 
-  const canonical = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-|$)/u.exec(runId);
-  if (canonical !== null) {
-    const parsed = Date.parse(
-      `${canonical[1]}-${canonical[2]}-${canonical[3]}T${canonical[4]}:${canonical[5]}:${canonical[6]}Z`,
-    );
-    if (Number.isFinite(parsed)) return parsed;
-  }
-
-  for (const line of readWorkflowRunJournal(projectRoot, runId)) {
+  for (const line of readWorkflowRunJournalStateAt(runId, runDir).lines) {
     const parsed = parseWorkflowTimestamp(line.ts);
     if (parsed !== undefined) return parsed;
   }
@@ -724,6 +851,14 @@ function workflowRunStartedAt(projectRoot: string, runId: string): number | unde
   } catch {
     // A malformed result does not establish run chronology.
   }
+
+  const canonical = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-|$)/u.exec(runId);
+  if (canonical !== null) {
+    const parsed = Date.parse(
+      `${canonical[1]}-${canonical[2]}-${canonical[3]}T${canonical[4]}:${canonical[5]}:${canonical[6]}Z`,
+    );
+    if (Number.isFinite(parsed)) return parsed;
+  }
   return undefined;
 }
 
@@ -738,10 +873,26 @@ function parseWorkflowTimestamp(value: unknown): number | undefined {
  * Valid rows remain available to compatibility callers; diagnostics retain every
  * JSON, structural, or read failure for status/viewer surfaces.
  */
-export function readWorkflowRunJournalState(projectRoot: string, runId: string): WorkflowJournalRead {
+export function readWorkflowRunJournalState(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowJournalRead {
+  try {
+    return readWorkflowRunJournalStateAt(runId, resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId));
+  } catch (error) {
+    return {
+      lines: [],
+      diagnostics: isMissingFileError(error)
+        ? []
+        : [{ kind: "io", lineNumber: null, message: `Journal could not be read: ${errorMessage(error)}.` }],
+    };
+  }
+}
+
+function readWorkflowRunJournalStateAt(runId: string, runDir: string): WorkflowJournalRead {
   let raw: string;
   try {
-    const runDir = workflowRunDir(projectRoot, runId);
     raw = readWorkflowRunTextFile(runDir, workflowJournalFile(runDir));
   } catch (error) {
     return {
@@ -774,8 +925,12 @@ export function readWorkflowRunJournalState(projectRoot: string, runId: string):
 }
 
 /** Compatibility projection for callers that only process valid journal events. */
-export function readWorkflowRunJournal(projectRoot: string, runId: string): WorkflowJournalLine[] {
-  return readWorkflowRunJournalState(projectRoot, runId).lines;
+export function readWorkflowRunJournal(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowJournalLine[] {
+  return readWorkflowRunJournalState(projectRoot, runId, resolvedRunDir).lines;
 }
 
 function workflowJournalLineProblem(value: unknown, expectedRunId: string): string | undefined {
@@ -1294,11 +1449,18 @@ export function resolveWorkflowRunId(projectRoot: string, selector: string): Wor
   }
   const shortSelector = special ? null : /^#?([a-zA-Z0-9]+)$/u.exec(wanted);
   if (!special && fullSelector === undefined && shortSelector === null) return { status: "not-found" };
+  if (fullSelector !== undefined) findWorkflowRunDir(projectRoot, fullSelector);
 
-  const runIds = listWorkflowRunIds(projectRoot);
+  const runs = listWorkflowRuns(projectRoot);
+  const runIds = runs.map((entry) => entry.runId);
   if (wanted === "" || wanted === "last" || wanted === "latest") {
-    const newest = runIds[0];
-    return newest === undefined ? { status: "not-found" } : { status: "resolved", runId: newest };
+    const roots = runs.filter((entry) => entry.kind !== "child");
+    const newest = roots[0];
+    if (newest === undefined) return { status: "not-found" };
+    const tied = roots.filter((entry) => sameWorkflowRunChronology(entry, newest));
+    return tied.length === 1
+      ? { status: "resolved", runId: newest.runId }
+      : { status: "ambiguous", matched: tied.length, candidates: tied.slice(0, 5).map((entry) => entry.runId) };
   }
   if (fullSelector !== undefined && runIds.includes(fullSelector)) {
     return { status: "resolved", runId: fullSelector };
@@ -1336,9 +1498,18 @@ export type WorkflowRunResultText =
  * copy was removed. Nothing here is truncated — being readable is the point.
  */
 export function readWorkflowRunResultText(projectRoot: string, runId: string): WorkflowRunResultText {
-  const runDir = workflowRunDir(projectRoot, runId);
+  let runDir: string;
+  try {
+    runDir = resolveWorkflowRunDir(projectRoot, runId);
+  } catch (error) {
+    return {
+      status: isMissingFileError(error) ? "none" : "invalid",
+      runId,
+      message: workflowLegacyRunMigrationMessage(projectRoot, runId) ?? errorMessage(error),
+    };
+  }
   const textPath = workflowResultTextFile(runDir);
-  const envelope = readWorkflowRunResult(projectRoot, runId);
+  const envelope = readWorkflowRunResult(projectRoot, runId, runDir);
   const invalidity = workflowPersistedResultInvalidity(envelope);
   if (invalidity !== undefined) {
     return {
@@ -1380,12 +1551,32 @@ export function readWorkflowRunResultText(projectRoot: string, runId: string): W
 }
 
 /** Read persisted result detail for `/workflows status <runId>`. Best-effort; never throws. */
-export function readWorkflowRunResult(projectRoot: string, runId: string): WorkflowRunResultEnvelope | null {
+export function readWorkflowRunResult(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowRunResultEnvelope | null {
   try {
-    const runDir = workflowRunDir(projectRoot, runId);
+    const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId);
     const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, workflowResultFile(runDir)));
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
+    let storageRootRunId: string | undefined;
+    let storageRootRunIdInvalid: string | undefined;
+    const physicalStorageRootRunId = path.relative(workflowRunsRootDir(projectRoot), runDir).split(path.sep)[0]!;
+    const nestedExecution = path.resolve(runDir) !== path.resolve(workflowRunDir(projectRoot, runId));
+    if (Object.prototype.hasOwnProperty.call(record, "storageRootRunId")) {
+      try {
+        storageRootRunId = assertWorkflowRunId(record.storageRootRunId);
+        if (storageRootRunId !== physicalStorageRootRunId)
+          throw new Error("storageRootRunId does not match the physical run group");
+      } catch (error) {
+        storageRootRunId = undefined;
+        storageRootRunIdInvalid = errorMessage(error);
+      }
+    } else if (nestedExecution) {
+      storageRootRunIdInvalid = "storageRootRunId is required for nested workflow execution evidence";
+    }
     const hasPersistedRunId = Object.prototype.hasOwnProperty.call(record, "runId");
     let persistedRunId: string | undefined;
     let runIdInvalid: string | undefined;
@@ -1406,7 +1597,7 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     // artifact, or script metadata. A missing runId remains readable as legacy
     // evidence, but is marked run-unbound so exact consumers can refuse it.
     const exposeBindingMetadata = runIdInvalid === undefined;
-    const binding = parseWorkflowPersistedBinding(record, projectRoot, runId);
+    const binding = parseWorkflowPersistedBinding(record, projectRoot, runId, { runDir });
     const target = binding.target;
     const targetInvalid = binding.targetInvalid;
     const scriptIdentity = binding.scriptIdentity;
@@ -1447,7 +1638,7 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     }
     if (Object.prototype.hasOwnProperty.call(record, "resultPersistence")) {
       try {
-        resultPersistence = parsePersistedResultPersistence(record.resultPersistence, projectRoot, runId);
+        resultPersistence = parsePersistedResultPersistence(record.resultPersistence, runDir);
         if (record.ok === true && resultPersistence.ok === false) {
           throw new Error("resultPersistence.ok=false cannot accompany an outer ok=true result");
         }
@@ -1592,6 +1783,8 @@ export function readWorkflowRunResult(projectRoot: string, runId: string): Workf
     }
     return {
       ...(persistedRunId === undefined ? {} : { runId: persistedRunId }),
+      ...(storageRootRunId === undefined ? {} : { storageRootRunId }),
+      ...(storageRootRunIdInvalid === undefined ? {} : { storageRootRunIdInvalid }),
       ...(runIdInvalid === undefined ? {} : { runIdInvalid }),
       ...(runUnbound === undefined ? {} : { runUnbound }),
       ...(typeof record.ok === "boolean" ? { ok: record.ok } : {}),
@@ -1677,13 +1870,9 @@ function isPersistedFailureDiagnostic(value: unknown): value is WorkflowFailureD
   );
 }
 
-function parsePersistedResultPersistence(
-  value: unknown,
-  projectRoot: string,
-  runId: string,
-): WorkflowResultPersistence {
+function parsePersistedResultPersistence(value: unknown, runDir: string): WorkflowResultPersistence {
   if (!isRecord(value)) throw new Error("resultPersistence must be an object");
-  const expectedPath = workflowResultFile(workflowRunDir(projectRoot, runId));
+  const expectedPath = workflowResultFile(runDir);
   if (value.path !== expectedPath) throw new Error("resultPersistence.path does not match the selected run result");
   if (value.ok === true) {
     if (!hasExactFields(value, ["ok", "path"])) throw new Error("resultPersistence success fields are invalid");
@@ -1713,15 +1902,20 @@ function parsePersistedResultPersistence(
  * Read only the immutable source snapshot recorded by one exact persisted run.
  * This boundary never consults the current workflow resolver or another file.
  */
-export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string): WorkflowRunScriptSnapshot {
+export function readWorkflowRunScriptSnapshot(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowRunScriptSnapshot {
   try {
     assertWorkflowRunId(runId);
   } catch (error) {
     return snapshotUnavailable("invalid", runId, `${errorMessage(error)}.`);
   }
 
-  const runDir = workflowRunDir(projectRoot, runId);
+  let runDir: string;
   try {
+    runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId);
     workflowRunFileExists(runDir, workflowResultFile(runDir));
   } catch (error) {
     return snapshotUnavailable(
@@ -1731,7 +1925,7 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
     );
   }
 
-  const result = readWorkflowRunResult(projectRoot, runId);
+  const result = readWorkflowRunResult(projectRoot, runId, runDir);
   if (result === null) {
     return snapshotUnavailable("legacy", runId, `Run ${runId} has no readable persisted result identity.`);
   }
@@ -1757,7 +1951,7 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   }
   const identity = result.scriptIdentity;
   if (identity === undefined) {
-    if (persistedResultHasScriptIdentity(projectRoot, runId)) {
+    if (persistedResultHasScriptIdentity(runDir)) {
       return snapshotUnavailable(
         "invalid",
         runId,
@@ -1788,14 +1982,11 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
     );
   }
 
-  const lexicalProjectRoot = path.resolve(projectRoot);
-  const lexicalRunsRoot = path.resolve(workflowRunsRootDir(lexicalProjectRoot));
-  const lexicalRunDir = path.resolve(lexicalRunsRoot, runId);
+  const lexicalRunDir = path.resolve(runDir);
   const lexicalRuntimeDir = workflowRunRuntimeDir(lexicalRunDir);
   const expectedName = `script-${identity.scriptSha256}.workflow.mjs`;
   const lexicalSnapshot = path.resolve(identity.snapshotPath);
   if (
-    path.dirname(lexicalRunDir) !== lexicalRunsRoot ||
     path.dirname(lexicalSnapshot) !== lexicalRuntimeDir ||
     path.basename(lexicalSnapshot) !== expectedName ||
     identity.snapshotPath !== path.join(lexicalRuntimeDir, expectedName)
@@ -1870,9 +2061,8 @@ export function readWorkflowRunScriptSnapshot(projectRoot: string, runId: string
   }
 }
 
-function persistedResultHasScriptIdentity(projectRoot: string, runId: string): boolean {
+function persistedResultHasScriptIdentity(runDir: string): boolean {
   try {
-    const runDir = workflowRunDir(projectRoot, runId);
     const parsed: unknown = JSON.parse(readWorkflowRunTextFile(runDir, workflowResultFile(runDir)));
     return (
       typeof parsed === "object" &&
@@ -1982,12 +2172,15 @@ export function readWorkflowRoundBody(
 }
 
 /** Summarize one valid run id. Corrupt or missing persisted evidence never throws. */
-export function readWorkflowRunSummary(projectRoot: string, runId: string): WorkflowRunSummary {
+export function readWorkflowRunSummary(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowRunSummary {
   assertWorkflowRunId(runId);
-  const runDir = workflowRunDir(projectRoot, runId);
-  const resultPath = workflowResultFile(runDir);
-  const hasResult = workflowRunFileExists(runDir, resultPath);
-  const lines = readWorkflowRunJournal(projectRoot, runId);
+  const runDir = resolvedRunDir ?? findWorkflowRunDir(projectRoot, runId);
+  const hasResult = runDir !== undefined && workflowRunFileExists(runDir, workflowResultFile(runDir));
+  const lines = runDir === undefined ? [] : readWorkflowRunJournal(projectRoot, runId, runDir);
 
   let phase: string | null = null;
   let agentsStarted = 0;
@@ -2035,7 +2228,7 @@ export function readWorkflowRunSummary(projectRoot: string, runId: string): Work
 
   let status: WorkflowRunStatus;
   if (hasResult) {
-    const persisted = readWorkflowRunResult(projectRoot, runId);
+    const persisted = readWorkflowRunResult(projectRoot, runId, runDir);
     status =
       persisted === null
         ? "unknown"

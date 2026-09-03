@@ -3,7 +3,7 @@ import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import type { SgNode } from "@ast-grep/napi";
 import {
-  listWorkflowRunIds,
+  listWorkflowRuns,
   readWorkflowRunScriptSnapshot,
   type WorkflowRunResultEnvelope,
   type WorkflowRunScriptSnapshot,
@@ -569,8 +569,10 @@ export function safeRecentWorkflowLabel(
 
 function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
   const recent: WorkflowCatalogHistoryRow[] = [];
-  for (const runId of listWorkflowRunIds(projectRoot)) {
-    const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId);
+  for (const run of listWorkflowRuns(projectRoot)) {
+    if (run.kind === "child") continue;
+    const { runId, runDir } = run;
+    const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId, runDir);
     const target = snapshot.target;
     if (target === undefined) continue;
     const safeName = safeRecentWorkflowLabel(target, projectRoot);

@@ -7,7 +7,7 @@ import type { WorkflowAgentBridgeOptions } from "../runtime/workflow-agent-bridg
 import { createWorkflowAgentPreflight, createWorkflowAgentRunner } from "../runtime/workflow-agent-bridge.js";
 import { createWorkflowArtifactStore, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
 import { DEFAULT_WORKFLOW_BUDGET, formatWorkflowBudgetPrelude } from "../runtime/workflow-budget.js";
-import { claimNewWorkflowRun, workflowRunDir } from "../runtime/workflow-journal.js";
+import { claimNewWorkflowRun } from "../runtime/workflow-journal.js";
 import {
   acquireWorkflowRootLease,
   releaseWorkflowRootLease,
@@ -67,6 +67,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
   const workingDirectory = getWorkingDirectory(options.ctx);
   const {
     runId,
+    runDir,
     journal: journalSink,
     firstLine: prelude,
   } = claimNewWorkflowRun(projectRoot, (mintedRunId) => ({
@@ -76,7 +77,6 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     source: "runtime",
     message: formatWorkflowBudgetPrelude(DEFAULT_WORKFLOW_BUDGET),
   }));
-  const runDir = workflowRunDir(projectRoot, runId);
   options.onEvent?.(prelude);
 
   const workspace = resolveWorkflowOutputDirectory(projectRoot, undefined, "fusion", workingDirectory, { runId });
@@ -86,6 +86,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     ctx: options.ctx,
     signal: options.signal,
     workflowRunId: runId,
+    workflowRunDir: runDir,
     workflowWorkspaceDir: workspace.absolutePath,
     evidenceDestinations: (callId) => artifactStore.childEvidenceDestinations(callId),
     ...(options.createExecutor === undefined ? {} : { createExecutor: options.createExecutor }),
@@ -180,6 +181,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     {
       projectRoot,
       runId,
+      runDir,
       workspaceDir: workspace.absolutePath,
       status: disposition.status,
       result: prepared,

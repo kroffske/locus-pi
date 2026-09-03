@@ -1,6 +1,7 @@
 /**
- * workflow-run-report.ts — the human-readable outputs of one workflow run,
- * under `<projectRoot>/.locus-pi/runs/<runId>/outputs/`.
+ * workflow-run-report.ts — the human-readable outputs of one workflow execution.
+ * Root outputs live under `.locus-pi/runs/<storageRootRunId>/outputs/`; saved
+ * children and resume attempts use the fixed nested execution directories.
  *
  * Everything here is deliberate: the workflow publishes supporting documents
  * and at most one primary document, while the mandatory result owner persists
@@ -20,7 +21,7 @@
  * The runtime directory (`../runtime/`) stays machine-owned: journal.ndjson, the
  * replay record, the result envelope, the script snapshot, and the hash-verified
  * artifact store that replay and continuations depend on. Nothing in the runtime
- * reads this folder back; deleting it loses no evidence.
+ * reads the outputs projection back; deleting runtime loses required evidence.
  *
  * Best-effort by contract: a failed secondary projection costs the readable
  * folder, never the run or its durable evidence.
@@ -29,24 +30,91 @@
 import path from "node:path";
 import type { WorkflowArtifactRecord, WorkflowArtifactRef } from "./workflow-artifacts.js";
 import {
-  ensureWorkflowRunOutputsDir,
-  writeWorkflowRunFile,
+  assertWorkflowRunDir,
+  ensureWorkflowDirectoryNoSymlink,
+  readWorkflowRunTextFile,
+  replaceWorkflowRunFileAtomically,
+  workflowRunFileExists,
   workflowRunDir,
+  writeWorkflowRunFile,
+  resolveWorkflowRunDir,
   workflowRunOutputsDir,
 } from "./workflow-run-layout.js";
 import type { WorkflowBudget } from "./workflow-budget.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
+import { assertWorkflowRootLease, writeWorkflowWorkspaceRunLink, type WorkflowRootLease } from "./workflow-output.js";
+
+/** Stable navigation only: terminal status remains in each run's authoritative receipt. */
+export function writeWorkflowRunGroupReport(
+  input: {
+    projectRoot: string;
+    runId: string;
+    storageRootRunId: string;
+    workspaceDir: string;
+    workflow: string;
+  },
+  lease: WorkflowRootLease,
+): void {
+  assertWorkflowRootLease(lease);
+  if (lease.record.rootRunId !== input.runId)
+    throw new Error("Only the root lease owner may write workflow group navigation.");
+  const groupDir = workflowRunDir(input.projectRoot, input.storageRootRunId);
+  const readme = path.join(groupDir, "README.md");
+  const marker = "<!-- locus-pi:workflow-run-group:v1 -->";
+  for (const directory of ["children", "attempts"]) {
+    assertWorkflowRootLease(lease);
+    ensureWorkflowDirectoryNoSymlink(groupDir, path.join(groupDir, directory));
+  }
+  const workspaceHref = path.relative(groupDir, input.workspaceDir).split(path.sep).map(encodeURIComponent).join("/");
+  const body = [
+    marker,
+    "# Группа запуска workflow",
+    "",
+    `Workflow: ${JSON.stringify(input.workflow)}`,
+    `Группа: ${input.storageRootRunId}`,
+    "",
+    `- [Workspace с рабочими файлами](${workspaceHref}/).`,
+    "- [Результаты первого запуска](outputs/).",
+    "- [Статус первого запуска](runtime/result.json) и [журнал](runtime/journal.ndjson).",
+    "- [Дочерние запуски](children/).",
+    "- [Попытки resume](attempts/).",
+    "",
+    "У каждого выполнения свой runId, outputs/ и runtime/. Актуальный статус находится в его runtime/result.json; незавершённое выполнение видно по journal.ndjson.",
+    "Эта страница содержит постоянные ссылки, не сводку последнего статуса. Не удаляйте runtime/: он нужен для истории и resume.",
+    "",
+  ].join("\n");
+  if (workflowRunFileExists(groupDir, readme)) {
+    const existing = readWorkflowRunTextFile(groupDir, readme);
+    if (!existing.startsWith(marker + "\n")) {
+      throw new Error(`Reserved workflow group file already exists: ${readme}`);
+    }
+    if (existing !== body) {
+      assertWorkflowRootLease(lease);
+      replaceWorkflowRunFileAtomically(groupDir, readme, body, {
+        beforeRename: () => assertWorkflowRootLease(lease),
+      });
+    }
+  } else {
+    assertWorkflowRootLease(lease);
+    replaceWorkflowRunFileAtomically(groupDir, readme, body, {
+      beforeRename: () => assertWorkflowRootLease(lease),
+    });
+  }
+  writeWorkflowWorkspaceRunLink(lease, groupDir, input.storageRootRunId);
+}
 
 /** Extensions worth preserving verbatim; anything else becomes readable Markdown. */
 const WORKFLOW_REPORT_EXTENSION_REGEX = /\.[A-Za-z0-9]{1,8}$/u;
 
 export function workflowReportDir(projectRoot: string, runId: string): string {
-  return workflowRunOutputsDir(workflowRunDir(projectRoot, runId));
+  return workflowRunOutputsDir(resolveWorkflowRunDir(projectRoot, runId));
 }
 
 export interface WorkflowRunReportInput {
   projectRoot: string;
   runId: string;
+  /** Execution directory claimed before this projection writer is constructed. */
+  runDir: string;
   /** Project-local directory where agents write workflow-owned files. */
   workspaceDir?: string;
   /** Terminal disposition status: completed / awaiting_operator / cancelled / failed. */
@@ -113,8 +181,9 @@ export function writeWorkflowRunReport(
   evidence: WorkflowRunReportEvidenceSource,
 ): WorkflowRunReportOutcome {
   try {
-    const reportDir = ensureWorkflowRunOutputsDir(input.projectRoot, input.runId);
-    const runDir = workflowRunDir(input.projectRoot, input.runId);
+    const runDir = assertWorkflowRunDir(input.projectRoot, input.runId, input.runDir);
+    const reportDir = workflowRunOutputsDir(runDir);
+    ensureWorkflowDirectoryNoSymlink(runDir, reportDir);
 
     let records: WorkflowArtifactRecord[] = [];
     let indexUnavailable: string | undefined;

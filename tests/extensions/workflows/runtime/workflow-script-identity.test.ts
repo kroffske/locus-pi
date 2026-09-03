@@ -24,9 +24,10 @@ import {
   createWorkflowScriptSnapshot,
   workflowScriptExecutionPath,
 } from "../../../../extensions/workflows/runtime/workflow-script-identity.js";
-import { readWorkflowRunResult, workflowRunDir } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunResult } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   ensureWorkflowRunDir,
+  workflowRunDir,
   workflowRunRuntimeDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";

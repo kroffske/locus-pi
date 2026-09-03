@@ -13,7 +13,7 @@ import {
 } from "../runtime/workflow-handoff.js";
 import { readWorkflowArtifactRecord, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
 import {
-  listWorkflowRunIds,
+  listWorkflowRuns,
   readWorkflowRunResult,
   workflowPersistedResultInvalidity,
 } from "../runtime/workflow-journal.js";
@@ -43,14 +43,15 @@ export function createWorkflowOperatorHandoffService(
   return {
     scan(projectRoot) {
       const items: WorkflowHandoffScanItem[] = [];
-      for (const runId of listWorkflowRunIds(projectRoot)) {
-        const read = readPersistedWorkflowOperatorHandoff(projectRoot, runId);
+      for (const run of listWorkflowRuns(projectRoot)) {
+        const { runId, runDir } = run;
+        const read = readPersistedWorkflowOperatorHandoff(projectRoot, runId, runDir);
         if (read.status === "absent") continue;
         if (read.status === "invalid") {
           items.push({ status: "invalid", runId, message: read.message });
           continue;
         }
-        const invalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId));
+        const invalidity = workflowPersistedResultInvalidity(readWorkflowRunResult(projectRoot, runId, runDir));
         if (invalidity !== undefined) {
           items.push({
             status: "invalid",
@@ -60,7 +61,7 @@ export function createWorkflowOperatorHandoffService(
           continue;
         }
         try {
-          readWorkflowResumeWorkspaceIdentity(projectRoot, runId);
+          readWorkflowResumeWorkspaceIdentity(projectRoot, runId, runDir);
         } catch (error) {
           items.push({ status: "invalid", runId, message: errorMessage(error) });
           continue;

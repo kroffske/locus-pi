@@ -26,6 +26,7 @@ import {
 import path from "node:path";
 import {
   assertWorkflowRunId,
+  workflowRunDir,
   workflowRootDir,
   WORKFLOW_PLANS_DIRNAME,
   WORKFLOW_ROOT_DIRNAME,
@@ -52,6 +53,10 @@ export const WORKFLOW_OUTPUT_LOCK_FILE = ".locus-pi-workflow.lock";
 const LEASE_OWNER_READ_ATTEMPTS = 20;
 const LEASE_OWNER_READ_RETRY_MS = 5;
 const LEASE_OWNER_READ_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+const WORKFLOW_WORKSPACE_RUNS_MARKER = "<!-- locus-pi:workflow-workspace-runs:v1 -->";
+const WORKFLOW_WORKSPACE_RUNS_HEADER =
+  `${WORKFLOW_WORKSPACE_RUNS_MARKER}\n# Связанные запуски workflow\n\n` +
+  `Статусы и история находятся в папках групп; этот файл содержит только ссылки.\n\n`;
 
 class InvalidJsonContentError extends Error {}
 class UnstableJsonReadError extends Error {}
@@ -493,6 +498,70 @@ export function releaseWorkflowRootLease(lease: WorkflowRootLease): void {
   removeLeaseFile(lease.projectRoot, lease.workspaceDir, lease.lockFile);
 }
 
+/** Runtime-owned atomic backlinks. Never replace a pre-existing user document. */
+export function writeWorkflowWorkspaceRunLink(
+  lease: WorkflowRootLease,
+  groupDir: string,
+  storageRootRunId: string,
+): void {
+  assertWorkflowRootLease(lease);
+  const file = path.join(lease.workspaceDir, ".workflow-runs.md");
+  const href = path.relative(lease.workspaceDir, groupDir).split(path.sep).map(encodeURIComponent).join("/");
+  const line = `- [Группа ${assertWorkflowRunId(storageRootRunId)}](${href}/README.md).\n`;
+  const exists = assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, file, "file", false);
+  const previous = exists ? readFileSync(file, "utf8") : WORKFLOW_WORKSPACE_RUNS_HEADER;
+  if (exists && !previous.startsWith(WORKFLOW_WORKSPACE_RUNS_MARKER + "\n")) {
+    throw new Error(`Reserved workflow workspace file already exists: ${file}`);
+  }
+  if (!validWorkflowWorkspaceRunLinks(previous, lease.projectRoot, lease.workspaceDir)) {
+    throw Object.assign(new Error(`Workflow backlink file requires recovery before it can be updated: ${file}`), {
+      code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED",
+    });
+  }
+  if (previous.split("\n").includes(line.trimEnd())) return;
+  assertWorkflowRootLease(lease);
+  replaceWorkflowWorkspaceTextFile(lease, file, previous + line);
+}
+
+function validWorkflowWorkspaceRunLinks(text: string, projectRoot: string, workspaceDir: string): boolean {
+  if (!text.startsWith(WORKFLOW_WORKSPACE_RUNS_HEADER) || !text.endsWith("\n")) return false;
+  const links = text.slice(WORKFLOW_WORKSPACE_RUNS_HEADER.length).split("\n").filter(Boolean);
+  const groups = new Set<string>();
+  for (const link of links) {
+    const match = /^- \[Группа ([A-Za-z0-9][A-Za-z0-9._-]{0,127})\]\(([^\r\n()]+)\/README\.md\)\.$/u.exec(link);
+    if (match === null || groups.has(match[1]!)) return false;
+    const groupId = match[1]!;
+    const expectedHref = path
+      .relative(workspaceDir, workflowRunDir(projectRoot, groupId))
+      .split(path.sep)
+      .map(encodeURIComponent)
+      .join("/");
+    if (match[2] !== expectedHref) return false;
+    groups.add(groupId);
+  }
+  return true;
+}
+
+function replaceWorkflowWorkspaceTextFile(lease: WorkflowRootLease, file: string, text: string): void {
+  const temporary = `${file}.tmp-${process.pid}-${randomUUID()}`;
+  assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, temporary, "file", false);
+  let created = false;
+  try {
+    writeNewDurableText(temporary, text);
+    created = true;
+    assertWorkflowRootLease(lease);
+    assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, temporary, "file", true);
+    assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, file, "file", false);
+    renameSync(temporary, file);
+    created = false;
+    fsyncDirectory(path.dirname(file));
+  } finally {
+    if (created && assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, temporary, "file", false)) {
+      unlinkSync(temporary);
+    }
+  }
+}
+
 export function readWorkflowCompletedCheckpoint(
   lease: WorkflowRootLease,
   identity: WorkflowCheckpointIdentity,
@@ -925,6 +994,16 @@ function writeNewDurableJson(file: string, value: unknown, options: { syncParent
     closeSync(fd);
   }
   if (options.syncParentDirectory) fsyncDirectory(path.dirname(file));
+}
+
+function writeNewDurableText(file: string, text: string): void {
+  const fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    writeFileSync(fd, text, "utf8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function fsyncDirectory(directory: string): void {

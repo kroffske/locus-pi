@@ -12,7 +12,7 @@ import {
   assertWorkflowRunId,
   readWorkflowRunFile,
   renameWorkflowRunFile,
-  workflowRunDir,
+  resolveWorkflowRunDir,
   workflowRunRuntimeFile,
   workflowRunFileExists,
   writeWorkflowRunFile,
@@ -53,9 +53,9 @@ export function workflowLaunchBindingFile(runDir: string): string {
   return workflowRunRuntimeFile(runDir, WORKFLOW_LAUNCH_BINDING_FILENAME);
 }
 
-export function workflowLaunchBindingExists(projectRoot: string, runId: string): boolean {
+export function workflowLaunchBindingExists(projectRoot: string, runId: string, resolvedRunDir?: string): boolean {
   const safeRunId = assertWorkflowRunId(runId);
-  const runDir = workflowRunDir(projectRoot, safeRunId);
+  const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, safeRunId);
   return workflowRunFileExists(runDir, workflowLaunchBindingFile(runDir));
 }
 
@@ -73,12 +73,16 @@ export function writeWorkflowLaunchBinding(runDir: string, binding: WorkflowLaun
 }
 
 /** Best-effort read; malformed or missing bindings are unusable authority. */
-export function readWorkflowLaunchBinding(projectRoot: string, runId: string): WorkflowLaunchBinding | null {
+export function readWorkflowLaunchBinding(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowLaunchBinding | null {
   try {
     const safeRunId = assertWorkflowRunId(runId);
-    const runDir = workflowRunDir(projectRoot, safeRunId);
+    const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, safeRunId);
     const record: unknown = JSON.parse(readWorkflowRunFile(runDir, workflowLaunchBindingFile(runDir)).toString("utf8"));
-    return parseWorkflowLaunchBinding(record, safeRunId, projectRoot);
+    return parseWorkflowLaunchBinding(record, safeRunId, projectRoot, runDir);
   } catch {
     return null;
   }
@@ -103,7 +107,12 @@ export function workflowLaunchBindingMatchesResult(
   );
 }
 
-function parseWorkflowLaunchBinding(value: unknown, runId: string, projectRoot: string): WorkflowLaunchBinding {
+function parseWorkflowLaunchBinding(
+  value: unknown,
+  runId: string,
+  projectRoot: string,
+  runDir: string,
+): WorkflowLaunchBinding {
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, ["schema", "runId", "target", "scriptIdentity", "workspace", "semanticInput"]) ||
@@ -119,7 +128,7 @@ function parseWorkflowLaunchBinding(value: unknown, runId: string, projectRoot: 
     { target: value.target, scriptIdentity: value.scriptIdentity },
     projectRoot,
     runId,
-    { verifySnapshot: true },
+    { verifySnapshot: true, runDir },
   );
   if (parsed.targetInvalid !== undefined || parsed.target === undefined) {
     throw new Error("workflow launch binding target is invalid");

@@ -103,6 +103,8 @@ export interface WorkflowAgentBridgeOptions {
   ctx: ExtensionContext; // captured at tool/command execute time
   signal: AbortSignal;
   workflowRunId?: string;
+  /** Claimed execution directory paired with workflowRunId for write agents. */
+  workflowRunDir?: string;
   /** Optional human semantic input; host continuation metadata is never mixed into it. */
   args?: string;
   /**
@@ -391,7 +393,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         };
       }
     } else if (workspaceMode === "worktree" || workspaceMode === "temporary-worktree") {
-      if (options.workflowRunId === undefined || options.workflowRunId.trim() === "") {
+      if (
+        options.workflowRunId === undefined ||
+        options.workflowRunId.trim() === "" ||
+        options.workflowRunDir === undefined
+      ) {
         const message = "Workflow write agent requires workflowRunId for isolated git worktree allocation.";
         return {
           ok: false,
@@ -409,6 +415,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         const worktree = createWorkflowWorktree({
           projectRoot,
           runId: options.workflowRunId,
+          runDir: options.workflowRunDir,
           safeCallId: callId,
         });
         worktreePath = worktree.path;

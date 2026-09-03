@@ -466,8 +466,13 @@ mounting. Pi exposes no global custom-UI lock for unrelated third-party
 extensions, so `/workflows` opens the recovery menu if another extension
 displaces the question.
 
-Every run is persisted to `.locus-pi/runs/<runId>/`. The runner creates
-only the non-symlink `outputs/` and `runtime/` evidence directories and writes
+Группа запуска хранится в `.locus-pi/runs/<storageRootRunId>/`. Первый root сохраняет
+`outputs/` и `runtime/` в корне группы; saved children — в `children/<runId>/`,
+root resume — в `attempts/<runId>/`. `lineage.rootRunId` по-прежнему означает root
+текущей попытки, а `storageRootRunId` — физическую группу первого запуска.
+Два независимых запуска одной Pi session получают разные группы.
+
+The runner creates the non-symlink `outputs/` and `runtime/` evidence directories and writes
 the first `runtime/journal.ndjson` line before it
 announces the RunID; initialization failure announces no start and launches no
 child. Agent-authored files use a separate project-local workspace. Fresh
@@ -477,10 +482,27 @@ start surface reports the resolved run directory, which matters when
 the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
 
+В корне группы `README.md` связывает workspace, дочерние executions и попытки.
+Workspace содержит runtime-owned `.workflow-runs.md` с обратными ссылками.
+Их пишет только root с действующим workspace lease; после release и при раннем
+отказе без lease общие страницы не обновляются. Они не показывают «последний статус»:
+смотрите `runtime/result.json` нужного выполнения. Конфликт reserved `.workflow-runs.md`
+с пользовательским файлом завершает запуск отказом и сохраняет исходный файл.
+Обе навигационные проекции пишутся как полное durable content через temp+rename и parent-directory sync. Marker, version и весь body проверяются до reuse: неполный README восстанавливается под lease, а неполный backlink отказывает с recovery-required error, чтобы не потерять ранее записанные ссылки.
+
+История прежних flat `.locus-pi/runs/<legacyRunId>/` остаётся readable/resumable без переноса.
+Lookup ограничен корнями групп и двумя вложенными каталогами; неоднозначный ID
+или выбранный symlink отклоняется. Ранний unsafe/unresolvable resume сохраняет
+отдельный rejected receipt; после безопасного определения группы даже semantic
+rejection лежит в её `attempts/`. Старое `.pi/locus-pi` не возвращается в lookup.
+Глобальный claim ID сериализуется коротким `.locus-pi/runs/.run-claim.lock`.
+Если claim прерван, новый запуск явно откажет; прежде чем вручную удалить lock,
+проверьте, что его процесс-владелец действительно остановлен. История не удаляется.
+
 ### Persisted run artifacts and viewer
 
 The canonical artifact inventory is
-`.locus-pi/runs/<runId>/runtime/artifacts/index.json`. Every record includes a
+`<resolved-runDir>/runtime/artifacts/index.json`. Every record includes a
 logical id/name, media type, byte size, relative path, stage, provenance, and
 SHA-256. Its portable identity is always the complete object
 `{ runId, artifactId, name, sha256 }`; a run id or path alone is not an artifact
@@ -540,8 +562,10 @@ The artifact index is single-owner and append-only during a run. External index
 changes, duplicate identities, symlink escapes, unsafe names, oversized text,
 tampered bytes, or malformed transcript headers fail closed.
 The same owner resolves the project root and rejects symlinks in every ancestor
-through `.locus-pi/runs/<runId>` before any artifact read, write, or
-consume, preventing a redirected canonical root.
+through the selected execution directory before any artifact read, write, or
+consume. A root execution lives at `.locus-pi/runs/<storageRootRunId>`; saved
+children and resume attempts live below that group at
+`{children,attempts}/<runId>`. This prevents a redirected canonical root.
 
 At run completion, `runtime/result.json` and the model-callable `workflow` tool project
 up to the newest 20 explicitly published/primary refs as `artifactRefs`; an
@@ -1784,9 +1808,12 @@ its own `agent_start` and its own terminal record — an `agent_end`, or an `err
 the attempt **threw** instead of answering — both carrying `attempt`, `attempts` and the
 `logicalCallId` of the one call they belong to, its own transcript
 and result directories, and its own charge against `maxTotalAgentInvocations`. A
-`[workflow:retry]` line names the boundary between attempts, and the run's journal folder
-`.locus-pi/runs/<runId>/outputs/README.md` grows a `## Retried agent calls` section listing every attempt by
-`callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
+`[workflow:retry]` line names the boundary between attempts. The selected
+execution's `outputs/README.md` grows a `## Retried agent calls` section listing
+every attempt by `callId` with the discarded one's cause; an attempt that threw
+is listed as `threw`. Root outputs live directly under
+`.locus-pi/runs/<storageRootRunId>/`; child and resume-attempt outputs live in
+their fixed nested execution directories. That
 section reads both terminal kinds on purpose: a call that timed out, was re-run and then
 threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
 would show a stage that ran twice and was billed twice as if it had never retried. A budget
@@ -2194,8 +2221,10 @@ package values. Giving scripts a run-level surface means deciding where
 operator-changeable knobs live, which is an open owner decision.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget, and `.locus-pi/runs/<runId>/outputs/README.md` carries a `## Budget` section
-with each axis, its applied value, and the spend the run evidence can measure:
+applied budget. The selected execution's `outputs/README.md` carries a `## Budget`
+section with each axis, its applied value, and the spend the run evidence can measure.
+For the root it is under `.locus-pi/runs/<storageRootRunId>/`; children and resume
+attempts use their fixed nested execution directories. The measured values are:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
 intervals, because `agent_start` is written before the gate is acquired — counting
@@ -2277,7 +2306,7 @@ hard cap.
   `git_read` accepts argv for
   allowlisted Git queries and rejects mutation, output-file, external-diff,
   textconv, pager, signature, and config options before launch.
-- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus-pi/runs/<runId>/runtime/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
+- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under the selected execution's `runtime/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`. That execution is the group root at `.locus-pi/runs/<storageRootRunId>/` or a saved child/resume attempt in its fixed nested directory.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. It never changes the tool set. New workflows should use `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
   The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
@@ -2495,8 +2524,9 @@ A replayed call reports **no** token usage, so the run budget shown by
 ## Journal layout
 
 ```
-.locus-pi/runs/<runId>/
-  outputs/           — README, semantic documents, exact workflow-result.md prose
+.locus-pi/runs/<storageRootRunId>/
+  README.md          — stable group navigation
+  outputs/           — first root README, documents, exact workflow-result.md prose
   runtime/
     script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
     journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
@@ -2512,7 +2542,12 @@ A replayed call reports **no** token usage, so the run budget shown by
       results/         — Fresh child result envelopes, grouped by call id
       published/       — Text written through publishArtifact()/publishPrimaryArtifact()
       inputs/          — Verified copies consumed from prior runs, with source refs
+  children/<runId>/  — saved-child execution; owns the same outputs/ and runtime/ shape
+  attempts/<runId>/  — resume execution; owns the same outputs/ and runtime/ shape
 ```
+
+Legacy top-level `.locus-pi/runs/<runId>/` evidence remains readable without
+migration. New child and resume evidence is always nested under its physical group.
 
 Files deliberately written by workflow agents are outside this tree, under the
 selected project-local workflow workspace. Fresh workflows default to

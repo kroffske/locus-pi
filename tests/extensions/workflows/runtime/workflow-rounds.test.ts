@@ -23,8 +23,11 @@ import {
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import type { AgentExecutor } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
-import { workflowJournalFile } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
-import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  ensureWorkflowRunDir,
+  workflowJournalFile,
+  workflowRunDir,
+} from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   createWorkflowRuntime,
   workflowSlotKey,
@@ -35,7 +38,6 @@ import {
   listWorkflowRoundsForSlot,
   readWorkflowRoundBody,
   readWorkflowSlotPhase,
-  workflowRunDir,
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   formatAgentLiveRowLine,

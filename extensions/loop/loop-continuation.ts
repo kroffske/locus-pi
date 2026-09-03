@@ -20,9 +20,9 @@ import {
   type GoalContinuationArtifact,
 } from "../_shared/project/goal-mode.js";
 import {
-  listWorkflowRunIds,
   readWorkflowRunSummary,
-  workflowRunDir,
+  resolveWorkflowRunDir,
+  resolveWorkflowRunId,
   workflowRunsRootDir,
   type WorkflowRunSummary,
 } from "../workflows/run/run-read.js";
@@ -172,7 +172,7 @@ export async function createWorkflowLoopContinuation(
     source: "workflow",
     runId,
     runStatus: summary.status,
-    sourcePath: workflowRunDir(projectRoot, runId),
+    sourcePath: resolveWorkflowRunDir(projectRoot, runId),
     prompt,
     autoDispatch: false,
     status: "manual",
@@ -219,11 +219,6 @@ function boundLoopMetadataLines(lines: string[]): string[] {
   });
 }
 
-export function readLatestWorkflowRunId(projectRoot: string): string | undefined {
-  const runIds = listWorkflowRunIds(projectRoot);
-  return runIds[0];
-}
-
 async function resolveGoalSource(
   projectRoot: string,
   goalState: Awaited<ReturnType<typeof loadGoalState>>,
@@ -256,14 +251,30 @@ async function resolveGoalSource(
 }
 
 async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSourceReport> {
-  const latestRunId = readLatestWorkflowRunId(projectRoot);
-  if (latestRunId === undefined) {
+  const latest = resolveWorkflowRunId(projectRoot, "latest");
+  if (latest.status === "not-found") {
     return {
       source: "workflow",
       availability: "missing",
       reason: `no workflow run metadata found under ${workflowRunsRootDir(projectRoot)}`,
     };
   }
+  if (latest.status === "ambiguous") {
+    return {
+      source: "workflow",
+      availability: "blocked",
+      reason: `latest workflow run is ambiguous across ${latest.matched} executions; use an exact runId`,
+    };
+  }
+  if (latest.status === "legacy") {
+    return {
+      source: "workflow",
+      availability: "blocked",
+      reason: latest.message,
+      id: latest.runId,
+    };
+  }
+  const latestRunId = latest.runId;
 
   const summary = readWorkflowRunSummary(projectRoot, latestRunId);
   const hasMetadata = summary.hasJournal === true || summary.hasResult;
@@ -274,7 +285,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
       reason: "workflow run folder exists but has no journal/result metadata yet",
       id: latestRunId,
       status: summary.status,
-      path: workflowRunDir(projectRoot, latestRunId),
+      path: resolveWorkflowRunDir(projectRoot, latestRunId),
     };
   }
 
@@ -284,7 +295,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
     reason: "workflow run metadata is available for /loop once workflow <runId>",
     id: latestRunId,
     status: summary.status,
-    path: workflowRunDir(projectRoot, latestRunId),
+    path: resolveWorkflowRunDir(projectRoot, latestRunId),
     summary: renderWorkflowSummary(summary),
   };
 }
