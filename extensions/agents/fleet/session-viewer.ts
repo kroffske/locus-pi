@@ -337,9 +337,17 @@ export class AgentSessionViewer implements CustomUiComponent {
     if (this.#disposed) return [];
     const safeWidth = Math.max(1, Math.floor(width));
     const row = agentLiveStore.rowForExecution(this.execution);
-    if (!this.#isHistoricalRound() && row === undefined) {
+    // A historical round is read back from the journal and needs no live row. A live
+    // round without one has nothing left to draw, so the screen closes here instead —
+    // which is why `#statusLine` below is only ever handed a row that exists.
+    let statusLine: string;
+    if (this.#isHistoricalRound()) {
+      statusLine = padLine(themeText(this.theme, "muted", `⊙ History · round ${this.#selection}`), safeWidth);
+    } else if (row === undefined) {
       this.#close("quit");
       return [];
+    } else {
+      statusLine = this.#statusLine(row, safeWidth);
     }
     const rounds = this.roundsLabel();
     const header = this.#dividerLine(
@@ -347,7 +355,6 @@ export class AgentSessionViewer implements CustomUiComponent {
       safeWidth,
       "top",
     );
-    const statusLine = this.#statusLine(row, safeWidth);
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
@@ -546,11 +553,7 @@ export class AgentSessionViewer implements CustomUiComponent {
    * crosses a bucket — and calm freezes only the frame, which is why the elapsed
    * text coarsens with it instead of counting seconds nobody is watching.
    */
-  #statusLine(row: AgentLiveRow | undefined, width: number): string {
-    if (this.#isHistoricalRound()) {
-      return padLine(themeText(this.theme, "muted", `⊙ History · round ${this.#selection}`), width);
-    }
-    if (row === undefined) return padLine(themeText(this.theme, "muted", "⊘ Unavailable"), width);
+  #statusLine(row: AgentLiveRow, width: number): string {
     const meta = statusMeta(row.status, this.#ticker.spinnerIndex);
     // A finished row reports its recorded duration; a live one is measured from its
     // start, so the number keeps moving exactly while the work does.

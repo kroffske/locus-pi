@@ -3761,8 +3761,11 @@ export function workflowSlotKey(input: { phase?: string | undefined; label?: str
 /**
  * Readable identity of one agent call for the replay record: `(phase, label,
  * occurrence)`, where `occurrence` counts the earlier calls sharing that slot in
- * THIS run. A loop or a `parallel()` branch legitimately repeats a label, so the
- * counter is what keeps two rounds of one node apart.
+ * THIS run. A slot is legitimately re-entered — a later round of a loop, or any
+ * sequential second call on the same `(phase, label)` — and the counter is what
+ * keeps those rounds of one node apart. Two branches holding the same slot AT THE
+ * SAME TIME is not that case: the runtime's slot guard refuses the second one
+ * (REQ-009), so concurrent `parallel()` branches never share an occurrence counter.
  *
  * A call without a label gets no name, and the replay controller fails closed on
  * it once the source bytes changed: naming a call is the author's job, and the
