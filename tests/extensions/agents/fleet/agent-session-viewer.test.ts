@@ -8,6 +8,7 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { statusMeta } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import agents from "../../../../extensions/agents/index.js";
 import {
@@ -189,14 +190,17 @@ describe("AgentSessionViewer", () => {
         message: { role: "assistant", content: [{ type: "text", text: `history-${index}` }], stopReason: "stop" },
       });
     }
-    const tui = { terminal: { rows: 8, columns: 32 }, requestRender: vi.fn() };
+    // Nine rows, not eight: the live status line under the header costs one body
+    // row, so the same REQUEST + RUNTIME reach needs one more terminal row.
+    const tui = { terminal: { rows: 9, columns: 32 }, requestRender: vi.fn() };
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const rendered = viewer.render(32);
     expect(rendered).toHaveLength(tui.terminal.rows - 1);
     expect(rendered.every((line) => visibleWidth(line) === 32)).toBe(true);
     expect(rendered[0]).toMatch(/^╭─ \[agent .+\] started work/u);
-    expect(rendered.at(-1)).toMatch(/^╰─ STATUS: queued/u);
+    expect(rendered[1]).toContain("Queued");
+    expect(rendered.at(-1)).toMatch(/^╰─ esc close/u);
     expect(rendered.join("\n")).toContain("history-7");
     expect(rendered.join("\n")).not.toContain("history-0");
 
@@ -230,8 +234,12 @@ describe("AgentSessionViewer", () => {
     expect(rendered).toContain("<muted>╭─ [agent");
     expect(rendered).toContain("<muted>├─ REQUEST");
     expect(rendered).toContain("<muted>├─ RUNTIME");
-    expect(rendered).toContain("<muted>╰─ STATUS:");
-    expect(fg.mock.calls.every(([color]) => color === "muted")).toBe(true);
+    expect(rendered).toContain("<muted>╰─ esc close");
+    // Only the dividers are claimed by this rule; the status line carries the tone
+    // of the state it reports (`statusMeta`), which is a different contract.
+    expect(fg.mock.calls.filter(([, text]) => /^[╭├╰]/u.test(String(text))).every(([color]) => color === "muted")).toBe(
+      true,
+    );
     // Double-weight rules read as a second, unrelated component.
     expect(rendered).not.toMatch(/[╞╘═]/u);
     viewer.dispose();
@@ -243,7 +251,8 @@ describe("AgentSessionViewer", () => {
     setViewerExternalRows("test-active-workflow", 3);
     try {
       const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
-      expect(viewer.render(80)).toHaveLength(6);
+      // header + status + 4 content rows + footer; the widget's 3 rows stay reserved.
+      expect(viewer.render(80)).toHaveLength(7);
       viewer.dispose();
     } finally {
       clearViewerExternalRows("test-active-workflow");
@@ -265,13 +274,14 @@ describe("AgentSessionViewer", () => {
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const rendered = viewer.render(80);
-    expect(rendered).toHaveLength(6);
+    expect(rendered).toHaveLength(7);
     expect(rendered[0]).toMatch(/^╭─ \[agent/u);
-    expect(rendered[1]).toMatch(/^├─ REQUEST/u);
-    expect(rendered[2]).toContain("Check one file.");
-    expect(rendered[3]).toMatch(/^├─ RUNTIME/u);
-    expect(rendered[4]).toContain("One-line result.");
-    expect(rendered[5]).toMatch(/^╰─ STATUS:/u);
+    expect(rendered[1]).toContain("Queued");
+    expect(rendered[2]).toMatch(/^├─ REQUEST/u);
+    expect(rendered[3]).toContain("Check one file.");
+    expect(rendered[4]).toMatch(/^├─ RUNTIME/u);
+    expect(rendered[5]).toContain("One-line result.");
+    expect(rendered[6]).toMatch(/^╰─ esc close/u);
     expect(rendered.every((line) => line.trim() !== "")).toBe(true);
     expect(rendered.length).toBeLessThan(tui.terminal.rows - 1);
     viewer.dispose();
@@ -652,11 +662,13 @@ describe("AgentSessionViewer", () => {
     });
 
     const initial = viewer.render(80);
-    expect(initial).toHaveLength(9);
+    // 9 + the status line: header, status, 4 content rows, 3 editor rows, footer.
+    expect(initial).toHaveLength(10);
     expect(initial.length).toBeLessThan(tui.terminal.rows - 1);
     expect(initial.join("\n")).not.toContain("Message to Agent");
     expect(initial.join("\n")).not.toContain("MESSAGE TO AGENT");
-    expect(initial.at(-1)).toMatch(/^╰─ STATUS: queued/u);
+    expect(initial[1]).toContain("Queued");
+    expect(initial.at(-1)).toMatch(/^╰─ esc close/u);
     viewer.handleInput("h");
     viewer.handleInput("i");
     viewer.handleInput("enter");
@@ -736,7 +748,8 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     const rendered = viewer.render(80);
-    expect(rendered).toHaveLength(12);
+    // 12 + the status line; the editor's own row count is unchanged here.
+    expect(rendered).toHaveLength(13);
     expect(rendered.length).toBeLessThan(terminal.rows - 1);
     expect(rendered.join("\n")).toContain("↵ send · ⇧↵ newline");
     viewer.handleInput("o");
@@ -869,7 +882,8 @@ describe("AgentSessionViewer", () => {
     });
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 9, columns: 100 }, requestRender: vi.fn() },
+      // One row more than before: the status line takes one body row.
+      { terminal: { rows: 10, columns: 100 }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );
@@ -897,7 +911,8 @@ describe("AgentSessionViewer", () => {
     });
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 7, columns: 100 }, requestRender: vi.fn() },
+      // One row more than before: the status line takes one body row.
+      { terminal: { rows: 8, columns: 100 }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );
@@ -924,5 +939,147 @@ describe("AgentSessionViewer", () => {
     expect(text).toContain("No child transcript or readable answer is available.");
     expect(text).toContain("error: Replayed answer artifact is tampered.");
     viewer.dispose();
+  });
+
+  it("locates a workflow agent by walking the store's parents up to its group", () => {
+    const group = agentLiveStore.begin({
+      id: "workflow:run-7:group:parallel-1",
+      workflowRunId: "run-7",
+      agentName: "workflow-group",
+      label: "parallel (2)",
+      groupKind: "parallel",
+      groupTotal: 2,
+    });
+    const anchor = agentLiveStore.begin({
+      id: "workflow:run-7:sdk:reviewer:audit:plan",
+      workflowRunId: "run-7",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "reviewer (audit)",
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-7:sdk:reviewer:audit:plan",
+      workflowRunId: "run-7",
+      parentRowId: anchor.id,
+      agentName: "reviewer",
+      label: "audit",
+      title: "Audit the router",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 160 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const header = viewer.render(160)[0] ?? "";
+    // Outermost first: run, then the group, then the anchor slot, then this agent.
+    expect(header).toContain("workflow run-7");
+    expect(header).toContain("parallel (2)");
+    expect(header).toContain("audit");
+    expect(header).toContain("Audit the router");
+    expect(header.indexOf("workflow run-7")).toBeLessThan(header.indexOf("parallel (2)"));
+    expect(header.indexOf("parallel (2)")).toBeLessThan(header.indexOf("Audit the router"));
+    viewer.dispose();
+  });
+
+  it("keeps the short heading for a non-workflow row and never repeats an anchor's own name", () => {
+    const plain = agentLiveStore.begin({ id: "plain-row", agentName: "reviewer", label: "Review" });
+    const plainViewer = new AgentSessionViewer(
+      executionFor(plain.id),
+      { terminal: { rows: 8, columns: 120 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(plainViewer.render(120)[0]).toMatch(/^╭─ \[agent .+\] started work · Review/u);
+    expect(plainViewer.render(120)[0]).not.toContain("workflow ");
+    plainViewer.dispose();
+
+    // The anchor and its child are one actor: the anchor's name adds no segment,
+    // and a parent that is no longer in the store ends the walk instead of it.
+    const anchor = agentLiveStore.begin({
+      id: "workflow:run-9:sdk:reviewer:audit:",
+      workflowRunId: "run-9",
+      parentRowId: "workflow:run-9:group:gone",
+      agentName: "reviewer",
+      label: "reviewer (audit)",
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-9:sdk:reviewer:audit:",
+      workflowRunId: "run-9",
+      parentRowId: anchor.id,
+      agentName: "reviewer",
+      label: "audit",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 120 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    const header = viewer.render(120)[0] ?? "";
+    expect(header).toContain("workflow run-9");
+    expect(header.match(/audit/gu)).toHaveLength(1);
+    viewer.dispose();
+  });
+
+  it("advances the status frame on the shared tick and freezes it under calm rendering", () => {
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "tick-viewer", agentName: "reviewer", label: "Review" });
+      agentLiveStore.patch(row.id, { status: "working" });
+      const tui = { terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+      expect(viewer.render(80)[1]).toContain(statusMeta("working", 0).icon);
+      tui.requestRender.mockClear();
+      vi.advanceTimersByTime(1000);
+      expect(tui.requestRender).toHaveBeenCalled();
+      expect(viewer.render(80)[1]).toContain(statusMeta("working", 1).icon);
+      viewer.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds the status line byte-identical across ticks under calm rendering", () => {
+    vi.stubEnv("LOCUS_PS_CALM", "1");
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "calm-viewer", agentName: "reviewer", label: "Review" });
+      agentLiveStore.patch(row.id, { status: "working" });
+      const tui = { terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+      const first = viewer.render(80)[1];
+      expect(first).toContain(statusMeta("working", 0).icon);
+      // The clock still runs — the tick asks for repaints — but the frame and the
+      // coarse elapsed bucket do not move, so the line is identical.
+      vi.advanceTimersByTime(3000);
+      expect(tui.requestRender).toHaveBeenCalled();
+      expect(viewer.render(80)[1]).toEqual(first);
+      viewer.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the status tick when the viewer is disposed", () => {
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "tick-leak-viewer", agentName: "reviewer", label: "Review" });
+      agentLiveStore.patch(row.id, { status: "working" });
+      const tui = { terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+      viewer.render(80);
+
+      viewer.dispose();
+      tui.requestRender.mockClear();
+      vi.advanceTimersByTime(10_000);
+      expect(tui.requestRender).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

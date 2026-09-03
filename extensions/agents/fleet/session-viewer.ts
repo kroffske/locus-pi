@@ -11,7 +11,15 @@ import type {
 } from "../../_shared/agent-runtime/agent-live-transcript.js";
 import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
 import { RenderScheduler } from "../../_shared/host/render-scheduler.js";
-import { agentLiveDisplayName, agentLiveTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
+import {
+  agentLiveDisplayName,
+  agentLiveTitle,
+  elapsedSinceStart,
+  formatDuration,
+  formatDurationCoarse,
+  statusMeta,
+} from "../../_shared/agent-runtime/agent-live-panel.js";
+import { startAgentLiveTicker, type AgentLiveTicker } from "../../_shared/agent-runtime/agent-live-tick.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { padLine, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";
@@ -92,6 +100,17 @@ type NativeComponentEntry =
 
 // Pi renders the default-loaded Locus footer beneath custom views.
 const PI_HOST_FOOTER_ROWS = 1;
+/**
+ * Rows the viewer's own frame always costs: the breadcrumb divider, the live
+ * status line beneath it, and the footer divider. Every geometry threshold below
+ * is expressed against this constant rather than a literal, so the frame can
+ * gain or lose a line in one place.
+ */
+const VIEWER_CHROME_ROWS = 3;
+/** Body rows the input may never eat into, so a suppressed editor is a last resort. */
+const MIN_BODY_ROWS_WITH_INPUT = 2;
+/** Bound on the `parentRowId` walk behind the header breadcrumb. */
+const MAX_LOCATION_ANCESTORS = 4;
 const MOUSE_SCROLL_LINES = 3;
 const ENABLE_MOUSE_SCROLL = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE_SCROLL = "\u001b[?1000l\u001b[?1006l";
@@ -212,6 +231,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   readonly #unsubscribe: () => void;
   readonly #scheduler = new RenderScheduler(() => this.tui.requestRender());
   #storeAttached = true;
+  readonly #ticker: AgentLiveTicker;
   readonly #mouseScrollOwned: boolean;
   #releaseMouseScroll = () => {};
   #releaseFleetViewedRow = () => {};
@@ -247,6 +267,15 @@ export class AgentSessionViewer implements CustomUiComponent {
     };
     agentLiveStore.emitter.on("change", requestRender);
     this.#unsubscribe = () => agentLiveStore.emitter.off("change", requestRender);
+    // The store emits on state, not on time: without a heartbeat the status line's
+    // spinner and elapsed text would stand still through a long tool call. Shared
+    // with the progress panel so both surfaces animate on one cadence.
+    this.#ticker = startAgentLiveTicker({
+      onTick: () => {
+        if (this.#disposed) return;
+        this.#scheduler.request();
+      },
+    });
     const dispose = () => this.dispose();
     activeSessionViewers().add(dispose);
     this.#unregisterGlobal = () => activeSessionViewers().delete(dispose);
@@ -261,7 +290,12 @@ export class AgentSessionViewer implements CustomUiComponent {
       return [];
     }
     const rounds = this.roundsLabel();
-    const header = this.#dividerLine(`${this.#title}${rounds === "" ? "" : `  ${rounds}`}`, safeWidth, "top");
+    const header = this.#dividerLine(
+      `${this.#headerLabel(row)}${rounds === "" ? "" : `  ${rounds}`}`,
+      safeWidth,
+      "top",
+    );
+    const statusLine = this.#statusLine(row, safeWidth);
     const snapshot = row?.transcript;
     const content = this.#isHistoricalRound()
       ? (this.rounds?.readBody(this.#selection) ?? [`Round ${this.#selection} is not available in the run journal.`])
@@ -271,17 +305,25 @@ export class AgentSessionViewer implements CustomUiComponent {
       hostRows === undefined ? undefined : Math.max(1, hostRows - PI_HOST_FOOTER_ROWS - viewerExternalRows());
     let input = this.#syncInput(terminalRows);
     let inputLines = input?.render(safeWidth).map((line) => padLine(line, safeWidth)) ?? [];
-    if (terminalRows !== undefined && inputLines.length > Math.max(0, terminalRows - 4)) {
+    // The editor may claim everything the frame and a readable body do not need.
+    // The frame now costs one row more than it did (status line), so the input's
+    // ceiling drops by exactly that row — the two body rows are unchanged.
+    if (
+      terminalRows !== undefined &&
+      inputLines.length > Math.max(0, terminalRows - VIEWER_CHROME_ROWS - MIN_BODY_ROWS_WITH_INPUT)
+    ) {
       this.#suppressInputForRows(terminalRows);
       input = undefined;
       inputLines = [];
     }
-    const footer = this.#dividerLine(this.#footerLabel(row, input !== undefined), safeWidth, "bottom");
+    const footer = this.#dividerLine(this.#footerLabel(input !== undefined), safeWidth, "bottom");
     if (terminalRows === undefined) {
-      return [header, ...content.map((line) => padLine(line, safeWidth)), ...inputLines, footer];
+      return [header, statusLine, ...content.map((line) => padLine(line, safeWidth)), ...inputLines, footer];
     }
-    if (terminalRows === 1) return [header];
-    const bodyHeight = Math.max(0, terminalRows - inputLines.length - 2);
+    // Below the frame's own height there is nothing to lay out: hand back the rows
+    // that were granted, outermost first, rather than overflowing the grant.
+    if (terminalRows < VIEWER_CHROME_ROWS) return [header, statusLine].slice(0, terminalRows);
+    const bodyHeight = Math.max(0, terminalRows - inputLines.length - VIEWER_CHROME_ROWS);
     if (this.#historyOffset > 0 && this.#lastHistoryLineCount > 0) {
       this.#historyOffset +=
         content.length - this.#lastHistoryLineCount + (this.#lastBodyHeight - Math.max(1, bodyHeight));
@@ -290,7 +332,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#lastHistoryLineCount = content.length;
     this.#lastBodyHeight = Math.max(1, bodyHeight);
     const visible = historyWindow(content, bodyHeight, this.#historyOffset).map((line) => padLine(line, safeWidth));
-    return [header, ...visible, ...inputLines, footer];
+    return [header, statusLine, ...visible, ...inputLines, footer];
   }
 
   handleInput(data: string): void {
@@ -360,6 +402,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#ticker.stop();
     this.#releaseMouseScroll();
     this.#releaseMouseScroll = () => {};
     this.#releaseFleetViewedRow();
@@ -407,6 +450,38 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#dividerLine("RUNTIME", width),
       ...transcript,
     ];
+  }
+
+  /**
+   * Where this agent sits, read from the store and not from its own text: the
+   * workflow run, then every live ancestor from the outermost inwards, then the
+   * agent itself. A row outside a workflow has no location to report, so it keeps
+   * the short one-segment heading it has always had.
+   */
+  #headerLabel(row: AgentLiveRow | undefined): string {
+    if (row === undefined) return this.#title;
+    return [...workflowLocationSegments(row), formatAgentSessionStart(row)].join(" · ");
+  }
+
+  /**
+   * The one line that answers "is it alive": the shared `statusMeta` icon/word for
+   * this row's state plus how long it has been in flight. Both halves move on the
+   * 1 Hz ticker — the spinner frame while it is working, the elapsed text as it
+   * crosses a bucket — and calm freezes only the frame, which is why the elapsed
+   * text coarsens with it instead of counting seconds nobody is watching.
+   */
+  #statusLine(row: AgentLiveRow | undefined, width: number): string {
+    if (this.#isHistoricalRound()) {
+      return padLine(themeText(this.theme, "muted", `⊙ History · round ${this.#selection}`), width);
+    }
+    if (row === undefined) return padLine(themeText(this.theme, "muted", "⊘ Unavailable"), width);
+    const meta = statusMeta(row.status, this.#ticker.spinnerIndex);
+    // A finished row reports its recorded duration; a live one is measured from its
+    // start, so the number keeps moving exactly while the work does.
+    const elapsedMs = row.elapsedMs ?? elapsedSinceStart(row);
+    const elapsed = this.#ticker.calm ? formatDurationCoarse(elapsedMs) : formatDuration(elapsedMs);
+    const text = `${meta.icon} ${meta.word}${elapsed === "" ? "" : ` · ${elapsed}`}`;
+    return padLine(themeText(this.theme, meta.color, text), width);
   }
 
   #dividerLine(label: string, width: number, style: DividerStyle = "section"): string {
@@ -500,15 +575,15 @@ export class AgentSessionViewer implements CustomUiComponent {
     return fallbacks.includes(data);
   }
 
-  #footerLabel(row: AgentLiveRow | undefined, hasInput: boolean): string {
+  /** Controls only. The agent's state moved to the status line under the header. */
+  #footerLabel(hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
     const controls = hasInput
       ? `${this.#mouseScrollOwned ? "wheel/" : ""}pgup/pgdn history · enter send`
       : this.#inputSuppressedAtRows === undefined
         ? "pgup/pgdn history"
         : "resize terminal for input";
-    const status = this.#isHistoricalRound() ? "history" : (row?.status ?? "unavailable");
-    return `STATUS: ${status} · ${notice}esc close · ${controls} · ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`;
+    return `${notice}esc close · ${controls} · ctrl+o tools:${this.#expandedTools ? "expanded" : "compact"}`;
   }
 }
 
@@ -654,7 +729,45 @@ function dividerLine(label: string, width: number, style: DividerStyle = "sectio
   return `${left}${fitted} ${fill.repeat(Math.max(0, labelWidth - visibleWidth(fitted)))}`;
 }
 
-function themeText(theme: unknown, tone: "muted", text: string): string {
+/**
+ * The run location of one live row, outermost segment first: `workflow <run>`
+ * then each live ancestor's own heading. The chain walks `parentRowId` through
+ * `agentLiveStore.rows` and stops at the first row carrying a `groupKind` — a
+ * group is the outermost live ancestor a workflow child has, and stopping there
+ * keeps the walk bounded even if a future producer nests rows more deeply.
+ *
+ * Two deliberate choices:
+ *
+ * - Ancestors are read as ROWS (their own title/label), never by decomposing a
+ *   `slotKey` or a row id. The phase is embedded in both as a string joined by an
+ *   unprintable unit separator (`workflow-runtime.ts:workflowSlotKey`); a heading
+ *   built by splitting those keys breaks silently the day the key format moves,
+ *   and the anchor row that carries the phase already states its own name.
+ * - The store is the authority, not the panel projection:
+ *   `compactWorkflowParentRows` re-parents a child onto the group for rendering,
+ *   but it is a pure projection — here the anchor is still the child's parent and
+ *   is worth naming when it says something the leaf does not.
+ */
+function workflowLocationSegments(row: AgentLiveRow): string[] {
+  if (row.workflowRunId === undefined) return [];
+  const leafTitle = agentLiveTitle(row);
+  const ancestors: string[] = [];
+  const visited = new Set<string>([row.id]);
+  let parentId = row.parentRowId;
+  while (parentId !== undefined && !visited.has(parentId) && ancestors.length < MAX_LOCATION_ANCESTORS) {
+    visited.add(parentId);
+    const parent = agentLiveStore.rows.get(parentId);
+    if (parent === undefined) break;
+    const title = agentLiveTitle(parent);
+    // An anchor row repeats its child's own name; one segment per distinct name.
+    if (title !== "" && title !== leafTitle && !ancestors.includes(title)) ancestors.push(title);
+    if (parent.groupKind !== undefined) break;
+    parentId = parent.parentRowId;
+  }
+  return [`workflow ${row.workflowRunId}`, ...ancestors.reverse()];
+}
+
+function themeText(theme: unknown, tone: string, text: string): string {
   if (!isRecord(theme) || typeof theme.fg !== "function") return text;
   return String(theme.fg.call(theme, tone, text));
 }
