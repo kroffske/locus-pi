@@ -50,7 +50,7 @@ function project(): string {
 describe("workflow command argument completion", () => {
   it("keeps ordinary command typing off the persisted handoff scan", async () => {
     const root = project();
-    const persistedRunIds = vi.spyOn(workflowJournal, "listWorkflowRunIds");
+    const persistedRunIds = vi.spyOn(workflowJournal, "listWorkflowRootRunIds");
     const eligibleRunIds = vi
       .spyOn(WorkflowOperatorHandoffController.prototype, "eligibleRunIds")
       .mockReturnValue(["20260724-130000-new"]);
@@ -87,6 +87,25 @@ describe("workflow command argument completion", () => {
 
   it("returns full argument strings for grammar-owned tokens and yields free text and paths", async () => {
     const root = project();
+    const storageRootRunId = "20260724-130000-new";
+    const childId = "20260724-140000-child";
+    const attemptId = "20260724-150000-attempt";
+    for (const [runId, kind] of [
+      [childId, "child"],
+      [attemptId, "attempt"],
+    ] as const) {
+      const runDir = ensureWorkflowRunDir(root, runId, { storageRootRunId, kind });
+      writeFileSync(
+        workflowResultFile(runDir),
+        JSON.stringify({
+          runId,
+          storageRootRunId,
+          ok: true,
+          journal: [{ ts: `2026-07-24T${kind === "child" ? "14" : "15"}:00:00.000Z` }],
+        }),
+        "utf8",
+      );
+    }
     const harness = createHarness(root);
     harness.ctx.cwd = root;
     workflows(harness.pi);
@@ -107,6 +126,8 @@ describe("workflow command argument completion", () => {
       expect.objectContaining({ value: "status 20260724-130000-new" }),
     );
     expect(complete("stop ")).toContainEqual(expect.objectContaining({ value: "stop last" }));
+    expect(complete("stop ")).toContainEqual(expect.objectContaining({ value: `stop ${attemptId}` }));
+    expect(complete("stop ")).not.toContainEqual(expect.objectContaining({ value: `stop ${childId}` }));
     expect(complete("run alpha ")).toEqual([
       expect.objectContaining({ value: "run alpha --run-name ", label: "--run-name" }),
       expect.objectContaining({ value: "run alpha --output-dir ", label: "--output-dir" }),

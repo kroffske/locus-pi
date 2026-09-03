@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowArtifactStore,
@@ -27,6 +27,7 @@ import {
   workflowRunArtifactsDir,
   workflowRunRuntimeDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import * as workflowRunLayout from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { parseWorkflowPersistedBinding } from "../../../../extensions/workflows/runtime/workflow-persisted-binding.js";
 import {
@@ -39,6 +40,7 @@ import { createHarness } from "../../../test-harness.js";
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -55,6 +57,17 @@ function runDir(root: string, runId: string): string {
 }
 
 describe("workflow run artifact store", () => {
+  it("refuses an unclaimed execution directory instead of creating a flat run", () => {
+    const root = project();
+    const id = "unclaimed-child";
+    const directory = path.join(root, ".locus-pi", "runs", id);
+    assert.throws(
+      () => createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: directory }),
+      /claimed execution|missing|ENOENT/u,
+    );
+    assert.equal(existsSync(directory), false);
+  });
+
   it("reads persisted indexes and bytes without creating missing runtime state", () => {
     const root = project();
     const absent = readWorkflowArtifactIndex(root, "absent-run");
@@ -352,12 +365,22 @@ describe("workflow run artifact store", () => {
       runId: "snapshot-binding-valid-consumer",
       runDir: runDir(root, "snapshot-binding-valid-consumer"),
     });
+    const originalResolve = workflowRunLayout.resolveWorkflowRunDir;
+    const resolve = vi.spyOn(workflowRunLayout, "resolveWorkflowRunDir").mockImplementation((projectRoot, runId) => {
+      const resolved = originalResolve(projectRoot, runId);
+      if (runId === sourceRunId) {
+        mkdirSync(path.join(runDir(root, "duplicate-source-group"), "children", sourceRunId), { recursive: true });
+      }
+      return resolved;
+    });
     assert.equal(current.consumeText(sourceRef).text, "exact plan");
+    assert.equal(resolve.mock.calls.length, 1);
   });
 
   it("binds present Package sources to inventory depth while preserving removed history", () => {
     const root = project();
     const runId = "inventory-binding";
+    mkdirSync(runDir(root, runId), { recursive: true });
     const snapshotPath = path.join(
       root,
       ".locus-pi",

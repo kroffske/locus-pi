@@ -28,7 +28,16 @@ import {
   WORKFLOW_OUTPUT_DIR_PATTERN,
   WORKFLOW_OUTPUT_LOCK_FILE,
   workflowOutputStateDir,
+  writeWorkflowWorkspaceRunLink,
 } from "../../../../extensions/workflows/runtime/workflow-output.js";
+import {
+  createWorkflowArtifactStore,
+  readWorkflowArtifactIndex,
+  readWorkflowArtifactRecord,
+} from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import * as workflowRunLayout from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { writeWorkflowRunGroupReport } from "../../../../extensions/workflows/runtime/workflow-run-report.js";
 import {
   readWorkflowRunResult,
   readWorkflowRunResultText,
@@ -1455,6 +1464,14 @@ export default (dsl, input) => dsl.agent(input);
       kind: "ready",
       target: { kind: "name", ref: "composed/worker", source: "project" },
     });
+    const childArtifacts = readWorkflowArtifactIndex(root, childRunId);
+    if (childArtifacts.status !== "ready") throw new Error(childArtifacts.message);
+    const answerRef = childArtifacts.index.artifacts.find((artifact) => artifact.kind === "answer");
+    if (answerRef === undefined) throw new Error("composed child answer was not persisted");
+    expect(readWorkflowArtifactRecord(root, childRunId, answerRef.artifactId)).toMatchObject({
+      status: "ready",
+      bytes: Buffer.from("done"),
+    });
 
     const direct = await runWorkflowScript({
       pi: harness.pi,
@@ -1522,6 +1539,8 @@ export default (dsl) => dsl.outputDir();
       name: "alpha",
     });
     expect(first.ok, first.error).toBe(true);
+    const originalReadme = readFileSync(path.join(first.runDir, "README.md"), "utf8");
+    const originalBacklink = readFileSync(path.join(first.workspaceDir!, ".workflow-runs.md"), "utf8");
 
     let calls = 0;
     const resumed = await runWorkflowScript({
@@ -1538,6 +1557,10 @@ export default (dsl) => dsl.outputDir();
 
     expect(resumed.ok).toBe(false);
     expect(resumed.error).toContain("outputDir must equal the source workspace");
+    expect(resumed.runDir).toBe(path.join(first.runDir, "attempts", resumed.runId));
+    expect(resumed.resultPersistence.ok).toBe(true);
+    expect(readFileSync(path.join(first.runDir, "README.md"), "utf8")).toBe(originalReadme);
+    expect(readFileSync(path.join(first.workspaceDir!, ".workflow-runs.md"), "utf8")).toBe(originalBacklink);
     expect(calls).toBe(0);
     expect(existsSync(path.join(root, "tmp", "beta"))).toBe(false);
   });
@@ -1856,6 +1879,19 @@ export default (dsl) => dsl.outputDir();
       outputDir,
     });
     expect(first.ok, first.error).toBe(true);
+
+    const originalResolve = workflowRunLayout.resolveWorkflowRunDir;
+    const duplicateGroup = path.join(root, ".locus-pi", "runs", "duplicate-binding-group");
+    const resolve = vi.spyOn(workflowRunLayout, "resolveWorkflowRunDir").mockImplementation((projectRoot, runId) => {
+      const resolved = originalResolve(projectRoot, runId);
+      mkdirSync(path.join(duplicateGroup, "children", runId), { recursive: true });
+      return resolved;
+    });
+    const resolvedRunDir = workflowRunLayout.resolveWorkflowRunDir(root, first.runId);
+    expect(readWorkflowLaunchBinding(root, first.runId, resolvedRunDir)).not.toBeNull();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    resolve.mockRestore();
+    rmSync(duplicateGroup, { recursive: true, force: true });
 
     const readSpy = vi.spyOn(workflowJournal, "readWorkflowRunResult");
     try {
@@ -2246,7 +2282,7 @@ export default (dsl) => dsl.outputDir();
       writeFileSync(path.join(root, "outputs", "retry", `${key}.md`), `${prompt}\n`, "utf8");
       return "written";
     });
-    const run = () =>
+    const run = (resumeFromRunId?: string) =>
       runWorkflowScript({
         pi: harness.pi,
         ctx: harness.ctx,
@@ -2255,6 +2291,7 @@ export default (dsl) => dsl.outputDir();
         input: "payload",
         items: ["alpha", "beta"],
         outputDir: "outputs/retry",
+        ...(resumeFromRunId === undefined ? {} : { resumeFromRunId }),
         createExecutor,
       });
 
@@ -2264,13 +2301,26 @@ export default (dsl) => dsl.outputDir();
 
     calls.length = 0;
     failBeta = false;
-    const resumed = await run();
+    const resumed = await run(interrupted.runId);
     expect(resumed.ok, resumed.error).toBe(true);
     expect(calls).toEqual(["write:payload:beta"]);
     expect(resumed.childRuns).toEqual([
       expect.objectContaining({ status: "skipped", key: "alpha" }),
       expect.objectContaining({ status: "completed", key: "beta" }),
     ]);
+    expect(resumed.storageRootRunId).toBe(interrupted.runId);
+    expect(resumed.runDir).toBe(path.join(interrupted.runDir, "attempts", resumed.runId));
+    expect(resumed.lineage).toEqual({ rootRunId: resumed.runId, depth: 0 });
+    const retriedChild = resumed.childRuns![1]!;
+    expect(retriedChild.runDir).toBe(path.join(interrupted.runDir, "children", retriedChild.runId!));
+    const childEnvelope = JSON.parse(readFileSync(workflowResultFile(retriedChild.runDir!), "utf8"));
+    expect(childEnvelope.storageRootRunId).toBe(interrupted.runId);
+    expect(childEnvelope.lineage.rootRunId).toBe(resumed.runId);
+    expect(readWorkflowRunScriptSnapshot(root, retriedChild.runId!)).toMatchObject({ kind: "ready" });
+    const resumedAgain = await run(resumed.runId);
+    expect(resumedAgain.ok, resumedAgain.error).toBe(true);
+    expect(resumedAgain.runDir).toBe(path.join(interrupted.runDir, "attempts", resumedAgain.runId));
+    expect(resumedAgain.childRuns!.every((child) => child.status === "skipped")).toBe(true);
 
     calls.length = 0;
     writeWorkflow(root, "child", `${CHILD}\n// changed source identity\n`);
@@ -2740,6 +2790,65 @@ export default (dsl) => dsl.outputDir();
 });
 
 describe("fenced output leases and atomic checkpoints", () => {
+  it("writes navigation only for the active root owner and preserves user backlink conflicts", async () => {
+    const root = project();
+    const output = resolveWorkflowOutputDirectory(root, "outputs/links", "links", root);
+    const groupDir = ensureWorkflowRunDir(root, "root-one");
+    const lease = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "root-one" });
+    const input = {
+      projectRoot: root,
+      runId: "root-one",
+      storageRootRunId: "root-one",
+      workspaceDir: output.absolutePath,
+      workflow: "links",
+    };
+    writeWorkflowRunGroupReport(input, lease);
+    const readme = readFileSync(path.join(groupDir, "README.md"), "utf8");
+    const backlinkFile = path.join(output.absolutePath, ".workflow-runs.md");
+    const backlink = readFileSync(backlinkFile, "utf8");
+    writeFileSync(path.join(groupDir, "README.md"), "<!-- locus-pi:workflow-run-group:v1 -->\npartial");
+    writeWorkflowRunGroupReport(input, lease);
+    expect(readFileSync(path.join(groupDir, "README.md"), "utf8")).toBe(readme);
+    writeFileSync(backlinkFile, "<!-- locus-pi:workflow-workspace-runs:v1 -->\npartial");
+    expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow(
+      expect.objectContaining({ code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED" }),
+    );
+    expect(readFileSync(backlinkFile, "utf8")).toBe("<!-- locus-pi:workflow-workspace-runs:v1 -->\npartial");
+    writeFileSync(backlinkFile, backlink);
+    writeFileSync(backlinkFile, backlink.replace("[Группа root-one]", "[Группа root-two]"));
+    expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow(
+      expect.objectContaining({ code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED" }),
+    );
+    writeFileSync(backlinkFile, backlink);
+    expect(readdirSync(groupDir).some((name) => name.includes(".tmp-"))).toBe(false);
+    expect(readdirSync(output.absolutePath).some((name) => name.includes(".tmp-"))).toBe(false);
+    expect(() => writeWorkflowRunGroupReport({ ...input, runId: "child" }, lease)).toThrow(
+      /Only the root lease owner/u,
+    );
+    releaseWorkflowRootLease(lease);
+    expect(() => writeWorkflowRunGroupReport(input, lease)).toThrow();
+    expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow();
+    expect(readFileSync(path.join(groupDir, "README.md"), "utf8")).toBe(readme);
+    expect(readFileSync(backlinkFile, "utf8")).toBe(backlink);
+
+    writeWorkflow(root, "links", 'export default () => "must not execute";');
+    const reserved = path.join(output.absolutePath, ".workflow-runs.md");
+    writeFileSync(reserved, "user document\n");
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "links",
+      outputDir: output.relativePath,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Reserved workflow workspace file/u);
+    expect(result.resultPersistence.ok).toBe(true);
+    expect(readFileSync(reserved, "utf8")).toBe("user document\n");
+    expect(existsSync(path.join(output.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(false);
+  });
+
   it("retries the live lock-create-to-write acquisition window", async () => {
     const root = project();
     const output = resolveWorkflowOutputDirectory(root, "outputs/racing-owner", "unused", root);

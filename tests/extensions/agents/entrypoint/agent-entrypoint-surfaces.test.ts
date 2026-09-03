@@ -11,9 +11,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../../extensions/agents/index.js";
 import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import { workflowRunDir } from "../../../../extensions/workflows/runtime/workflow-journal.js";
-import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
-import { workflowJournalFile } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  ensureWorkflowRunDir,
+  workflowJournalFile,
+  workflowRunDir,
+} from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import type { ExtensionCommandContext } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit, runTool } from "../../../test-harness.js";
 

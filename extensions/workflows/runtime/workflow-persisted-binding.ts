@@ -18,7 +18,7 @@ import {
   readWorkflowRunFile,
   WORKFLOW_ROOT_DIRNAME,
   WORKFLOW_SAVED_SOURCE_DIRNAME,
-  workflowRunDir,
+  resolveWorkflowRunDir,
   workflowRunRuntimeDir,
 } from "./workflow-run-layout.js";
 
@@ -53,7 +53,7 @@ export function parseWorkflowPersistedBinding(
   record: Record<string, unknown>,
   projectRoot: string,
   runId: string,
-  options: { verifySnapshot?: boolean } = {},
+  options: { verifySnapshot?: boolean; runDir?: string } = {},
 ): WorkflowPersistedBindingRead {
   let target: WorkflowTargetIdentity | undefined;
   let targetPath: string | undefined;
@@ -110,7 +110,13 @@ export function parseWorkflowPersistedBinding(
   }
   if (scriptIdentity !== undefined && scriptIdentityInvalid === undefined) {
     try {
-      validatePersistedSnapshotBinding(scriptIdentity, projectRoot, runId, options.verifySnapshot === true);
+      validatePersistedSnapshotBinding(
+        scriptIdentity,
+        projectRoot,
+        runId,
+        options.verifySnapshot === true,
+        options.runDir,
+      );
     } catch (error) {
       scriptIdentityInvalid = errorMessage(error);
       scriptIdentity = undefined;
@@ -154,9 +160,10 @@ function validatePersistedSnapshotBinding(
   projectRoot: string,
   runId: string,
   verifySnapshot: boolean,
+  resolvedRunDir?: string,
 ): void {
   const safeRunId = assertWorkflowRunId(runId);
-  const runDir = workflowRunDir(projectRoot, safeRunId);
+  const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, safeRunId);
   const expectedPath = path.join(workflowRunRuntimeDir(runDir), `script-${identity.scriptSha256}.workflow.mjs`);
   if (identity.snapshotPath !== expectedPath) {
     throw new Error("Workflow script identity snapshotPath does not match its exact run-owned hash path.");

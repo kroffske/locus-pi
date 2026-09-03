@@ -17,17 +17,15 @@ import type { WorkflowArtifactRecord } from "../../../../extensions/workflows/ru
 import { DEFAULT_WORKFLOW_BUDGET } from "../../../../extensions/workflows/runtime/workflow-budget.js";
 import {
   workflowReportDir,
-  writeWorkflowRunReport,
+  writeWorkflowRunReport as writeClaimedWorkflowRunReport,
   type WorkflowRunReportEvidenceSource,
   type WorkflowRunReportInput,
 } from "../../../../extensions/workflows/runtime/workflow-run-report.js";
-import {
-  readWorkflowRunJournalState,
-  workflowRunDir,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunJournalState } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   ensureWorkflowRunDir,
   workflowJournalFile,
+  workflowRunDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   workflowResultFile,
@@ -53,6 +51,23 @@ function project(): string {
 }
 
 const RUN_ID = "20260728-190000-abcd";
+
+type TestWorkflowRunReportInput = Omit<WorkflowRunReportInput, "runDir"> & { runDir?: string };
+
+function writeWorkflowRunReport(
+  input: TestWorkflowRunReportInput,
+  evidence: WorkflowRunReportEvidenceSource,
+): ReturnType<typeof writeClaimedWorkflowRunReport> {
+  let runDir = input.runDir;
+  if (runDir === undefined) {
+    try {
+      runDir = ensureWorkflowRunDir(input.projectRoot, input.runId);
+    } catch {
+      runDir = input.projectRoot;
+    }
+  }
+  return writeClaimedWorkflowRunReport({ ...input, runDir }, evidence);
+}
 
 function record(
   overrides: Partial<WorkflowArtifactRecord> & Pick<WorkflowArtifactRecord, "artifactId" | "name" | "kind">,
@@ -100,6 +115,17 @@ function evidenceFrom(
 }
 
 describe("workflow run report", () => {
+  it("refuses an unclaimed directory without creating a flat run", () => {
+    const root = project();
+    const runDir = path.join(root, ".locus-pi", "runs", RUN_ID);
+    const outcome = writeClaimedWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, runDir, status: "failed", journal: [] },
+      evidenceFrom([], {}),
+    );
+    assert.equal(outcome.ok, false);
+    assert.equal(existsSync(runDir), false);
+  });
+
   it("projects each artifact name as ONE document holding its newest revision, with the chain in the README", () => {
     const root = project();
     ensureWorkflowRunDir(root, RUN_ID);
@@ -866,9 +892,12 @@ describe("workflow run report", () => {
  */
 describe("workflow run report budget section", () => {
   function budgetInput(overrides: Partial<WorkflowRunReportInput> = {}): WorkflowRunReportInput {
+    const projectRoot = overrides.projectRoot ?? project();
+    const runId = overrides.runId ?? RUN_ID;
     return {
-      projectRoot: project(),
-      runId: RUN_ID,
+      projectRoot,
+      runId,
+      runDir: overrides.runDir ?? ensureWorkflowRunDir(projectRoot, runId),
       status: "completed",
       journal: [],
       budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 0 },

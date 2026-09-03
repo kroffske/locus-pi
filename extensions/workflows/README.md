@@ -35,7 +35,9 @@ The `workflow` tool is the structured execution surface for agents. It supports 
 
 ## Evidence and workspaces
 
-- Run evidence: `.locus-pi/runs/<runId>/outputs/` and `runtime/`.
+- Откройте `.locus-pi/runs/<storageRootRunId>/README.md`: это общая папка первого запуска, дочерних executions и попыток resume. Первый запуск сохраняет `outputs/` и `runtime/` прямо в ней; дочерние находятся в `children/<runId>/`, попытки resume — в `attempts/<runId>/`.
+- У каждого выполнения отдельный `runId`. Команды status/result/resume находят его независимо от вложенности; старые flat runs остаются на месте и читаются без миграции.
+- В workspace файл `.workflow-runs.md` содержит обратные ссылки на группы. README и backlink атомарно заменяются только под действующим root lease. Неполный runtime-owned README восстанавливается, а неполный backlink требует явного recovery без потери прежних ссылок. Это навигация, не сводка текущего статуса: состояние каждого выполнения находится в его `runtime/result.json` и `runtime/journal.ndjson`.
 - Default workflow workspace: a unique `.locus-pi/workspaces/<generated-run-name>/` directory.
 - Any workflow supports `--run-name <name>` to select `.locus-pi/workspaces/<name>/`; an existing legacy-only `.locus-pi/plans/<name>/` stays in place so resume and checkpoint identity remain stable.
 - Explicit output directories must remain safe, project-relative paths.

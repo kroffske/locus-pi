@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   createWorkflowWorktree,
   createWorkflowWorkspaceManager,
 } from "../../../../extensions/workflows/runtime/workflow-worktree.js";
+import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 
 function repository() {
   const root = mkdtempSync(path.join(tmpdir(), "locus-workflow-workspace-"));
@@ -31,11 +32,26 @@ function repository() {
 }
 
 describe("workflow runtime-owned workspace", () => {
+  it("refuses an unclaimed run without creating a flat worktree root", () => {
+    const repo = repository();
+    const runDir = path.join(repo.root, ".locus-pi", "runs", "missing-run");
+    expect(() =>
+      createWorkflowWorktree({
+        projectRoot: repo.root,
+        runId: "missing-run",
+        runDir,
+        safeCallId: "agent-1",
+      }),
+    ).toThrow();
+    expect(existsSync(runDir)).toBe(false);
+  });
+
   it("allocates one opaque handle at the requested commit and resolves it repeatedly", () => {
     const repo = repository();
     const manager = createWorkflowWorkspaceManager({
       projectRoot: repo.root,
       runId: "review-fix",
+      runDir: ensureWorkflowRunDir(repo.root, "review-fix"),
     });
 
     const handle = manager.allocate("accepted fixes", repo.first);
@@ -56,6 +72,7 @@ describe("workflow runtime-owned workspace", () => {
     const manager = createWorkflowWorkspaceManager({
       projectRoot: repo.root,
       runId: "review-fix",
+      runDir: ensureWorkflowRunDir(repo.root, "review-fix"),
     });
 
     expect(() => manager.resolve("/tmp/model-reported-worktree")).toThrow("Unknown workflow workspace handle");
@@ -66,6 +83,7 @@ describe("workflow runtime-owned workspace", () => {
     const manager = createWorkflowWorkspaceManager({
       projectRoot: repo.root,
       runId: "review-fix",
+      runDir: ensureWorkflowRunDir(repo.root, "review-fix"),
     });
     const handle = manager.allocate("accepted fixes", repo.first);
     writeFileSync(path.join(repo.root, "file.txt"), "mutated original\n", "utf8");
@@ -97,7 +115,12 @@ describe("workflow runtime-owned workspace", () => {
     symlinkSync(outside, path.join(runtime, "worktrees"), "dir");
 
     expect(() =>
-      createWorkflowWorktree({ projectRoot: repo.root, runId: "run-escape", safeCallId: "agent-1" }),
+      createWorkflowWorktree({
+        projectRoot: repo.root,
+        runId: "run-escape",
+        runDir: path.join(repo.root, ".locus-pi", "runs", "run-escape"),
+        safeCallId: "agent-1",
+      }),
     ).toThrow(/symlink|unsafe/u);
     expect(readFileSync(sentinel, "utf8")).toBe("do-not-touch\n");
 
@@ -115,6 +138,7 @@ describe("workflow runtime-owned workspace", () => {
       createWorkflowWorktree({
         projectRoot: repo.root,
         runId: "run-override",
+        runDir: ensureWorkflowRunDir(repo.root, "run-override"),
         safeCallId: "agent-1",
         baseDir: outside,
       }),
@@ -134,7 +158,12 @@ describe("workflow runtime-owned workspace", () => {
     symlinkSync(outside, path.join(baseDir, "agent-1"), "dir");
 
     expect(() =>
-      createWorkflowWorktree({ projectRoot: repo.root, runId: "run-target", safeCallId: "agent-1" }),
+      createWorkflowWorktree({
+        projectRoot: repo.root,
+        runId: "run-target",
+        runDir: ensureWorkflowRunDir(repo.root, "run-target"),
+        safeCallId: "agent-1",
+      }),
     ).toThrow(/symlink|unsafe/u);
     expect(readFileSync(sentinel, "utf8")).toBe("do-not-touch\n");
 

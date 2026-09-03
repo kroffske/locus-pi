@@ -57,7 +57,6 @@ import {
 import {
   claimNewWorkflowRun,
   workflowJournalFile,
-  workflowRunDir,
   readWorkflowRunResult,
   readWorkflowRunSummary,
   workflowPersistedResultInvalidity,
@@ -189,12 +188,14 @@ import {
   readWorkflowRunTextFile,
   workflowLegacyRunMigrationMessage,
   workflowRunRuntimeDir,
+  workflowStorageRootRunId,
+  type WorkflowRunLocation,
   WORKFLOW_PLANS_DIRNAME,
   WORKFLOW_ROOT_DIRNAME,
   WORKFLOW_WORKSPACES_DIRNAME,
 } from "./workflow-run-layout.js";
 import { verifyWorkflowPersistedSnapshot } from "./workflow-persisted-binding.js";
-import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
+import { workflowReportDir, writeWorkflowRunReport, writeWorkflowRunGroupReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
   assertWorkflowHandoffClaimForContinuation,
@@ -241,6 +242,7 @@ interface ExpectedWorkflowChildSource {
 
 interface WorkflowRunnerCoordination {
   rootRunId: string;
+  storageRootRunId: string;
   depth: 0 | 1;
   parentRunId?: string;
   parentItemKey?: string;
@@ -350,6 +352,7 @@ export interface RunWorkflowScriptOptions {
 export interface RunWorkflowScriptResult {
   runId: string;
   runDir: string;
+  storageRootRunId?: string;
   ok: boolean;
   /** Runtime-owned terminal meaning. Optional only for legacy/test envelopes. */
   disposition?: WorkflowDisposition;
@@ -590,10 +593,15 @@ function readWorkflowResumeSemanticInputIdentity(
 export function readWorkflowResumeWorkspaceIdentity(
   projectRoot: string,
   runId: string,
+  resolvedRunDir?: string,
 ): WorkflowResumeWorkspaceIdentity {
-  const sourceResult = readWorkflowRunResult(projectRoot, runId);
-  const bindingPresent = workflowLaunchBindingExists(projectRoot, runId);
-  const binding = readWorkflowLaunchBinding(projectRoot, runId);
+  const sourceResult = readWorkflowRunResult(projectRoot, runId, resolvedRunDir);
+  const invalidity = workflowPersistedResultInvalidity(sourceResult);
+  if (invalidity !== undefined) {
+    throw new Error(`Cannot resume workflow: source run ${runId} has malformed persisted metadata (${invalidity}).`);
+  }
+  const bindingPresent = workflowLaunchBindingExists(projectRoot, runId, resolvedRunDir);
+  const binding = readWorkflowLaunchBinding(projectRoot, runId, resolvedRunDir);
   if (bindingPresent) {
     if (binding === null || sourceResult === null || !workflowLaunchBindingMatchesResult(binding, sourceResult)) {
       throw new Error(`Cannot resume post-code-review workflow: source run ${runId} has no valid host launch binding.`);
@@ -867,6 +875,7 @@ class SavedChildExecutionOwner {
   ): Promise<RunWorkflowScriptResult> {
     const childCoordination: WorkflowRunnerCoordination = {
       rootRunId: this.options.coordination.rootRunId,
+      storageRootRunId: this.options.coordination.storageRootRunId,
       depth: 1,
       parentRunId: this.options.parentRunId,
       parentItemKey: validated.key,
@@ -1045,18 +1054,39 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const resolvedBudget = inheritedCoordination?.budget === undefined ? resolveWorkflowBudget(opts.budget) : undefined;
   const budget = inheritedCoordination?.budget ?? resolvedBudget!.budget;
   const budgetRaises = resolvedBudget?.raises ?? [];
+  let storageLocation: WorkflowRunLocation | undefined;
+  let storageResolutionError: unknown;
+  if (inheritedCoordination !== undefined) {
+    storageLocation = { storageRootRunId: inheritedCoordination.storageRootRunId, kind: "child" };
+  } else if (opts.resumeFromRunId !== undefined) {
+    try {
+      storageLocation = {
+        storageRootRunId: workflowStorageRootRunId(projectRoot, opts.resumeFromRunId),
+        kind: "attempt",
+      };
+    } catch (error) {
+      // No safe group is known yet. Retain the rejected request in its own receipt.
+      storageResolutionError = error;
+    }
+  }
   const {
     runId,
+    runDir,
     journal,
     firstLine: budgetPrelude,
-  } = claimNewWorkflowRun(projectRoot, (mintedRunId) => ({
-    ts: new Date().toISOString(),
-    runId: mintedRunId,
-    kind: "log",
-    source: "runtime",
-    message: formatWorkflowBudgetPrelude(budget),
-  }));
-  const runDir = workflowRunDir(projectRoot, runId);
+  } = claimNewWorkflowRun(
+    projectRoot,
+    (mintedRunId) => ({
+      ts: new Date().toISOString(),
+      runId: mintedRunId,
+      kind: "log",
+      source: "runtime",
+      message: formatWorkflowBudgetPrelude(budget),
+    }),
+    undefined,
+    storageLocation,
+  );
+  const storageRootRunId = storageLocation?.storageRootRunId ?? runId;
   const runtimeDir = workflowRunRuntimeDir(runDir);
   const outputDir = workflowReportDir(projectRoot, runId);
   // Inherited coordination is the only authority for children: a saved child
@@ -1166,6 +1196,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     | "primaryFile"
     | "lineage"
     | "childRuns"
+    | "storageRootRunId"
   > => {
     const lineage: WorkflowRunLineage =
       inheritedCoordination === undefined
@@ -1210,6 +1241,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           }),
       ...(primaryFile === undefined ? {} : { primaryFile }),
       lineage,
+      storageRootRunId,
       ...(childRuns.length === 0 ? {} : { childRuns: [...childRuns] }),
     };
   };
@@ -1413,6 +1445,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         {
           projectRoot,
           runId,
+          runDir,
           ...(enrichedFields.workspaceDir === undefined ? {} : { workspaceDir: enrichedFields.workspaceDir }),
           status: enrichedFields.disposition?.status ?? (enrichedFields.ok ? "completed" : "failed"),
           ...(enrichedFields.target === undefined
@@ -1511,6 +1544,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         {
           projectRoot,
           runId,
+          runDir,
           ...(failedFields.workspaceDir === undefined ? {} : { workspaceDir: failedFields.workspaceDir }),
           status: failedFields.disposition?.status ?? "failed",
           ...(failedFields.target === undefined
@@ -1581,6 +1615,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     assertWorkflowInput(opts.input);
     if (opts.continuation !== undefined) assertWorkflowContinuation(opts.continuation);
     if (hasResume) resumeFromRunId = assertWorkflowRunId(requestedResumeFromRunId);
+    if (
+      storageResolutionError !== undefined &&
+      !(
+        typeof storageResolutionError === "object" &&
+        storageResolutionError !== null &&
+        "code" in storageResolutionError &&
+        storageResolutionError.code === "ENOENT"
+      )
+    )
+      throw storageResolutionError;
     if (hasResume && opts.continuation !== undefined) {
       throw new Error("Workflow continuation and resumeFromRunId are mutually exclusive.");
     }
@@ -1991,8 +2035,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     if (inheritedCoordination === undefined) {
       rootLease = acquireWorkflowRootLease({ projectRoot, output: stableOutput, rootRunId: runId });
+      writeWorkflowRunGroupReport(
+        { projectRoot, runId, storageRootRunId, workspaceDir: stableOutput.absolutePath, workflow: target.ref },
+        rootLease,
+      );
       coordination = {
         rootRunId: runId,
+        storageRootRunId,
         depth: 0,
         sharedExecution: createWorkflowSharedExecutionState({
           maxConcurrentAgents: budget.concurrency,
@@ -2112,6 +2161,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   workspaceManager = createWorkflowWorkspaceManager({
     projectRoot,
     runId,
+    runDir,
   });
   try {
     artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
@@ -2177,6 +2227,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ctx: opts.ctx,
     signal: opts.signal,
     workflowRunId: runId,
+    workflowRunDir: runDir,
     workspaceManager,
     evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
     workflowWorkspaceDir: stableOutput!.absolutePath,

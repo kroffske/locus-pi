@@ -12,35 +12,55 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
+import { readLoopStatus } from "../../../../extensions/loop/loop-continuation.js";
+import { buildRunDetailBlock } from "../../../../extensions/workflows/run/run-evidence.js";
+import { WorkflowRunViewer } from "../../../../extensions/workflows/run/run-viewer.js";
 import { composeWorkflowChildTask } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
+import * as workflowArtifacts from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
 import { readWorkflowArtifactRecord } from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
+import * as workflowJournal from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   listWorkflowRunIds,
+  listWorkflowRootRunIds,
+  listWorkflowRuns,
   readWorkflowRunJournal,
   readWorkflowRunJournalState,
   readWorkflowRunResult,
   readWorkflowRunResultText,
+  readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
-  workflowRunDir,
+  resolveWorkflowRunId,
+  workflowPersistedResultInvalidity,
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import * as workflowRunLayout from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   assertWorkflowRunId,
   ensureWorkflowRunDir,
+  replaceWorkflowRunFileAtomically,
+  workflowJournalFile,
+  resolveWorkflowRunDir,
+  workflowStorageRootRunId,
   workflowRunOutputsDir,
   workflowRunRuntimeDir,
   workflowRunFileExists,
+  workflowRunDir,
   workflowRunsRootDir,
   workflowLegacyRunMigrationMessage,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { readWorkflowReplayLog } from "../../../../extensions/workflows/runtime/workflow-replay.js";
-import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
+import {
+  readWorkflowResumeWorkspaceIdentity,
+  runWorkflowScript,
+} from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import { createHarness } from "../../../test-harness.js";
 
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -119,7 +139,7 @@ describe("workflow workspace and run evidence", () => {
     const persisted = readWorkflowRunResult(root, result.runId);
     assert.equal(persisted?.workspacePhysicalIdentity, `.locus-pi/workspaces/${result.runId}-files`);
     assert.equal(persisted?.workspacePhysicalIdentityInvalid, undefined);
-    assert.deepEqual(readdirSync(workspaceDir), ["plan.md"]);
+    assert.deepEqual(readdirSync(workspaceDir), [".workflow-runs.md", "plan.md"]);
     assert.equal(readFileSync(path.join(workspaceDir, "plan.md"), "utf8"), "the plan body");
     assert.equal(tasks.length, 1);
     assert.equal(tasks[0]!.split(workspaceDir).length - 1, 1);
@@ -127,7 +147,7 @@ describe("workflow workspace and run evidence", () => {
     const outputNames = readdirSync(workflowRunOutputsDir(workflowRunDir(root, result.runId))).sort();
     assert.deepEqual(outputNames, ["README.md", "workflow-result.md"]);
     assert.ok(!outputNames.includes("plan.md"));
-    assert.deepEqual(readdirSync(result.runDir).sort(), ["outputs", "runtime"]);
+    assert.deepEqual(readdirSync(result.runDir).sort(), ["README.md", "attempts", "children", "outputs", "runtime"]);
     assert.ok(readdirSync(workflowRunRuntimeDir(result.runDir)).includes("journal.ndjson"));
     assert.match(result.runDir, /\.locus-pi\/runs\//u);
   });
@@ -175,7 +195,7 @@ describe("workflow workspace and run evidence", () => {
     assert.equal(result.ok, true, result.error);
     assert.equal(result.workspaceDir, path.join(root, ".locus-pi", "workspaces", `${result.runId}-empty`));
     assert.equal(existsSync(result.workspaceDir!), true);
-    assert.deepEqual(readdirSync(result.workspaceDir!), []);
+    assert.deepEqual(readdirSync(result.workspaceDir!), [".workflow-runs.md"]);
   });
 
   it("fails runWorkspaceDir() with the named migration error", async () => {
@@ -597,6 +617,318 @@ describe("workflow workspace and run evidence", () => {
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /canonical physical|unsafe|symlink/u);
     assert.deepEqual(readdirSync(outside), []);
+  });
+});
+
+describe("grouped run lookup", () => {
+  it("orders same-second executions by persisted time and keeps children out of root selection", () => {
+    const root = project();
+    const groupId = "20260903-120000-zzzz";
+    const childId = "20260903-120000-aaaa";
+    const attemptId = "20260903-120000-bbbb";
+    const entries = [
+      { runId: groupId, runDir: ensureWorkflowRunDir(root, groupId), ts: "2026-09-03T12:00:00.100Z" },
+      {
+        runId: childId,
+        runDir: ensureWorkflowRunDir(root, childId, { storageRootRunId: groupId, kind: "child" }),
+        ts: "2026-09-03T12:00:00.900Z",
+      },
+      {
+        runId: attemptId,
+        runDir: ensureWorkflowRunDir(root, attemptId, { storageRootRunId: groupId, kind: "attempt" }),
+        ts: "2026-09-03T12:00:00.800Z",
+      },
+    ];
+    for (const entry of entries) {
+      writeFileSync(
+        workflowJournalFile(entry.runDir),
+        `${JSON.stringify({ ts: entry.ts, runId: entry.runId, kind: "phase", phase: "run" })}\n`,
+      );
+    }
+
+    assert.deepEqual(
+      listWorkflowRuns(root).map(({ runId }) => runId),
+      [childId, attemptId, groupId],
+    );
+    assert.deepEqual(listWorkflowRunIds(root), [childId, attemptId, groupId]);
+    assert.deepEqual(listWorkflowRootRunIds(root), [attemptId, groupId]);
+    assert.deepEqual(resolveWorkflowRunId(root, "last"), { status: "resolved", runId: attemptId });
+    assert.deepEqual(resolveWorkflowRunId(root, childId), { status: "resolved", runId: childId });
+  });
+
+  it("refuses latest selection and loop inference when timestamps cannot order root runs", async () => {
+    let tied:
+      | {
+          root: string;
+          runIds: [string, string];
+          runs: ReturnType<typeof listWorkflowRuns>;
+        }
+      | undefined;
+    for (let attempt = 0; attempt < 50 && tied === undefined; attempt += 1) {
+      const root = project();
+      const runIds: [string, string] = [`tie-${attempt}-a`, `tie-${attempt}-b`];
+      const runsRoot = workflowRunsRootDir(root);
+      mkdirSync(runsRoot, { recursive: true });
+      const runDirs = runIds.map((runId) => workflowRunDir(root, runId));
+      for (const runDir of runDirs) mkdirSync(runDir);
+      for (const [index, runDir] of runDirs.entries()) {
+        mkdirSync(workflowRunRuntimeDir(runDir));
+        mkdirSync(workflowRunOutputsDir(runDir));
+        writeFileSync(
+          workflowJournalFile(runDir),
+          `${JSON.stringify({ ts: "2026-09-03T12:00:00.123Z", runId: runIds[index], kind: "phase", phase: "run" })}\n`,
+        );
+      }
+      const runs = listWorkflowRuns(root);
+      if (runs.length === 2 && runs[0]!.claimedAt === runs[1]!.claimedAt) tied = { root, runIds, runs };
+    }
+
+    assert.ok(tied, "test setup could not create two directories in one claim-time millisecond");
+    assert.deepEqual(
+      tied.runs.map(({ runId, chronologyTied }) => ({ runId, chronologyTied })),
+      tied.runIds.map((runId) => ({ runId, chronologyTied: true })),
+    );
+    assert.deepEqual(resolveWorkflowRunId(tied.root, "latest"), {
+      status: "ambiguous",
+      matched: 2,
+      candidates: tied.runIds,
+    });
+    const loopStatus = await readLoopStatus(tied.root);
+    assert.equal(loopStatus.mode, "blocked");
+    assert.deepEqual(
+      loopStatus.sources.find((source) => source.source === "workflow"),
+      {
+        source: "workflow",
+        availability: "blocked",
+        reason: "latest workflow run is ambiguous across 2 executions; use an exact runId",
+      },
+    );
+    assert.equal(loopStatus.recommendedSourceId, undefined);
+  });
+
+  it("requires storageRootRunId only for nested result envelopes", () => {
+    const root = project();
+    const group = ensureWorkflowRunDir(root, "legacy-flat");
+    const child = ensureWorkflowRunDir(root, "nested-child", {
+      storageRootRunId: "legacy-flat",
+      kind: "child",
+    });
+    writeFileSync(path.join(group, "runtime", "result.json"), JSON.stringify({ runId: "legacy-flat", ok: true }));
+    writeFileSync(path.join(child, "runtime", "result.json"), JSON.stringify({ runId: "nested-child", ok: true }));
+
+    assert.equal(workflowPersistedResultInvalidity(readWorkflowRunResult(root, "legacy-flat")), undefined);
+    assert.match(
+      workflowPersistedResultInvalidity(readWorkflowRunResult(root, "nested-child")) ?? "",
+      /storageRootRunId is required/u,
+    );
+    assert.throws(
+      () => readWorkflowResumeWorkspaceIdentity(root, "nested-child"),
+      /malformed persisted metadata.*storageRootRunId is required/u,
+    );
+  });
+
+  it("lets one resolved listing feed row and snapshot readers without rediscovering the tree", () => {
+    const root = project();
+    const groupId = "resolved-group";
+    const childId = "resolved-child";
+    ensureWorkflowRunDir(root, groupId);
+    const child = ensureWorkflowRunDir(root, childId, { storageRootRunId: groupId, kind: "child" });
+    writeFileSync(
+      workflowJournalFile(child),
+      `${JSON.stringify({ ts: "2026-09-03T12:00:00.123Z", runId: childId, kind: "phase", phase: "child" })}\n`,
+    );
+    const source = path.join(root, ".locus-pi", "workflows", "resolved.workflow.mjs");
+    const sourceText = 'export default () => "resolved";\n';
+    const sha256 = createHash("sha256").update(sourceText).digest("hex");
+    const snapshotPath = path.join(workflowRunRuntimeDir(child), `script-${sha256}.workflow.mjs`);
+    writeFileSync(source, sourceText);
+    writeFileSync(snapshotPath, sourceText);
+    writeFileSync(
+      workflowResultFile(child),
+      JSON.stringify({
+        runId: childId,
+        storageRootRunId: groupId,
+        ok: true,
+        target: { kind: "name", ref: "resolved", source: "project", path: source },
+        scriptIdentity: {
+          schemaVersion: 2,
+          identityPolicy: "static-node-only-v1",
+          sourcePath: source,
+          snapshotPath,
+          scriptSha256: sha256,
+          identityCoverage: "self-contained-static",
+          executionSource: "snapshot",
+          nodeVersion: process.version,
+          platform: process.platform,
+          arch: process.arch,
+          builtinImports: [],
+          unboundDependencies: [],
+        },
+        resultPersistence: { ok: true, path: workflowResultFile(child) },
+      }),
+    );
+    const listed = listWorkflowRuns(root).find((entry) => entry.runId === childId);
+    assert.ok(listed);
+
+    ensureWorkflowRunDir(root, childId);
+    assert.throws(() => resolveWorkflowRunDir(root, childId), /Ambiguous/u);
+    assert.equal(readWorkflowRunSummary(root, childId, listed.runDir).phase, "child");
+    assert.deepEqual(readWorkflowRunScriptSnapshot(root, childId, listed.runDir), {
+      kind: "ready",
+      runId: childId,
+      target: { kind: "name", ref: "resolved", source: "project" },
+      path: snapshotPath,
+      sha256,
+      identityCoverage: "self-contained-static",
+      source: sourceText,
+    });
+  });
+
+  it("threads one resolved execution directory through detail and viewer snapshot readers", () => {
+    const root = project();
+    const runId = "resolved-detail";
+    const runDir = ensureWorkflowRunDir(root, runId);
+    writeFileSync(
+      workflowJournalFile(runDir),
+      `${JSON.stringify({ ts: "2026-09-03T12:00:00.123Z", runId, kind: "phase", phase: "detail" })}\n`,
+    );
+    writeFileSync(workflowResultFile(runDir), JSON.stringify({ runId, ok: true }));
+    const resolve = vi.spyOn(workflowRunLayout, "resolveWorkflowRunDir");
+    const readJournal = vi.spyOn(workflowJournal, "readWorkflowRunJournalState");
+    const readSummary = vi.spyOn(workflowJournal, "readWorkflowRunSummary");
+    const readResult = vi.spyOn(workflowJournal, "readWorkflowRunResult");
+    const readSnapshot = vi.spyOn(workflowJournal, "readWorkflowRunScriptSnapshot");
+    const readArtifactIndex = vi.spyOn(workflowArtifacts, "readWorkflowArtifactIndex");
+
+    buildRunDetailBlock(root, runId);
+    assert.equal(resolve.mock.calls.length, 1);
+    assert.ok(readJournal.mock.calls.some((call) => call[2] === runDir));
+    assert.ok(readSummary.mock.calls.some((call) => call[2] === runDir));
+    assert.ok(readResult.mock.calls.some((call) => call[2] === runDir));
+    assert.ok(readSnapshot.mock.calls.some((call) => call[2] === runDir));
+
+    vi.clearAllMocks();
+    new WorkflowRunViewer(
+      { requestRender: vi.fn(), terminal: { rows: 24, columns: 80 } },
+      {},
+      {},
+      root,
+      vi.fn(),
+      runId,
+    );
+    assert.equal(resolve.mock.calls.length, 1);
+    assert.ok(readJournal.mock.calls.some((call) => call[2] === runDir));
+    assert.ok(readSummary.mock.calls.some((call) => call[2] === runDir));
+    assert.ok(readResult.mock.calls.some((call) => call[2] === runDir));
+    assert.ok(readArtifactIndex.mock.calls.some((call) => call[2] === runDir));
+  });
+
+  it("keeps the old projection and removes its temp file when authority expires before rename", () => {
+    const root = project();
+    const runDir = ensureWorkflowRunDir(root, "projection-fence");
+    const file = path.join(runDir, "README.md");
+    writeFileSync(file, "old\n");
+
+    assert.throws(
+      () =>
+        replaceWorkflowRunFileAtomically(runDir, file, "new\n", {
+          beforeRename: () => {
+            throw new Error("projection authority is stale");
+          },
+        }),
+      /authority is stale/u,
+    );
+    assert.equal(readFileSync(file, "utf8"), "old\n");
+    assert.equal(
+      readdirSync(runDir).some((name) => name.includes(".tmp-")),
+      false,
+    );
+  });
+
+  it("resolves root, child and attempt IDs and rejects ambiguity without reading arbitrary descendants", () => {
+    const root = project();
+    const group = ensureWorkflowRunDir(root, "group");
+    const child = ensureWorkflowRunDir(root, "child", { storageRootRunId: "group", kind: "child" });
+    const attempt = ensureWorkflowRunDir(root, "retry", { storageRootRunId: "group", kind: "attempt" });
+    assert.equal(resolveWorkflowRunDir(root, "group"), group);
+    assert.equal(resolveWorkflowRunDir(root, "child"), child);
+    assert.equal(resolveWorkflowRunDir(root, "retry"), attempt);
+    assert.equal(workflowStorageRootRunId(root, "retry"), "group");
+    mkdirSync(path.join(group, "runtime", "ignored"), { recursive: true });
+    assert.throws(() => resolveWorkflowRunDir(root, "ignored"), /not found/u);
+    assert.throws(() => workflowRunFileExists(child, path.join(group, "runtime", "result.json")), /escapes/u);
+    ensureWorkflowRunDir(root, "child");
+    assert.throws(() => resolveWorkflowRunDir(root, "child"), /Ambiguous/u);
+    assert.equal(resolveWorkflowRunDir(root, "retry"), attempt);
+  });
+
+  it("rejects nested symlink leaves and never follows container symlinks", () => {
+    const root = project();
+    const group = ensureWorkflowRunDir(root, "group");
+    const external = project();
+    writeFileSync(path.join(external, "sentinel"), "unchanged");
+    mkdirSync(path.join(group, "children"));
+    symlinkSync(external, path.join(group, "children", "unsafe"), "dir");
+    symlinkSync(external, path.join(group, "attempts"), "dir");
+    assert.throws(() => resolveWorkflowRunDir(root, "unsafe"), /unsafe/u);
+    assert.throws(() => ensureWorkflowRunDir(root, "new", { storageRootRunId: "group", kind: "attempt" }), /unsafe/u);
+    assert.equal(readFileSync(path.join(external, "sentinel"), "utf8"), "unchanged");
+    assert.equal(existsSync(path.join(external, "new")), false);
+  });
+
+  it("keeps an unsafe resume rejection separate without changing the external source", async () => {
+    const root = project();
+    const external = project();
+    mkdirSync(workflowRunsRootDir(root), { recursive: true });
+    symlinkSync(external, workflowRunDir(root, "unsafe-source"), "dir");
+    writeFileSync(path.join(external, "sentinel"), "unchanged");
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "missing",
+      resumeFromRunId: "unsafe-source",
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error!, /unsafe/u);
+    assert.equal(result.resultPersistence.ok, true);
+    assert.equal(result.runDir, workflowRunDir(root, result.runId));
+    assert.equal(existsSync(path.join(result.runDir, "README.md")), false);
+    assert.deepEqual(readdirSync(external).sort(), [".agents", ".locus-pi", "sentinel"]);
+  });
+
+  it("keeps two workflows from one session in separate groups with linked workspaces", async () => {
+    const root = project();
+    const harness = createHarness(root, { sessionId: "one-session" });
+    for (const name of ["first", "second"])
+      writeFileSync(path.join(root, ".locus-pi", "workflows", name + ".workflow.mjs"), 'export default () => "done";');
+    const first = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "first",
+    });
+    const second = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "second",
+    });
+    assert.equal(first.ok, true);
+    assert.equal(second.ok, true);
+    assert.notEqual(first.storageRootRunId, second.storageRootRunId);
+    assert.notEqual(first.workspaceDir, second.workspaceDir);
+    for (const result of [first, second]) {
+      assert.equal(result.storageRootRunId, result.runId);
+      const readme = readFileSync(path.join(result.runDir, "README.md"), "utf8");
+      assert.match(readme, /runtime\/result.json/u);
+      assert.doesNotMatch(readme, /status: completed/u);
+      assert.match(
+        readFileSync(path.join(result.workspaceDir!, ".workflow-runs.md"), "utf8"),
+        new RegExp(result.runId, "u"),
+      );
+    }
   });
 });
 

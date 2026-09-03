@@ -39,7 +39,7 @@
 
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { workflowRunDir } from "./workflow-journal.js";
+import { resolveWorkflowRunDir } from "./workflow-run-layout.js";
 import {
   appendWorkflowRunTextFile,
   ensureWorkflowDirectoryNoSymlink,
@@ -185,7 +185,7 @@ export function workflowReplayFile(runDir: string): string {
 export function readWorkflowReplayLog(projectRoot: string, runId: string): WorkflowReplayEntry[] {
   let raw: string;
   try {
-    const runDir = workflowRunDir(projectRoot, runId);
+    const runDir = resolveWorkflowRunDir(projectRoot, runId);
     raw = readWorkflowRunTextFile(runDir, workflowReplayFile(runDir));
   } catch {
     return [];

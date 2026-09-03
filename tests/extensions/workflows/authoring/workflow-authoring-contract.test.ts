@@ -184,9 +184,11 @@ describe("design-first readable workflow authoring", () => {
       ".locus-pi/workspaces/<generated-run-name>",
     );
     const storage = source("docs/workflows.md");
-    expect(storage).toContain("runs/<runId>/");
+    expect(storage).toContain("runs/<storageRootRunId>/");
     expect(storage).toContain("outputs/    human-readable host projection");
     expect(storage).toContain("runtime/    machine evidence and continuation authority");
+    expect(storage).toContain("children/<runId>/");
+    expect(storage).toContain("attempts/<runId>/");
     expect(storage).toContain("must never resolve to the same directory");
   });
 

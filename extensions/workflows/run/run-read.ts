@@ -4,8 +4,9 @@
  *
  * WHY THIS EXISTS
  *
- * Workflow runs persist under `.locus-pi/runs/<runId>/`, and the module
- * that owns that layout also owns the append sink, the journal-to-live-row
+ * Workflow root runs persist under `.locus-pi/runs/<storageRootRunId>/`, with
+ * saved children and attempts below fixed nested directories. The journal
+ * owner also owns the append sink and journal-to-live-row
  * projection, and the live-row retention bound. Two consumers outside this
  * extension only ever needed to READ a run — the agent drill's round submenu and
  * the loop's continuation source — yet both reached straight into that module and
@@ -28,18 +29,8 @@
  *     it would make the journal import this file, i.e. make foundational code
  *     import a feature directory, which is the exact edge the ownership refactor
  *     exists to remove.
- *   - `workflowRunDir` is pure path derivation, and the ownership reason for leaving
- *     it in the journal has lapsed: the handoff, runner and replay modules that
- *     build run paths with it were in `extensions/_shared/` when this file was
- *     written, so relocating it here would have given each of them an upward edge
- *     into a feature directory. They now live beside the journal in
- *     `extensions/workflows/runtime/`, so that edge would be an ordinary
- *     same-extension import. What still argues against moving it is cohesion, not
- *     legality: the journal defines the run directory layout and calls the
- *     derivation at seven of its own call sites, and four further modules in this
- *     extension take it from the journal rather than from here. Moving it into the
- *     read door would put the layout definition in the facade and leave its owner
- *     importing its own contract back.
+ *   - Path constructors belong to the layout owner and are not exposed here.
+ *     This facade re-exports only resolved read operations allowed across feature layers.
  *   - `listWorkflowRunIds`, `readWorkflowRunSummary`, `listWorkflowRoundsForSlot`,
  *     `readWorkflowRoundBody`, and `readWorkflowSlotPhase` all resolve through
  *     private journal internals — the start-timestamp proof that orders runs, the
@@ -53,16 +44,19 @@
 
 export {
   listWorkflowRoundsForSlot,
+  listWorkflowRootRunIds,
   listWorkflowRunIds,
   readWorkflowRoundBody,
   readWorkflowRunSummary,
   readWorkflowSlotPhase,
-  workflowRunDir,
+  resolveWorkflowRunId,
   workflowRunIdFromRowId,
 } from "../runtime/workflow-journal.js";
 export type { WorkflowRunSummary } from "../runtime/workflow-journal.js";
 export {
-  WORKFLOW_RUN_STORAGE_PATTERN,
+  WORKFLOW_NESTED_RUN_STORAGE_PATTERN,
+  WORKFLOW_RUN_GROUP_STORAGE_PATTERN,
+  resolveWorkflowRunDir,
   workflowJournalFile,
   workflowRunsRootDir,
 } from "../runtime/workflow-run-layout.js";

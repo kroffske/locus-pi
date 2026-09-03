@@ -5,15 +5,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   readWorkflowRunResultText,
   resolveWorkflowRunId,
-  workflowRunDir,
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   workflowResultFile,
   workflowResultTextFile,
   writeWorkflowResultText,
 } from "../../../../extensions/workflows/runtime/workflow-result.js";
-import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
-import { workflowJournalFile } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  ensureWorkflowRunDir,
+  workflowJournalFile,
+  workflowRunDir,
+} from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import workflows from "../../../../extensions/workflows/index.js";
 import { createHarness } from "../../../test-harness.js";
 

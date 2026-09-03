@@ -4,8 +4,8 @@ import type { WorkflowAskEvidenceRecord } from "./workflow-ask-tool.js";
 import { workflowResultFile } from "./workflow-result.js";
 import { parseWorkflowPersistedBinding } from "./workflow-persisted-binding.js";
 import {
+  assertWorkflowRunDir,
   ensureWorkflowDirectoryNoSymlink,
-  ensureWorkflowRunRuntimeDir,
   assertWorkflowRunId,
   readWorkflowRunFile,
   removeWorkflowRunFile,
@@ -13,7 +13,7 @@ import {
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   writeWorkflowRunFile,
   workflowRunArtifactsDir,
-  workflowRunDir,
+  resolveWorkflowRunDir,
   workflowRunFileExists,
   workflowRunRuntimeDir,
 } from "./workflow-run-layout.js";
@@ -216,22 +216,25 @@ export type WorkflowArtifactRecordRead =
   | { status: "missing" | "invalid" | "tampered"; message: string };
 
 /** Side-effect-free persisted index read for viewers and diagnostics. */
-export function readWorkflowArtifactIndex(projectRoot: string, runId: string): WorkflowArtifactIndexRead {
+export function readWorkflowArtifactIndex(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowArtifactIndexRead {
   try {
     assertSafeComponent(runId, "runId");
-  } catch (error) {
-    return { status: "invalid", message: errorMessage(error) };
-  }
-  const runDir = workflowRunDir(projectRoot, runId);
-  const artifactsDir = workflowRunArtifactsDir(runDir);
-  const indexPath = path.join(artifactsDir, "index.json");
-  try {
+    const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId);
+    const artifactsDir = workflowRunArtifactsDir(runDir);
+    const indexPath = path.join(artifactsDir, "index.json");
     if (!workflowRunFileExists(runDir, indexPath)) {
       return { status: "missing", message: `Workflow artifact index is missing for run ${runId}.` };
     }
     const index = parseIndex(readWorkflowRunFile(runDir, indexPath).toString("utf8"), runId);
     return { status: "ready", index: cloneIndex(index) };
   } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return { status: "missing", message: `Workflow artifact index is missing for run ${runId}.` };
+    }
     return { status: "invalid", message: errorMessage(error) };
   }
 }
@@ -241,21 +244,22 @@ export function readWorkflowArtifactRecord(
   projectRoot: string,
   runId: string,
   artifactId: string,
+  resolvedRunDir?: string,
 ): WorkflowArtifactRecordRead {
   try {
     assertSafeComponent(artifactId, "artifactId");
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };
   }
-  const indexRead = readWorkflowArtifactIndex(projectRoot, runId);
-  if (indexRead.status !== "ready") return indexRead;
-  const record = indexRead.index.artifacts.find((entry) => entry.artifactId === artifactId);
-  if (record === undefined) {
-    return { status: "missing", message: `Workflow artifact ${artifactId} is not indexed for run ${runId}.` };
-  }
-  const artifactsDir = workflowRunArtifactsDir(workflowRunDir(projectRoot, runId));
-  const runDir = workflowRunDir(projectRoot, runId);
   try {
+    const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId);
+    const indexRead = readWorkflowArtifactIndex(projectRoot, runId, runDir);
+    if (indexRead.status !== "ready") return indexRead;
+    const record = indexRead.index.artifacts.find((entry) => entry.artifactId === artifactId);
+    if (record === undefined) {
+      return { status: "missing", message: `Workflow artifact ${artifactId} is not indexed for run ${runId}.` };
+    }
+    const artifactsDir = workflowRunArtifactsDir(runDir);
     const bytes = readArtifactFile(runDir, artifactsDir, path.join(artifactsDir, record.relativePath));
     if (bytes.byteLength !== record.size || sha256(bytes) !== record.sha256) {
       return { status: "tampered", message: `Workflow artifact digest mismatch: ${record.artifactId}` };
@@ -268,10 +272,7 @@ export function readWorkflowArtifactRecord(
 
 export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStoreOptions): WorkflowArtifactStore {
   assertSafeComponent(options.runId, "runId");
-  const expectedRunDir = workflowRunDir(options.projectRoot, options.runId);
-  if (path.resolve(options.runDir) !== path.resolve(expectedRunDir)) {
-    throw new Error("Workflow artifact run directory does not match the canonical run root.");
-  }
+  assertWorkflowRunDir(options.projectRoot, options.runId, options.runDir);
   const runtimeDir = workflowRunRuntimeDir(options.runDir);
   const runDir = options.runDir;
   const artifactsDir = workflowRunArtifactsDir(options.runDir);
@@ -281,7 +282,6 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   if (!Number.isSafeInteger(maxTextBytes) || maxTextBytes < 1) {
     throw new Error("Workflow text artifact limit must be a positive safe integer.");
   }
-  ensureWorkflowRunRuntimeDir(options.projectRoot, options.runId);
   ensureWorkflowDirectoryNoSymlink(options.runDir, runtimeDir);
   ensureWorkflowDirectoryNoSymlink(runtimeDir, artifactsDir);
   const existingIndexBytes = workflowRunFileExists(options.runDir, indexPath)
@@ -545,11 +545,10 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   function consumeText(ref: WorkflowArtifactRef, stage?: string): WorkflowConsumedTextArtifact {
     validateRef(ref);
     if (ref.runId === options.runId) throw new Error("Workflow artifact self-reference is not allowed.");
-    const sourceRunDir = workflowRunDir(options.projectRoot, ref.runId);
-    const sourceResult = workflowResultFile(sourceRunDir);
-    const resultBytes = readWorkflowRunFile(sourceRunDir, sourceResult);
-    const sourceEnvelope = parseSourceRunEnvelope(resultBytes, ref.runId, options.projectRoot);
-    const sourceRead = readWorkflowArtifactRecord(options.projectRoot, ref.runId, ref.artifactId);
+    const sourceRunDir = resolveWorkflowRunDir(options.projectRoot, ref.runId);
+    const resultBytes = readWorkflowRunFile(sourceRunDir, workflowResultFile(sourceRunDir));
+    const sourceEnvelope = parseSourceRunEnvelope(resultBytes, ref.runId, options.projectRoot, sourceRunDir);
+    const sourceRead = readWorkflowArtifactRecord(options.projectRoot, ref.runId, ref.artifactId, sourceRunDir);
     if (sourceRead.status !== "ready") throw new Error(sourceRead.message);
     const sourceRecord = sourceRead.record;
     if (!sameRef(sourceRecord, ref)) throw new Error("Workflow artifact reference does not match its source index.");
@@ -732,6 +731,7 @@ function parseSourceRunEnvelope(
   bytes: Buffer,
   runId: string,
   projectRoot: string,
+  runDir: string,
 ): {
   target: WorkflowArtifactSourceTarget;
   terminal: { result?: unknown; artifactRefs: WorkflowArtifactRef[] };
@@ -754,7 +754,7 @@ function parseSourceRunEnvelope(
   if (persistedRunId !== runId) {
     throw new Error(`Source workflow run result belongs to another run: ${runId}`);
   }
-  const binding = parseWorkflowPersistedBinding(value, projectRoot, runId, { verifySnapshot: true });
+  const binding = parseWorkflowPersistedBinding(value, projectRoot, runId, { verifySnapshot: true, runDir });
   if (binding.targetInvalid !== undefined || binding.target === undefined) {
     throw new Error(`Source workflow run has an invalid target identity: ${runId}`);
   }
