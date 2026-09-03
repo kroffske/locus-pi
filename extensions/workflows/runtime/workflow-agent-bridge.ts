@@ -561,19 +561,22 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           })
         : undefined;
     // Slot anchoring (REQ-009, D-006): a workflow agent with a `label` is a repeatable slot.
-    // Give its live row a STABLE id derived from (runId, agent, label, phase) so a loop re-invoke
-    // REUSES the one row (round++) instead of spawning a fresh `agent-live-*` row each iteration.
+    // Give its live row a STABLE id derived from (runId, agent, label, phase), plus the
+    // runtime-owned mapped occurrence when present. A loop re-invoke in one member therefore
+    // REUSES its row (round++), while sibling members cannot collapse into that row.
     // No label ⇒ not a slot: leave rowId unset (fresh-row-per-call legacy behaviour, no rounds).
+    const baseSlotKey = req.label === undefined ? undefined : workflowSlotKey({ phase: req.phase, label: req.label });
+    const slotKey = req.workflowSlot?.key ?? baseSlotKey;
+    const rowOccurrence = req.workflowSlot?.rowOccurrence;
     const slotRowId =
       options.workflowRunId !== undefined && req.label !== undefined
-        ? workflowAgentLiveChildRowId({
+        ? `${workflowAgentLiveChildRowId({
             runId: options.workflowRunId,
             ...resultIdentity,
             label: req.label,
             ...(req.phase !== undefined ? { phase: req.phase } : {}),
-          })
+          })}${rowOccurrence === undefined ? "" : `:${rowOccurrence.groupId}:${rowOccurrence.memberIndex}`}`
         : undefined;
-    const slotKey = slotRowId !== undefined ? workflowSlotKey({ phase: req.phase, label: req.label }) : undefined;
     const round = slotRowId !== undefined ? nextRound(roundByRowId, slotRowId) : undefined;
     const live: AgentSdkSessionExecutorOptions["live"] = {
       ...(req.label !== undefined ? { label: req.label } : {}),

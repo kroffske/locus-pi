@@ -44,10 +44,10 @@ trigger = "Any growth above 2055 lines or another persisted agent identity field
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-replay.test.ts"
 rule = "code-lines"
-ceiling = 1260
+ceiling = 1693
 owner = "workflow replay tests"
-reason = "The existing end-to-end replay contract grew before this responsibility-only relayout; splitting it here would mix behavioral test redesign into a path migration."
-trigger = "Any growth above 1260 lines or a stable replay sub-responsibility gaining four tests requires a responsibility split."
+reason = "T-195 keeps mapped occurrence replay compatibility with the existing persisted replay contract; moving the case would duplicate its recording harness."
+trigger = "Any growth above 1693 lines or another mapped replay scenario requires a replay-test responsibility split."
 
 [[exceptions]]
 path = "extensions/workflows/run/run-viewer.ts"
@@ -60,10 +60,18 @@ trigger = "Any growth above 730 lines requires a run-view responsibility split."
 [[exceptions]]
 path = "extensions/workflows/runtime/workflow-agent-bridge.ts"
 rule = "code-lines"
-ceiling = 1053
+ceiling = 1056
 owner = "workflow child-agent bridge"
-reason = "T-188 keeps operator-answer evidence failure translation at the existing child-agent transport boundary."
-trigger = "Any growth above 1053 lines or another child-evidence policy requires a bridge responsibility split."
+reason = "T-195 carries the runtime-owned mapped occurrence through the bridge's existing live-row projection; extracting three lines would create a shallow module."
+trigger = "Any growth above 1056 lines, another slot/live-row identity policy, or another bridge policy requires a bridge responsibility split."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-runtime.ts"
+rule = "code-lines"
+ceiling = 3970
+owner = "workflow runtime scheduler and agent lifecycle"
+reason = "T-195 keeps async group-member context, effective slot claims, and replay exclusion inside the runtime closure that already owns those lifecycle decisions."
+trigger = "Any growth above 3970 lines or another group identity or concurrency behavior requires a runtime responsibility split."
 
 [[exceptions]]
 path = "extensions/workflows/runtime/workflow-artifacts.ts"
@@ -140,10 +148,18 @@ trigger = "Any growth above 530 lines requires a run-viewer test responsibility 
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-agent-transport.test.ts"
 rule = "code-lines"
-ceiling = 1492
+ceiling = 1717
 owner = "workflow agent transport tests"
-reason = "T-188 verifies typed answer-evidence failure and round-trips the real writer-generated display identity through the strict journal reader at the existing transport boundary."
-trigger = "Any growth above 1492 lines or another persisted journal identity scenario requires an agent-transport test responsibility split."
+reason = "T-195 verifies mapped request transport, true duplicate conflict, and claim release through the existing agent transport harness."
+trigger = "Any growth above 1717 lines or another occurrence or slot-guard behavior family requires an agent-transport test responsibility split."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-rounds.test.ts"
+rule = "code-lines"
+ceiling = 546
+owner = "workflow live-row and round tests"
+reason = "T-195 proves distinct mapped live rows and unchanged sequential rounds through the existing live-store harness."
+trigger = "Any growth above 546 lines or another mapped live-row behavior family requires a round-test responsibility split."
 
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-artifacts.test.ts"
