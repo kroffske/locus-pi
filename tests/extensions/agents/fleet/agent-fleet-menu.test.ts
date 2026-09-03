@@ -9,6 +9,7 @@ import {
   selectFleetMenuRows,
 } from "../../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import { agentLiveStore, type AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { orderAgentLiveRows } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
@@ -566,7 +567,11 @@ describe("agent fleet menu", () => {
       groupTotal: 8,
       workflowRunId: "ps-fan",
     });
-    agentLiveStore.patch(group.id, { status: "working", groupCompleted: 1, groupFailed: 1 });
+    // The counters are deliberately AHEAD of the leaves: two done and two failed
+    // on the group row against one done and one failed leaf. `1/8 done` would
+    // mean the heading was recomputed from the visible members, so `2/8 done`
+    // is the only reading that proves it comes from the group row itself.
+    agentLiveStore.patch(group.id, { status: "working", groupCompleted: 2, groupFailed: 2 });
     const members = Array.from({ length: 8 }, (_unused, index) => {
       const member = agentLiveStore.begin({
         id: `ps-fan-item-${index}`,
@@ -590,11 +595,11 @@ describe("agent fleet menu", () => {
     );
 
     // The heading is part of the `/ps` row set, with the counters the group row
-    // carries — not recomputed from the leaves.
+    // carries — not recomputed from the leaves (one done leaf, one failed leaf).
     const passive = renderFleetMenuRows([...agentLiveStore.rows.values()], 120, {}).join("\n");
     expect(passive).toContain("parallel (8)");
-    expect(passive).toContain("1/8 done");
-    expect(passive).toContain("1 failed");
+    expect(passive).toContain("2/8 done");
+    expect(passive).toContain("2 failed");
 
     const visited = new Set<string>([fleetMenuState.selectedRowId!]);
     for (let step = 0; step < members.length; step += 1) {
@@ -619,6 +624,52 @@ describe("agent fleet menu", () => {
     expect(at("ps item 3 of 8")).toBeLessThan(at("ps item 5 of 8"));
     expect(focusedFrame.join("\n")).not.toMatch(/earlier agents/u);
     component.dispose();
+  });
+
+  it("re-parents a leaf onto the nearest surviving ancestor when two nested groups are both too small", () => {
+    // A group of one gets no heading and is dropped from the projection. When the
+    // dropped group sits inside ANOTHER dropped group, handing its child the
+    // grandparent's id names a row nobody holds any more: the leaf silently
+    // detaches and renders as a root, after the next real root instead of under
+    // the phase it belongs to.
+    const phase = agentLiveStore.begin({ id: "nested-phase", agentName: "workflow", label: "phase anchor" });
+    const outer = agentLiveStore.begin({
+      id: "nested-outer",
+      parentRowId: phase.id,
+      agentName: "workflow-group",
+      label: "pipeline (1)",
+      groupKind: "pipeline",
+      groupTotal: 1,
+    });
+    const inner = agentLiveStore.begin({
+      id: "nested-inner",
+      parentRowId: outer.id,
+      agentName: "workflow-group",
+      label: "parallel (1)",
+      groupKind: "parallel",
+      groupTotal: 1,
+    });
+    const leaf = agentLiveStore.begin({
+      id: "nested-leaf",
+      parentRowId: inner.id,
+      agentName: "worker",
+      label: "the only item",
+    });
+    // A second child of the phase, started after the group: it is where the
+    // detached leaf ends up in front of, or behind, depending on whether the leaf
+    // is still attached to the phase.
+    const sibling = agentLiveStore.begin({
+      id: "nested-sibling",
+      parentRowId: phase.id,
+      agentName: "worker",
+      label: "sibling item",
+    });
+
+    expect(orderAgentLiveRows([phase, outer, inner, leaf, sibling]).map((row) => row.id)).toEqual([
+      phase.id,
+      leaf.id,
+      sibling.id,
+    ]);
   });
 
   it("keeps the group heading on screen in /ps while the fan-out fits the viewport", () => {

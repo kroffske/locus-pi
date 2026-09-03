@@ -492,6 +492,76 @@ describe("workflow progress widget", () => {
       component.dispose();
     });
 
+    it("keeps the live fan-out on screen when finished group headings fill the budget", () => {
+      // A finished group's heading is not live work, so it must not outrank the
+      // group that IS running. When headings could not be collapsed at all, a run
+      // that had already closed twenty fan-outs filled the roster with `✓ parallel
+      // (2)` summaries and the tail cut took the live group, both of its working
+      // agents and the pending line off the screen.
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-tail", 24);
+      for (let group = 0; group < 20; group += 1) {
+        const ids = startFanOut(component, "card-tail", [`closed ${group}a`, `closed ${group}b`], `fan-${group}`);
+        for (const id of ids) agentLiveStore.patch(id, { status: "done" });
+        pushProgress(
+          component,
+          line({
+            kind: "group_end",
+            status: "completed",
+            groupId: `fan-${group}`,
+            groupKind: "parallel",
+            groupTotal: 2,
+            groupCompleted: 2,
+            groupFailed: 0,
+            durationMs: 1_000,
+            ts: 100 + group,
+            runId: "card-tail",
+          }),
+        );
+      }
+      const liveIds = startFanOut(component, "card-tail", ["live-a item", "live-b item"], "fan-live");
+      for (const id of liveIds) agentLiveStore.patch(id, { status: "working" });
+
+      const rendered = component.render(160);
+      const text = rendered.join("\n");
+      expect(rendered.length).toBeLessThanOrEqual(24);
+      // The running work — the only thing an operator can still steer — survives.
+      expect(text).toContain("live-a item");
+      expect(text).toContain("live-b item");
+      // Finished members go first, then the headings above them — and both losses
+      // are counted out loud instead of being cut off the bottom of the panel.
+      expect(text).not.toContain("closed 0a");
+      expect(text).not.toContain("closed 19b");
+      expect(text).toMatch(/\(\+40 earlier agents · \+\d+ earlier groups\)/u);
+      // The summaries that DID survive are the finished fan-outs, in one line each.
+      expect(text).toContain("2/2 done");
+      component.dispose();
+    });
+
+    it("collapses a group's finished members before the ones still working", () => {
+      // `orderAgentLiveRows` puts working members on top of their group. A clamp
+      // that then gave up rows from the top would hide exactly those and keep the
+      // finished ones — the ordering rule defeated where it matters most.
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-live-first", 14);
+      const labels = [
+        ...Array.from({ length: 6 }, (_unused, index) => `live item ${index}`),
+        ...Array.from({ length: 4 }, (_unused, index) => `closed item ${index}`),
+      ];
+      const ids = startFanOut(component, "card-live-first", labels);
+      ids.forEach((id, index) => agentLiveStore.patch(id, { status: index < 6 ? "working" : "done" }));
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("parallel (10)");
+      // Every finished member is gone before a single working one is given up.
+      expect(text).not.toContain("closed item");
+      expect(text.match(/live item/gu) ?? []).toHaveLength(5);
+      expect(text).toContain("live item 0");
+      expect(text).toContain("live item 5");
+      expect(text).toMatch(/\(\+5 earlier agents\)/u);
+      component.dispose();
+    });
+
     it("carries the failed count in the group heading (failed)", () => {
       agentLiveStore.reset();
       const component = fanOutComponent("card-failed");

@@ -6,6 +6,7 @@ import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../../_
 import {
   AgentLivePanel,
   AGENT_LIVE_SPINNER_FRAME_COUNT,
+  agentGroupMemberDisplayRank,
   compactWorkflowParentRows,
   elapsedSinceStart,
   formatAgentIdentity,
@@ -13,6 +14,7 @@ import {
   orderAgentLiveRows,
   selectAgentLiveRowsForParents,
   truncate,
+  withWorkflowGroupTokenTotals,
 } from "../../_shared/agent-runtime/agent-live-panel.js";
 import {
   fleetMenuState,
@@ -434,7 +436,10 @@ export class WorkflowProgressComponent implements CustomUiComponent {
    * roster collapsed to fit a budget, because only here is nothing selectable.
    */
   private renderRoster(rows: AgentLiveRow[], width: number, budget: number): string[] {
-    const projected = orderAgentLiveRows(rows);
+    // `withWorkflowGroupTokenTotals` before the ordering, exactly as `/ps` and
+    // `AgentLivePanel.renderRows` do it: without it the same group heading would
+    // report tokens on one surface and `tok —` on the other.
+    const projected = orderAgentLiveRows(withWorkflowGroupTokenTotals(rows));
     const leaves = selectFleetMenuLeafRows(projected);
     const sourceRunId = this.options.continuationSourceRunId;
     const previousLeaves = sourceRunId === undefined ? [] : leaves.filter((row) => row.workflowRunId === sourceRunId);
@@ -458,14 +463,31 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       (row === current ? panel.renderRows([row], rowWidth) : [panel.renderRow(row, rowWidth)]).map(
         (line) => `  ${line}`,
       );
-    // A group heading is the summary of the rows beneath it (`k/n done · f failed`),
-    // so it is never the thing the clamp gives up: when its members collapse, the
-    // heading is what still answers "how did that fan-out go".
-    const currentAgentLines = currentRows.map((row) => ({
-      settled: row.groupKind === undefined && row !== current,
-      hiddenAgents: row.groupKind === undefined ? 1 : 0,
-      lines: renderAgentLines(row),
-    }));
+    // What the roster gives up, and in what order (see `clampRosterLines`):
+    //
+    //   * A group heading is the summary of the rows beneath it (`k/n done ·
+    //     f failed`), so it outlives its own members: when they collapse, the
+    //     heading is what still answers "how did that fan-out go". It is given
+    //     up only after every settled leaf, and only once the group itself has
+    //     finished — a LIVE group's heading is never collapsed, because the work
+    //     it names is still happening.
+    //   * A working agent is live work. `orderAgentLiveRows` puts it on top of
+    //     its group for exactly that reason, so it is the last thing collapsed;
+    //     collapsing it first would hide the running fan-out behind the finished
+    //     one and defeat the ordering rule.
+    const currentAgentLines = currentRows.map((row) => {
+      const isGroupHeading = row.groupKind !== undefined;
+      return {
+        settled: isGroupHeading ? isTerminalRosterStatus(row.status) : row !== current,
+        collapseRank: isGroupHeading ? ROSTER_COLLAPSE_RANK_TERMINAL_GROUP_HEADING : agentCollapseRank(row.status),
+        hiddenAgents: isGroupHeading ? 0 : 1,
+        hiddenGroups: isGroupHeading ? 1 : 0,
+        lines: renderAgentLines(row),
+      };
+    });
+    // The previous run contributes its LEAVES only — no headings. It is a closed
+    // history block an operator cannot act on, so it is one collapsible unit; the
+    // "one structure" promise above is about the run in progress.
     const previousRunBlock =
       sourceRunId === undefined
         ? []
@@ -473,7 +495,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
           ? [
               {
                 settled: true,
+                collapseRank: ROSTER_COLLAPSE_RANK_FINISHED,
                 hiddenAgents: 0,
+                hiddenGroups: 0,
                 lines: [
                   this.#fg(
                     "dim",
@@ -488,7 +512,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
           : [
               {
                 settled: true,
+                collapseRank: ROSTER_COLLAPSE_RANK_FINISHED,
                 hiddenAgents: previousLeaves.length,
+                hiddenGroups: 0,
                 lines: [
                   this.#fg("dim", truncate(`  ↳ previous run #${shortWorkflowRunId(sourceRunId)}`, width)),
                   ...previousLeaves.flatMap((row) => renderAgentLines(row)),
@@ -497,7 +523,9 @@ export class WorkflowProgressComponent implements CustomUiComponent {
             ];
     const pendingLines = (fleetViewedRowId() === undefined ? this.pendingStageLines(width) : []).map((line) => ({
       settled: false,
+      collapseRank: ROSTER_COLLAPSE_RANK_LIVE,
       hiddenAgents: 0,
+      hiddenGroups: 0,
       lines: [line],
     }));
     const roster = [...previousRunBlock, ...currentAgentLines, ...pendingLines];
@@ -1011,29 +1039,89 @@ function collapseConsecutiveDuplicateLines(lines: string[]): string[] {
   return collapsed;
 }
 
+/** Finished work — a done member, a closed previous run: given up first, oldest first. */
+const ROSTER_COLLAPSE_RANK_FINISHED = 4;
+/** A finished group heading: given up only after every settled leaf. */
+const ROSTER_COLLAPSE_RANK_TERMINAL_GROUP_HEADING = 1;
+/** Live work and rows nobody may collapse ahead of it. */
+const ROSTER_COLLAPSE_RANK_LIVE = 0;
+
+function isTerminalRosterStatus(status: AgentLiveStatus): boolean {
+  return status === "done" || status === "cancelled" || status === "error";
+}
+
 /**
- * Keep the roster inside its budget by collapsing the OLDEST settled agents
- * first: the current agent, the pending stages, and the most recent finished work
- * are what an operator steers on. The collapse is announced, never silent.
+ * How readily an agent row is given up: the REVERSE of the order
+ * `orderAgentLiveRows` displays a group member in (working → failed → queued →
+ * done), so the row shown first is collapsed last. A working row drops to the
+ * live rank, beneath even a finished group's heading, because it is the running
+ * work the whole roster exists to show. A linear run has one rank across all its
+ * finished rows, so there it still collapses oldest-first.
+ */
+function agentCollapseRank(status: AgentLiveStatus): number {
+  const displayRank = agentGroupMemberDisplayRank(status);
+  return displayRank === 0 ? ROSTER_COLLAPSE_RANK_LIVE : ROSTER_COLLAPSE_RANK_TERMINAL_GROUP_HEADING + displayRank;
+}
+
+/**
+ * Keep the roster inside its budget by collapsing the most expendable settled
+ * entry first, and the oldest one when several are equally expendable: finished
+ * agents, then queued and failed group members, then the headings of groups that
+ * have already finished, and only then anything live. The current agent, the
+ * live group and its working members, and the pending stages are what an
+ * operator steers on, so they are what survives. The collapse is announced,
+ * never silent.
+ *
+ * Rank, not position, drives the choice: a roster whose oldest entries are
+ * finished-group headings would otherwise run out of "settled" entries at the
+ * top and fall through to a plain tail cut, taking the live group, its working
+ * agents and the pending line off the screen.
  */
 function clampRosterLines(
-  entries: readonly { settled: boolean; hiddenAgents?: number; lines: string[] }[],
+  entries: readonly {
+    settled: boolean;
+    collapseRank?: number;
+    hiddenAgents?: number;
+    hiddenGroups?: number;
+    lines: string[];
+  }[],
   budget: number,
   width: number,
 ): string[] {
   const all = entries.flatMap((entry) => entry.lines);
   if (all.length <= budget) return all;
   let hiddenAgents = 0;
+  let hiddenGroups = 0;
   const kept = [...entries];
   while (kept.flatMap((entry) => entry.lines).length + 1 > budget) {
-    const index = kept.findIndex((entry) => entry.settled);
+    const index = nextRosterCollapseIndex(kept);
     if (index < 0) break;
     const [removed] = kept.splice(index, 1);
     hiddenAgents += removed?.hiddenAgents ?? 1;
+    hiddenGroups += removed?.hiddenGroups ?? 0;
   }
   const lines = kept.flatMap((entry) => entry.lines);
-  if (hiddenAgents === 0) return lines.slice(0, budget);
-  return [truncate(`  (+${hiddenAgents} earlier agents)`, width), ...lines].slice(0, budget);
+  const hidden = [
+    ...(hiddenAgents > 0 ? [`+${hiddenAgents} earlier agents`] : []),
+    ...(hiddenGroups > 0 ? [`+${hiddenGroups} earlier groups`] : []),
+  ];
+  if (hidden.length === 0) return lines.slice(0, budget);
+  return [truncate(`  (${hidden.join(" · ")})`, width), ...lines].slice(0, budget);
+}
+
+/** The settled entry the roster gives up next, or -1 when nothing may be given up. */
+function nextRosterCollapseIndex(entries: readonly { settled: boolean; collapseRank?: number }[]): number {
+  let chosen = -1;
+  let chosenRank = -1;
+  entries.forEach((entry, index) => {
+    if (!entry.settled) return;
+    const rank = entry.collapseRank ?? ROSTER_COLLAPSE_RANK_FINISHED;
+    if (rank > chosenRank) {
+      chosen = index;
+      chosenRank = rank;
+    }
+  });
+  return chosen;
 }
 
 function fitLines(

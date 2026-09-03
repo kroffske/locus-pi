@@ -146,11 +146,24 @@ const GROUP_MEMBER_RANK: Record<AgentLiveStatus, number> = {
   cancelled: 3,
 };
 
+/**
+ * The display rank of a group member: 0 is what the operator sees first.
+ *
+ * Exported because a surface that has to GIVE UP rows (the passive progress
+ * roster) must give them up in the reverse of this order — a panel that puts
+ * live work on top and then collapses live work first would defeat its own
+ * ordering rule. Reading the rank instead of re-listing the statuses keeps the
+ * two from drifting apart.
+ */
+export function agentGroupMemberDisplayRank(status: AgentLiveStatus): number {
+  return GROUP_MEMBER_RANK[status] ?? 3;
+}
+
 function orderGroupMembers(members: AgentLiveRow[]): AgentLiveRow[] {
   return members
     .map((row, index) => ({ row, index }))
     .sort((a, b) => {
-      const rank = (GROUP_MEMBER_RANK[a.row.status] ?? 3) - (GROUP_MEMBER_RANK[b.row.status] ?? 3);
+      const rank = agentGroupMemberDisplayRank(a.row.status) - agentGroupMemberDisplayRank(b.row.status);
       return rank !== 0 ? rank : a.index - b.index;
     })
     .map((entry) => entry.row);
@@ -158,8 +171,11 @@ function orderGroupMembers(members: AgentLiveRow[]): AgentLiveRow[] {
 
 /**
  * Drop group summary rows that aggregate fewer than two agents and re-parent
- * their children onto the dropped group's own parent, so the tree stays intact
- * and no leaf disappears with the heading.
+ * their children onto the nearest ancestor that SURVIVED, so the tree stays
+ * intact and no leaf disappears with the heading. The walk is a loop, not one
+ * hop: a sub-threshold group nested inside another sub-threshold group would
+ * otherwise leave its child pointing at a row nobody holds any more, and the
+ * child would silently detach from its real ancestor and render as a root.
  */
 function dropSubThresholdGroupRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   const droppedIds = new Set(
@@ -167,11 +183,20 @@ function dropSubThresholdGroupRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   );
   if (droppedIds.size === 0) return rows;
   const byId = new Map(rows.map((row) => [row.id, row]));
+  const survivingAncestorId = (parentRowId: string): string | undefined => {
+    let candidate: string | undefined = parentRowId;
+    const seen = new Set<string>();
+    while (candidate !== undefined && droppedIds.has(candidate) && !seen.has(candidate)) {
+      seen.add(candidate);
+      candidate = byId.get(candidate)?.parentRowId;
+    }
+    return candidate;
+  };
   return rows
     .filter((row) => !droppedIds.has(row.id))
     .map((row) => {
       if (row.parentRowId === undefined || !droppedIds.has(row.parentRowId)) return row;
-      const nextParentRowId = byId.get(row.parentRowId)?.parentRowId;
+      const nextParentRowId = survivingAncestorId(row.parentRowId);
       const { parentRowId: _droppedParent, ...rest } = row;
       return nextParentRowId === undefined ? rest : { ...rest, parentRowId: nextParentRowId };
     });
