@@ -39,6 +39,62 @@ function row(id: string, title: string, status: AgentLiveStatus = "working") {
   return agentLiveStore.patch(value.id, { status })!;
 }
 
+/**
+ * A fan-out with the row layer a real run actually produces: the group row, one
+ * workflow journal ANCHOR per branch under it, and the SDK child row under each
+ * anchor. Two rows per agent, collapsed into one only by the shared projection.
+ *
+ * Every `/ps` assertion about a group — its heading, that heading's counters, the
+ * order of its members — has to be made against this shape. A test that hangs the
+ * members straight off the group row skips the collapse entirely and would pass
+ * on code where the live surface shows no heading at all, which is exactly how
+ * the pin below shipped broken.
+ */
+function liveFanOut(options: {
+  runId: string;
+  label: string;
+  size: number;
+  status?: (index: number) => AgentLiveStatus;
+  groupCounters?: { groupCompleted: number; groupFailed: number };
+}) {
+  const { runId, label, size } = options;
+  const group = agentLiveStore.begin({
+    id: workflowGroupLiveRowId({ runId, groupId: `parallel-${size}` }),
+    agentName: "workflow-group",
+    label: `parallel (${size})`,
+    groupKind: "parallel",
+    groupTotal: size,
+    workflowRunId: runId,
+  });
+  agentLiveStore.patch(group.id, { status: "working", ...(options.groupCounters ?? {}) });
+  const statusOf = options.status ?? ((index: number) => (index === 0 ? "error" : index < 4 ? "done" : "working"));
+  const branches = Array.from({ length: size }, (_unused, index) => {
+    const memberLabel = `${label} ${index} of ${size}`;
+    const line = { runId, executionMode: "bare", label: memberLabel, phase: "fanout" } as const;
+    const anchor = agentLiveStore.begin({
+      id: workflowAgentLiveRowId(line),
+      parentRowId: group.id,
+      agentName: "worker",
+      label: memberLabel,
+      workflowRunId: runId,
+    });
+    const child = agentLiveStore.begin({
+      id: workflowAgentLiveChildRowId(line),
+      parentRowId: anchor.id,
+      agentName: "worker",
+      label: memberLabel,
+      title: memberLabel,
+      workflowRunId: runId,
+    });
+    return { anchor, member: agentLiveStore.patch(child.id, { status: statusOf(index) })! };
+  });
+  return {
+    group,
+    anchors: branches.map((branch) => branch.anchor),
+    members: branches.map((branch) => branch.member),
+  };
+}
+
 describe("agent fleet menu", () => {
   it("puts the newest workflow run first and labels the runs behind it", () => {
     const earlier = agentLiveStore.begin({
@@ -721,27 +777,14 @@ describe("agent fleet menu", () => {
     // the top and no key could bring it back: `/ps` showed a wall of members
     // under nothing. It is pinned above the window instead, and pinning it costs
     // no member row.
-    const group = agentLiveStore.begin({
-      id: "workflow:ps-long:group:parallel-9",
-      agentName: "workflow-group",
-      label: "parallel (9)",
-      groupKind: "parallel",
-      groupTotal: 9,
-      workflowRunId: "ps-long",
-    });
-    agentLiveStore.patch(group.id, { status: "working" });
-    const members = Array.from({ length: 9 }, (_unused, index) => {
-      const member = agentLiveStore.begin({
-        id: `ps-long-item-${index}`,
-        parentRowId: group.id,
-        agentName: "worker",
-        label: `long item ${index} of 9`,
-        title: `long item ${index} of 9`,
-        workflowRunId: "ps-long",
-      });
-      const status: AgentLiveStatus = index === 0 ? "error" : index < 4 ? "done" : "working";
-      return agentLiveStore.patch(member.id, { status })!;
-    });
+    //
+    // The rows are built the way a live fan-out builds them — group, a workflow
+    // journal ANCHOR per branch, and the SDK child under each anchor — because
+    // that anchor layer is the whole difficulty: `/ps` freezes its membership and
+    // re-projects it every frame, and a frozen set that lost its anchors cannot
+    // re-parent the children onto the group. A flat group→member set passes
+    // whether the pin works on the live surface or not.
+    const { group, members } = liveFanOut({ runId: "ps-long", label: "long item", size: 9 });
 
     fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
     fleetMenuState.setFocused(true);
@@ -779,6 +822,79 @@ describe("agent fleet menu", () => {
     expect(frame.find((frameLine) => frameLine.startsWith("> "))).toBeDefined();
     expect(frame.find((frameLine) => frameLine.startsWith("> "))).not.toContain("parallel (9)");
     expect(frame.filter((frameLine) => frameLine.includes("long item"))).toHaveLength(8);
+    component.dispose();
+  });
+
+  it("counts the /ps group heading off the live anchor-backed members while the fan-out runs", () => {
+    // A fan-out that is still running has stated no counters of its own — the
+    // journal writes them at `group_end` — so the heading is summed from its
+    // member rows. Those members are the group's members only after the anchor
+    // collapse, and `/ps` keeps its own frozen row set: the heading would sit
+    // over rows it cannot count and read `0/6 done` next to ✓ and ✗ members.
+    const { group, members } = liveFanOut({
+      runId: "ps-counters",
+      label: "counted item",
+      size: 6,
+      status: () => "working",
+    });
+    expect(group.groupCompleted).toBeUndefined();
+
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+    expect(component.render(120).join("\n")).toContain("0/6 done");
+
+    // Members settle under the open menu; the heading follows them.
+    agentLiveStore.patch(members[0]!.id, { status: "error" });
+    agentLiveStore.patch(members[1]!.id, { status: "done" });
+    agentLiveStore.patch(members[2]!.id, { status: "done" });
+
+    const frame = component.render(120).join("\n");
+    expect(frame).toContain("2/6 done");
+    expect(frame).toContain("1 failed");
+    component.dispose();
+  });
+
+  it("re-ranks the live anchor-backed group members in /ps as they settle under the open menu", () => {
+    // Working → failed → queued → done is a fact about the group's children, so
+    // it needs the same anchor collapse the heading does. The menu freezes WHICH
+    // rows it owns, never the order they project into: a member that fails while
+    // `/ps` is open has to rise, and one that finishes has to fall.
+    const { members } = liveFanOut({
+      runId: "ps-order",
+      label: "ranked item",
+      size: 4,
+      status: () => "working",
+    });
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+    const positionsOf = (frame: string[]) => (needle: string) =>
+      frame.findIndex((frameLine) => frameLine.includes(needle));
+
+    const opened = positionsOf(component.render(120));
+    expect(opened("ranked item 0 of 4")).toBeLessThan(opened("ranked item 1 of 4"));
+
+    agentLiveStore.patch(members[0]!.id, { status: "done" });
+    agentLiveStore.patch(members[1]!.id, { status: "error" });
+
+    const at = positionsOf(component.render(120));
+    expect(at("ranked item 2 of 4")).toBeLessThan(at("ranked item 1 of 4"));
+    expect(at("ranked item 1 of 4")).toBeLessThan(at("ranked item 0 of 4"));
+    // Reordering moves rows, not the cursor: it stays on the row the operator
+    // put it on, which has just travelled to the bottom of the group.
+    expect(fleetMenuState.selectedRowId).toBe(members[0]!.id);
+    expect(members.every((member) => at(member.title!) >= 0)).toBe(true);
     component.dispose();
   });
 

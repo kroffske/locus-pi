@@ -35,7 +35,21 @@ class FleetMenuState {
   readonly emitter = new EventEmitter();
   #focused = false;
   #selectedRowId: string | undefined;
-  #visibleRowIds: string[] = [];
+  /**
+   * The frozen membership of the focused list, held as SOURCE row ids — the raw
+   * store rows the projection consumes, workflow journal anchors included.
+   *
+   * Holding the projected ids instead is what broke `/ps` on a real fan-out: the
+   * projection had already collapsed each anchor into its SDK child, so the
+   * anchors were missing from the frozen set while the children resolved back
+   * out of the store still carrying `parentRowId = <anchor id>`. Re-projecting
+   * that set found no anchor to collapse, so no child was re-parented onto its
+   * group, and every rule that reads the group's members — the heading's
+   * `k/n done · f failed`, the working→failed→queued→done member ranking, and
+   * the heading pinned above a window shorter than the fan-out — read a tree
+   * that was not there.
+   */
+  #sourceRowIds: string[] = [];
   #emptyEditorFocusAvailable = false;
   #fallbackFocusAvailable = false;
   #projectionOwners = new Map<symbol, { priority: number; order: number }>();
@@ -94,7 +108,7 @@ class FleetMenuState {
    * a row retired during the drill falls back to the usual preferred row.
    */
   beginFocus(rows: AgentLiveRow[], initialRowId?: string): void {
-    this.#visibleRowIds = projectFleetMenuSnapshotRows(rows).map((row) => row.id);
+    this.#sourceRowIds = rows.map((row) => row.id);
     const visibleRows = this.visibleRows();
     if (initialRowId !== undefined && selectFleetMenuLeafRows(visibleRows).some((row) => row.id === initialRowId)) {
       this.#selectedRowId = initialRowId;
@@ -103,12 +117,22 @@ class FleetMenuState {
   }
 
   setVisibleRows(rows: AgentLiveRow[]): void {
-    this.#visibleRowIds = rows.map((row) => row.id);
-    this.#normalizeSelection(rows);
+    this.#sourceRowIds = rows.map((row) => row.id);
+    this.#normalizeSelection(this.visibleRows());
   }
 
+  /**
+   * The rows the focused list shows: the frozen membership, read live out of the
+   * store and put through the shared projection. Focus freezes WHICH rows the
+   * list owns, never the shape they project into, so every consumer — the cursor,
+   * the renderer, the heading — sees one tree.
+   */
   visibleRows(): AgentLiveRow[] {
-    return this.#visibleRowIds
+    return projectFleetMenuSnapshotRows(this.#sourceRows());
+  }
+
+  #sourceRows(): AgentLiveRow[] {
+    return this.#sourceRowIds
       .map((id) => agentLiveStore.rows.get(id))
       .filter((row): row is AgentLiveRow => row !== undefined);
   }
@@ -126,13 +150,11 @@ class FleetMenuState {
   }
 
   reconcileVisibleRows(): void {
-    const rows = this.visibleRows();
-    const ids = rows.map((row) => row.id);
-    const membershipChanged =
-      ids.length !== this.#visibleRowIds.length || ids.some((id, index) => id !== this.#visibleRowIds[index]);
-    const selectionChanged = this.#normalizeSelection(rows);
+    const liveIds = this.#sourceRows().map((row) => row.id);
+    const membershipChanged = liveIds.length !== this.#sourceRowIds.length;
+    if (membershipChanged) this.#sourceRowIds = liveIds;
+    const selectionChanged = this.#normalizeSelection(this.visibleRows());
     if (!membershipChanged && !selectionChanged) return;
-    this.#visibleRowIds = ids;
     this.emitter.emit("change");
   }
 
@@ -334,6 +356,12 @@ function projectFleetMenuRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
   );
 }
 
+/**
+ * The focused `/ps` row set. Idempotent, and it has to be: the focused state
+ * projects its frozen membership here, and `renderFleetMenuRows` projects again
+ * on whatever it is handed, so a caller that passes an already-projected set
+ * must get it back unchanged.
+ */
 function projectFleetMenuSnapshotRows(sourceRows: AgentLiveRow[]): AgentLiveRow[] {
   return partitionEarlierWorkflowRunRows(
     orderAgentLiveRows(withWorkflowGroupTotals(compactWorkflowParentRows(sourceRows))),
