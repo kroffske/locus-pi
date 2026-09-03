@@ -1028,11 +1028,13 @@ describe("agent attempts — retry behaviour", () => {
   });
 
   it("gives two interleaved parallel calls their own logical identity", async () => {
-    // `parallel()` may run two calls that agree on agent, label, phase and group, and their
-    // physical attempts then interleave. Nothing descriptive tells them apart, so each
-    // logical call carries its own identity and every attempt of it repeats that identity.
-    // Without it a reader grouping the journal by the descriptive fields attributes one
-    // call's discarded attempt to the other.
+    // `parallel()` may run two calls that agree on agent, phase and group, and their physical
+    // attempts then interleave. Their labels differ because two CONCURRENT calls sharing one
+    // (phase, label) are refused since T-192 W6 — but the journal's grouping key must not
+    // depend on an author having chosen distinct labels: the unlabelled pair below agrees on
+    // every descriptive field there is. So each logical call carries its own identity and
+    // every attempt of it repeats that identity. Without it a reader grouping the journal by
+    // the descriptive fields attributes one call's discarded attempt to the other.
     let started = 0;
     let releaseFirstRound: (() => void) | undefined;
     const bothFirstAttemptsStarted = new Promise<void>((resolve) => {
@@ -1054,8 +1056,8 @@ describe("agent attempts — retry behaviour", () => {
     });
 
     await dsl.parallel([
-      () => dsl.agent("advise A", { ...RETRYABLE_CALL, label: "advise", phase: "advise" }),
-      () => dsl.agent("advise B", { ...RETRYABLE_CALL, label: "advise", phase: "advise" }),
+      () => dsl.agent("advise A", { ...RETRYABLE_CALL, label: "advise a", phase: "advise" }),
+      () => dsl.agent("advise B", { ...RETRYABLE_CALL, label: "advise b", phase: "advise" }),
     ]);
 
     const ends = getJournal().filter((line) => line.kind === "agent_end");
@@ -1072,6 +1074,116 @@ describe("agent attempts — retry behaviour", () => {
     // Two logical calls, two physical attempts each, four distinct children in total.
     expect([...byLogicalCall.values()].map((callIds) => callIds.length)).toEqual([2, 2]);
     expect(new Set([...byLogicalCall.values()].flat()).size).toBe(4);
+  });
+
+  it("refuses a second concurrent call on one (phase,label), naming both, before any child", async () => {
+    // The slot is the live row. Two branches holding it at once would write one row between
+    // them, so the second is refused — and refused BEFORE the journal opens a colliding
+    // agent_start, which is the whole point of guarding the logical call rather than
+    // deduplicating rows after the fact.
+    let started = 0;
+    let releaseFirst: (() => void) | undefined;
+    // The first branch stays in flight until the refusal has been journalled, so the two
+    // calls provably overlap rather than running one after the other.
+    const secondWasRefused = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({
+      runId: "slot-guard-refuses",
+      onEvent(line) {
+        if (line.kind === "error" && line.message?.includes("slot is already running") === true) releaseFirst?.();
+      },
+      agentRunner: async (request): Promise<WorkflowAgentResult> => {
+        started += 1;
+        await secondWasRefused;
+        return completed(`answer for ${request.callId ?? "?"}`);
+      },
+    });
+
+    await expect(
+      dsl.parallel([
+        () => dsl.agent("advise A", { label: "advise", phase: "advise" }),
+        () => dsl.agent("advise B", { label: "advise", phase: "advise" }),
+      ]),
+    ).rejects.toThrow(/phase "advise", label "advise"/u);
+
+    // One child ran, and the journal carries exactly one agent_start for the slot: the
+    // refused call left no live row to collide with the survivor.
+    expect(started).toBe(1);
+    const starts = getJournal().filter((line) => line.kind === "agent_start");
+    expect(starts).toHaveLength(1);
+    expect(starts[0]?.label).toBe("advise");
+  });
+
+  it("frees the slot for the next round, so a loop re-enters it", async () => {
+    // Sequential re-entry is what a slot is FOR: the same (phase,label) called twice in a
+    // row is one row and two rounds, not a conflict.
+    const { dsl, requests, getJournal } = scriptedRuntime("slot-guard-sequential", [
+      completed("first"),
+      completed("second"),
+    ]);
+
+    await expect(dsl.agent("verify", { label: "verify", phase: "verify" })).resolves.toBe("first");
+    await expect(dsl.agent("verify", { label: "verify", phase: "verify" })).resolves.toBe("second");
+
+    expect(requests).toHaveLength(2);
+    expect(getJournal().filter((line) => line.kind === "agent_start")).toHaveLength(2);
+  });
+
+  it("frees the slot after a failure, so the same slot can be retried later", async () => {
+    // Released in `finally`, so exhaustion, a thrown host failure and an abort all leave the
+    // slot free. A claim that survived its call would refuse the recovery attempt.
+    const { dsl } = scriptedRuntime("slot-guard-after-failure", [
+      transportFailure(),
+      transportFailure(),
+      completed("recovered"),
+    ]);
+
+    await expect(dsl.agent("summarize", { ...RETRYABLE_CALL, label: "summary", phase: "wrap" })).rejects.toThrow(
+      /budget and was aborted/u,
+    );
+    await expect(dsl.agent("summarize", { label: "summary", phase: "wrap" })).resolves.toBe("recovered");
+  });
+
+  it("leaves the retries of ONE call alone — a transport retry is not a concurrent call", async () => {
+    // The claim wraps the logical call, not each physical attempt; a guard around the
+    // attempt would refuse the call's own second try.
+    const { dsl, requests } = scriptedRuntime("slot-guard-retry", [transportFailure(), completed("second answer")]);
+
+    await expect(dsl.agent("summarize", { ...RETRYABLE_CALL, label: "summary", phase: "wrap" })).resolves.toBe(
+      "second answer",
+    );
+    expect(requests).toHaveLength(2);
+  });
+
+  it("lets two unlabelled calls run at once — no label, no slot to share", async () => {
+    // The guard's boundary, not a hole in it: an unlabelled call anchors no live row, so
+    // there is nothing for a second one to overwrite.
+    let concurrent = 0;
+    let peak = 0;
+    let releaseBoth: (() => void) | undefined;
+    const bothStarted = new Promise<void>((resolve) => {
+      releaseBoth = resolve;
+    });
+    const { dsl } = createWorkflowRuntime({
+      runId: "slot-guard-unlabelled",
+      agentRunner: async (request): Promise<WorkflowAgentResult> => {
+        concurrent += 1;
+        peak = Math.max(peak, concurrent);
+        if (concurrent === 2) releaseBoth?.();
+        await bothStarted;
+        concurrent -= 1;
+        return completed(`answer for ${request.callId ?? "?"}`);
+      },
+    });
+
+    await expect(
+      dsl.parallel([
+        () => dsl.agent("advise A", { phase: "advise" }),
+        () => dsl.agent("advise B", { phase: "advise" }),
+      ]),
+    ).resolves.toHaveLength(2);
+    expect(peak).toBe(2);
   });
 
   it("writes a journal a reader accepts, retry line included", async () => {

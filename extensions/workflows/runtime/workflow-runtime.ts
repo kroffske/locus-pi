@@ -1463,6 +1463,28 @@ export class WorkflowAgentExecutionError extends Error {
   }
 }
 
+/**
+ * Thrown when a second agent call would occupy a `(phase, label)` slot that another call of
+ * the same run is still executing. One slot is one live row and one journal correlation key,
+ * so two concurrent occupants would collapse two branches into a single row. Sequential
+ * re-entry of the same slot — a loop round, `r<N>` — is untouched: the slot is released when
+ * the first call ends. A BRANCH-level failure by design: unlike the run cap and the run
+ * deadline it does not bubble past a grouped context, because only this branch is refused.
+ */
+export class WorkflowAgentSlotConflictError extends Error {
+  readonly phase: string | undefined;
+  readonly label: string;
+  constructor(phase: string | undefined, label: string) {
+    super(
+      `workflow agent slot is already running: phase ${phase === undefined ? "(none)" : `"${phase}"`}, label "${label}"; ` +
+        "two concurrent calls sharing one (phase, label) would write one live row, so the second is refused before it starts",
+    );
+    this.name = "WorkflowAgentSlotConflictError";
+    this.phase = phase;
+    this.label = label;
+  }
+}
+
 /** The DSL's "declared shape not met" failure. Thrown by agent({ schema }) — that path always
  *  fails closed — when the child's answer still violates the schema after SCHEMA_MAX_ATTEMPTS.
  *  Carries the validator errors + attempt count. A child RUN failure stays
@@ -2496,6 +2518,12 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   let totalLogicalAgentCalls = 0;
   /** Per-run `(phase,label)` -> how many calls that slot has already opened. */
   const agentNodeOccurrences = new Map<string, number>();
+  /**
+   * The `(phase,label)` slots this run is executing RIGHT NOW. Membership is what makes a
+   * second concurrent occupant of one slot refusable; it is not a history, so a slot is
+   * free again the moment its call ends.
+   */
+  const activeAgentSlots = new Set<string>();
   let totalFusionCalls = 0;
   const journal = options.journal;
   const nowFn = options.now ?? (() => new Date().toISOString());
@@ -2628,83 +2656,113 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.[FUSION_CAPABILITY_MODE] === undefined ? {} : { capabilityMode: opts[FUSION_CAPABILITY_MODE] }),
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
     };
-    // Replay eligibility is decided from the RESOLVED request, so defaults and
-    // aliases cannot make two different executions share a key. A worktree call
-    // is never served from a record: its recorded text would claim a filesystem
-    // mutation this run did not perform.
-    const replayable = req.workspaceMode === "project" && req.workspaceHandle === undefined;
-    // Bounded and gated BEFORE the replay envelope opens and before any child exists, so a
-    // refused declaration costs neither an ordinal nor an invocation. Never clamped: a
-    // script that declares `attempts: 50` must hear "no", not silently receive 3.
-    const attempts = normalizeAgentAttempts(opts?.attempts);
-    if (attempts > 1) {
-      const refusal = transportRetryRefusal(req, replayable);
-      if (refusal !== undefined) throw new Error(refusal);
+    // T-192 W6 — one slot, one RUNNING call. A `(phase, label)` slot names one live row and
+    // one journal correlation key, so two calls occupying it at the same time would collapse
+    // two branches into a single row: the second branch's rounds would overwrite the first's
+    // and the operator would watch one line describe two agents. Sequential re-entry of the
+    // slot — the loop round that `r<N>` counts — is exactly what the slot is FOR and stays
+    // allowed, because the claim below lives only as long as the call.
+    //
+    // Claimed around the LOGICAL call and before anything is spent on it: before the replay
+    // ordinal, before the invocation charge, before `agent_start`. A refusal after the
+    // journal line would leave behind the colliding live row it exists to prevent, and a
+    // claim around each physical attempt instead would make a transport retry of one call
+    // look concurrent with itself. Only a labelled call anchors a slot, so an unlabelled one
+    // falls outside the guard rather than being exempted from it.
+    const activeSlot =
+      req.label === undefined
+        ? undefined
+        : { key: workflowSlotKey({ phase: req.phase, label: req.label }), label: req.label };
+    if (activeSlot !== undefined) {
+      if (activeAgentSlots.has(activeSlot.key)) {
+        throw new WorkflowAgentSlotConflictError(req.phase, activeSlot.label);
+      }
+      activeAgentSlots.add(activeSlot.key);
     }
-    const canonicalRequest = canonicalAgentRequest(req);
-    // Allocated once per logical call, and only where one ordinal is opened: it is the name
-    // the physical attempts below share, and the only field a report can group them by.
-    totalLogicalAgentCalls += 1;
-    const logicalCallId = `logical-${String(totalLogicalAgentCalls).padStart(4, "0")}`;
-    // Claimed on the same synchronous stretch that opens the record's ordinal
-    // below, so the occurrence counter and the position always describe the same
-    // call. One object serves the lookup and all three record sites, so the name
-    // written can never drift from the name compared.
-    const node = workflowNodeName(req, agentNodeOccurrences);
-    const replayCall = { ...(node === undefined ? {} : { node }), canonicalRequest };
-    const lookup = options.replay?.beginAgentAttempt({ ...replayCall, replayable });
-    if (opts?.[FUSION_REPLAY_REQUIRED] === true && lookup?.replayed !== true) {
-      options.replay?.recordAgentAttempt(replayCall, { ok: false });
-      throw new Error(
-        `fusion resume cannot mix recorded and fresh agent calls; replay missed with ${lookup?.reason ?? "no replay controller"}`,
-      );
-    }
-    const replayedText = lookup?.replayed === true ? lookup.text : undefined;
-
-    let lastFailure: WorkflowAgentResult | undefined;
-    for (let attempt = 1; ; attempt++) {
-      let physical: PhysicalAgentAttempt;
-      try {
-        physical = await runPhysicalAgentAttempt({
-          req,
-          permissionMode,
-          workspaceMode,
-          opts,
-          ...(maxAnswerChars !== undefined ? { maxAnswerChars } : {}),
-          attempt,
-          attempts,
-          logicalCallId,
-          ...(checkSchema !== undefined ? { checkSchema } : {}),
-          ...(replayedText !== undefined ? { replayedText } : {}),
-        });
-      } catch (err) {
-        // A THROWN failure carries no classified cause, so it is never retried. Record it so
-        // the recorded sequence keeps the same ordinals as the live one: a later resume then
-        // replays the prefix and re-runs the call that failed, which is the point of resuming.
+    try {
+      // Replay eligibility is decided from the RESOLVED request, so defaults and
+      // aliases cannot make two different executions share a key. A worktree call
+      // is never served from a record: its recorded text would claim a filesystem
+      // mutation this run did not perform.
+      const replayable = req.workspaceMode === "project" && req.workspaceHandle === undefined;
+      // Bounded and gated BEFORE the replay envelope opens and before any child exists, so a
+      // refused declaration costs neither an ordinal nor an invocation. Never clamped: a
+      // script that declares `attempts: 50` must hear "no", not silently receive 3.
+      const attempts = normalizeAgentAttempts(opts?.attempts);
+      if (attempts > 1) {
+        const refusal = transportRetryRefusal(req, replayable);
+        if (refusal !== undefined) throw new Error(refusal);
+      }
+      const canonicalRequest = canonicalAgentRequest(req);
+      // Allocated once per logical call, and only where one ordinal is opened: it is the name
+      // the physical attempts below share, and the only field a report can group them by.
+      totalLogicalAgentCalls += 1;
+      const logicalCallId = `logical-${String(totalLogicalAgentCalls).padStart(4, "0")}`;
+      // Claimed on the same synchronous stretch that opens the record's ordinal
+      // below, so the occurrence counter and the position always describe the same
+      // call. One object serves the lookup and all three record sites, so the name
+      // written can never drift from the name compared.
+      const node = workflowNodeName(req, agentNodeOccurrences);
+      const replayCall = { ...(node === undefined ? {} : { node }), canonicalRequest };
+      const lookup = options.replay?.beginAgentAttempt({ ...replayCall, replayable });
+      if (opts?.[FUSION_REPLAY_REQUIRED] === true && lookup?.replayed !== true) {
         options.replay?.recordAgentAttempt(replayCall, { ok: false });
-        throw err;
+        throw new Error(
+          `fusion resume cannot mix recorded and fresh agent calls; replay missed with ${lookup?.reason ?? "no replay controller"}`,
+        );
       }
-      if (physical.ok) {
-        // This run writes its OWN complete record, replayed entries included, so a
-        // resume of a resume still has an unbroken prefix to work from.
-        options.replay?.recordAgentAttempt(replayCall, { ok: true, text: physical.text });
-        return physical.outcome;
+      const replayedText = lookup?.replayed === true ? lookup.text : undefined;
+
+      let lastFailure: WorkflowAgentResult | undefined;
+      for (let attempt = 1; ; attempt++) {
+        let physical: PhysicalAgentAttempt;
+        try {
+          physical = await runPhysicalAgentAttempt({
+            req,
+            permissionMode,
+            workspaceMode,
+            opts,
+            ...(maxAnswerChars !== undefined ? { maxAnswerChars } : {}),
+            attempt,
+            attempts,
+            logicalCallId,
+            ...(checkSchema !== undefined ? { checkSchema } : {}),
+            ...(replayedText !== undefined ? { replayedText } : {}),
+          });
+        } catch (err) {
+          // A THROWN failure carries no classified cause, so it is never retried. Record it so
+          // the recorded sequence keeps the same ordinals as the live one: a later resume then
+          // replays the prefix and re-runs the call that failed, which is the point of resuming.
+          options.replay?.recordAgentAttempt(replayCall, { ok: false });
+          throw err;
+        }
+        if (physical.ok) {
+          // This run writes its OWN complete record, replayed entries included, so a
+          // resume of a resume still has an unbroken prefix to work from.
+          options.replay?.recordAgentAttempt(replayCall, { ok: true, text: physical.text });
+          return physical.outcome;
+        }
+        lastFailure = physical.result;
+        if (attempt >= attempts || !isTransportRetryableFailure(physical.result)) break;
+        // `log` carries no agent identity of its own (`workflow-journal.ts` rejects one), so the
+        // agent is named in the message; the attempt's own agent_end already holds the rest.
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          message: `[workflow:retry] ${workflowAgentDisplayName(req)}${req.label === undefined ? "" : ` (${req.label})`}: transport attempt ${attempt} of ${attempts} failed with ${workflowAgentFailureCause(physical.result)}; re-running the identical request`,
+        });
       }
-      lastFailure = physical.result;
-      if (attempt >= attempts || !isTransportRetryableFailure(physical.result)) break;
-      // `log` carries no agent identity of its own (`workflow-journal.ts` rejects one), so the
-      // agent is named in the message; the attempt's own agent_end already holds the rest.
-      emit({
-        ts: nowFn(),
-        runId,
-        kind: "log",
-        source: "runtime",
-        ...(req.phase !== undefined ? { phase: req.phase } : {}),
-        message: `[workflow:retry] ${workflowAgentDisplayName(req)}${req.label === undefined ? "" : ` (${req.label})`}: transport attempt ${attempt} of ${attempts} failed with ${workflowAgentFailureCause(physical.result)}; re-running the identical request`,
-      });
+      options.replay?.recordAgentAttempt(replayCall, { ok: false });
+      throw new WorkflowAgentExecutionError(lastFailure!);
+    } finally {
+      // Released on every exit — answer, transport exhaustion, thrown host failure, abort and
+      // run deadline alike. A claim that outlived its call would refuse the next round of the
+      // loop that owns the slot, which is the opposite of what this guard protects.
+      if (activeSlot !== undefined) activeAgentSlots.delete(activeSlot.key);
     }
-    options.replay?.recordAgentAttempt(replayCall, { ok: false });
-    throw new WorkflowAgentExecutionError(lastFailure!);
   }
 
   /**
