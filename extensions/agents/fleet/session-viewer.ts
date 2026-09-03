@@ -116,6 +116,20 @@ const ENABLE_MOUSE_SCROLL = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE_SCROLL = "\u001b[?1000l\u001b[?1006l";
 const MOUSE_SCROLL_ENV = "LOCUS_DRILL_MOUSE";
 
+/**
+ * How the agent screen ended, for the caller that has somewhere to go back to.
+ *
+ * - `back` — the operator stepped out of this screen (Esc, or cancelling the
+ *   input editor) and expects to land where they came from. Opened from `/ps`,
+ *   that is `/ps` again on the same row.
+ * - `quit` — the screen is done rather than stepped out of: `q` leaves the agent
+ *   surface altogether and hands the editor back, and so does every close the
+ *   operator did not ask for (the viewed row retired underneath the screen).
+ *   Reopening a fleet nobody asked for would be a surprise, and with no live
+ *   rows left it would also raise a "found no live agent rows" warning.
+ */
+export type AgentViewerCloseReason = "back" | "quit";
+
 export type AgentViewerCapabilityResult =
   { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
 
@@ -240,7 +254,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   constructor(
     private readonly execution: AgentLiveExecutionHandle,
     private readonly tui: ViewerTui,
-    private readonly done: () => void,
+    private readonly done: (reason: AgentViewerCloseReason) => void,
     private readonly capability: AgentViewerCapability,
     private readonly rounds?: DrillRoundsConfig,
     private readonly keybindings?: ViewerKeybindings,
@@ -260,7 +274,7 @@ export class AgentSessionViewer implements CustomUiComponent {
       if (this.#disposed) return;
       if (agentLiveStore.rowForExecution(this.execution) === undefined) {
         if (this.#isHistoricalRound()) this.#detachStore();
-        else this.#close();
+        else this.#close("quit");
         return;
       }
       this.#scheduler.request();
@@ -286,7 +300,7 @@ export class AgentSessionViewer implements CustomUiComponent {
     const safeWidth = Math.max(1, Math.floor(width));
     const row = agentLiveStore.rowForExecution(this.execution);
     if (!this.#isHistoricalRound() && row === undefined) {
-      this.#close();
+      this.#close("quit");
       return [];
     }
     const rounds = this.roundsLabel();
@@ -337,8 +351,14 @@ export class AgentSessionViewer implements CustomUiComponent {
 
   handleInput(data: string): void {
     if (this.#disposed) return;
-    if (isClose(data) || (data === "q" && this.#input === undefined)) {
-      this.#close();
+    // Esc steps back to whatever opened this screen; `q` leaves the agent surface
+    // for the editor. Both still close, so the split is only in the reason.
+    if (isClose(data)) {
+      this.#close("back");
+      return;
+    }
+    if (data === "q" && this.#input === undefined) {
+      this.#close("quit");
       return;
     }
     if (this.#mouseScrollOwned) {
@@ -377,7 +397,8 @@ export class AgentSessionViewer implements CustomUiComponent {
     const selectedRound = this.#selectRound(data, this.#input === undefined);
     if (selectedRound !== undefined) {
       if (selectedRound === this.rounds?.active && agentLiveStore.rowForExecution(this.execution) === undefined) {
-        this.#close();
+        // The live round the operator asked for is gone: nothing to step back to.
+        this.#close("quit");
         return;
       }
       this.#selection = selectedRound;
@@ -421,11 +442,11 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#scheduler.cancel();
   }
 
-  #close(): void {
+  #close(reason: AgentViewerCloseReason): void {
     if (this.#closed) return;
     this.#closed = true;
     this.dispose();
-    this.done();
+    this.done(reason);
   }
 
   get expandedTools(): boolean {
@@ -530,7 +551,9 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.tui,
       this.keybindings,
       (value) => this.#submitInput(value),
-      () => this.#close(),
+      // Cancelling the editor is the same Esc the operator would press with no
+      // editor on screen, so it steps back the same way.
+      () => this.#close("back"),
       this.theme,
     );
     return this.#input;

@@ -1126,6 +1126,48 @@ describe("agent fleet menu", () => {
     expect(reopened?.join("\n")).not.toContain(second.displayName!);
   });
 
+  it("returns to the editor without reopening /ps when q closes the agent screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    row("quit-return-a", "first quit row");
+    row("quit-return-b", "second quit row");
+    // fleet: down, enter → agent screen: q. `q` leaves the agent surface for the
+    // editor, so no third surface opens and the queue is not exhausted.
+    h.customInputQueue.push("down", "enter", "q");
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(h.customOptions).toEqual([{ overlay: false }, { overlay: false }]);
+    expect(h.customInputQueue).toHaveLength(0);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+  });
+
+  it("hands the editor back instead of reopening /ps when the drilled row retires under the screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const only = row("vanish-return-a", "only fleet row");
+    // The agent screen closes itself when its row goes away mid-drill. That close
+    // is not a request for the fleet, and here reopening would also warn that /ps
+    // found no live agent rows.
+    h.customInputQueue.push("enter");
+    const baseCustom = h.ctx.ui.custom!;
+    let customCalls = 0;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCalls += 1;
+      if (customCalls === 2) queueMicrotask(() => agentLiveStore.removeRows([only.id]));
+      return baseCustom.call(h.ctx.ui, factory, options) as Promise<T>;
+    };
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(customCalls).toBe(2);
+    expect(h.notifications.some((message) => message.includes("found no live agent rows"))).toBe(false);
+    expect(fleetMenuState.focused).toBe(false);
+  });
+
   it("returns /ps <target> to the editor without opening the fleet", async () => {
     const h = createHarness();
     h.ctx.hasUI = true;

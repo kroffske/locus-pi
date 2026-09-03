@@ -191,8 +191,17 @@ async function openFleetMenu(
       // must show the viewed agent alone, and dropping ownership is what clears
       // the fleet cursor — so the row to come back to travels in the outcome.
       ownership.finish();
-      await executeAgentDrillCommand(ctx as ExtensionCommandContext, { target: action.rowId }, agentSessionAuthority);
-      return { drilledRowId: action.rowId };
+      const closed = await executeAgentDrillCommand(
+        ctx as ExtensionCommandContext,
+        { target: action.rowId },
+        agentSessionAuthority,
+      );
+      // Only a step back out of the agent screen comes back here. `q` leaves the
+      // agent surface for the editor, and a screen that closed itself because its
+      // row retired was never a request for the fleet — reopening either would
+      // put a surface on screen the operator did not ask for, and with no live
+      // rows left it would also raise "/ps found no live agent rows".
+      return closed === "back" ? { drilledRowId: action.rowId } : undefined;
     }
   } finally {
     disposeComponent();

@@ -22,7 +22,7 @@ import {
 } from "../../workflows/run/run-read.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "../operator/operator-surface.js";
-import { AgentSessionViewer, loadAgentViewerCapability } from "./session-viewer.js";
+import { AgentSessionViewer, loadAgentViewerCapability, type AgentViewerCloseReason } from "./session-viewer.js";
 import type { ParsedAgentDrillCommand } from "../command/command-parser.js";
 
 export const AGENT_DRILL_USAGE = "Usage: /agent drill <row-id|agent|last>";
@@ -36,11 +36,17 @@ export interface AgentSessionAuthority {
   isCurrent(authority: number): boolean;
 }
 
+/**
+ * Opens the agent screen and reports how it closed, so a caller that has a place
+ * to return to (the fleet loop) can tell "step back" from "done here". Every path
+ * that never put a screen on screen — a refused target, a host without custom UI,
+ * a stale session — reports nothing to go back from.
+ */
 export async function executeAgentDrillCommand(
   ctx: ExtensionCommandContext,
   command: ParsedAgentDrillCommand,
   sessionAuthority: AgentSessionAuthority,
-): Promise<void> {
+): Promise<AgentViewerCloseReason | undefined> {
   const capturedSessionAuthority = sessionAuthority.capture();
   if (command.target === "") {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
@@ -152,20 +158,24 @@ export async function executeAgentDrillCommand(
   const rounds = buildDrillRounds(ctx, row);
   if (!isCurrent()) return;
   let viewer: AgentSessionViewer | undefined;
+  let closeReason: AgentViewerCloseReason | undefined;
   try {
     try {
-      await requestInlineOperatorInteraction<void>(ctx, (tui, theme, keybindings, done) => {
-        viewer = new AgentSessionViewer(
-          executionAuthority,
-          tui,
-          done,
-          capability.capability,
-          rounds,
-          keybindings as { matches(data: string, keybinding: string): boolean },
-          theme,
-        );
-        return viewer;
-      });
+      closeReason = await requestInlineOperatorInteraction<AgentViewerCloseReason>(
+        ctx,
+        (tui, theme, keybindings, done) => {
+          viewer = new AgentSessionViewer(
+            executionAuthority,
+            tui,
+            done,
+            capability.capability,
+            rounds,
+            keybindings as { matches(data: string, keybinding: string): boolean },
+            theme,
+          );
+          return viewer;
+        },
+      );
     } catch (error) {
       if (isStaleInlineOperatorInteractionError(error)) {
         notifyInteractionEnded(ctx, error, "Agent view");
@@ -176,14 +186,20 @@ export async function executeAgentDrillCommand(
   } finally {
     viewer?.dispose();
   }
-  if (!isCurrent()) return;
-  const current = agentLiveStore.rows.get(row.id);
-  if (current?.status === "working" || current?.status === "queued") {
-    ctx.ui.notify(
-      `Agent view closed; ${current.displayName ?? current.agentName ?? current.id} continues running.`,
-      "info",
-    );
+  // Staleness gates the reassurance, not the answer: how the operator left this
+  // screen is a fact about the keystroke they pressed, and a row that retired
+  // while they were reading it is exactly the case the fleet loop must still
+  // return to. The caller has its own guard for a session that moved on.
+  if (isCurrent()) {
+    const current = agentLiveStore.rows.get(row.id);
+    if (current?.status === "working" || current?.status === "queued") {
+      ctx.ui.notify(
+        `Agent view closed; ${current.displayName ?? current.agentName ?? current.id} continues running.`,
+        "info",
+      );
+    }
   }
+  return closeReason;
 }
 
 /**

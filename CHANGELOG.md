@@ -15,6 +15,7 @@ User-visible changes to the public package.
 - Model roles now have one persistent authority: `~/.pi/agent/model-roles/config.json`. `/model-roles` reads and writes that global user file. Project `.pi/model-roles/config.json`, `settings.json#modelRoles`, and session evidence no longer override it.
 - The Package `task` namespace now has one explicit handoff: `task/draft` publishes an editable brief with the graph pattern, agents, handoffs, review bounds, concurrency, failure exits, and primary output; `task/plan` consumes the accepted text and directly publishes a checked `workflow.mjs`.
 - The workflow-create skill now authors orchestration-only JavaScript. New workflows may contain visible prompts, agent calls, DSL control flow, and text publication, while project inspection and file work belong to child agents instead of workflow-side file, path, or artifact-reading primitives. Its Build step uses a strict `workflow_check_source` mode; the default compatibility mode still validates existing reviewed workflows.
+- Escape from an agent drill opened through `/ps` now returns to `/ps` on the row it was opened from instead of to the editor, and the fleet re-reads its membership on the way back, so agents that arrived during the drill are there. `q` still leaves the agent surface for the editor, and a drill whose row retired while it was open hands the editor back rather than reopening a fleet nobody asked for.
 
 ### Fixed
 
