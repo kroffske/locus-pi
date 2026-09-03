@@ -1355,4 +1355,51 @@ describe("AgentSessionViewer", () => {
     }
     viewer.dispose();
   });
+  it("keeps the footer on screen in fullscreen by leaving Pi's transcript row alone", () => {
+    // Pi's fullscreen dock sits under a ScrollView it may never shrink below one
+    // row, so a component that claims `rows - 1` loses its last line — the footer
+    // with every control on it — and Pi's own view is already at its bottom, so
+    // there is nowhere to scroll to reach it.
+    const row = agentLiveStore.begin({ id: "fullscreen-geometry-row", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 120; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `line-${index}` }], stopReason: "stop" },
+      });
+    }
+    const execution = executionFor(row.id);
+
+    const fullscreen = new AgentSessionViewer(
+      execution,
+      { mode: "fullscreen" as const, terminal: { rows: 50, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    const fullscreenLines = fullscreen.render(80);
+    expect(fullscreenLines).toHaveLength(48);
+    expect(fullscreenLines.at(-1)).toMatch(/^╰─ esc close/u);
+    fullscreen.dispose();
+
+    // Regular mode keeps the row it always had: one line more of transcript.
+    const regular = new AgentSessionViewer(
+      execution,
+      { mode: "regular" as const, terminal: { rows: 50, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    const regularLines = regular.render(80);
+    expect(regularLines).toHaveLength(49);
+    expect(regularLines.at(-1)).toMatch(/^╰─ esc close/u);
+    regular.dispose();
+
+    // A host that reports no mode is laid out like regular, unchanged.
+    const unknown = new AgentSessionViewer(
+      execution,
+      { terminal: { rows: 50, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(unknown.render(80)).toHaveLength(49);
+    unknown.dispose();
+  });
 });

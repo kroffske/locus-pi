@@ -104,9 +104,23 @@ type NativeComponentEntry =
       expanded: boolean;
     };
 
-// Pi renders the default-loaded Locus footer beneath custom views.
-const PI_HOST_FOOTER_ROWS = 1;
 /**
+ * Rows Pi keeps outside the custom component, by the host's own TUI mode.
+ *
+ * Regular mode costs one: the default-loaded Locus footer drawn beneath custom
+ * views. Fullscreen costs two, and the second row is not optional. Pi mounts a
+ * custom editor component into `editorContainer`, which sits in a dock stacked
+ * under the transcript `ScrollView`, and that ScrollView is declared
+ * `{ basis: 0, grow: 1, shrink: 1, minSize: 1 }`
+ * (`@earendil-works/pi-coding-agent/dist/modes/interactive/interactive-mode.js:624`
+ * and `:640`). The dock shrinks before the ScrollView surrenders its last row,
+ * so a component that asked for `rows - 1` had its final line clipped — and the
+ * final line is the footer carrying every control hint. Pi's own viewport was
+ * already at its bottom, so the clipped row was not somewhere the operator could
+ * scroll to; it was simply gone. Reserving the row costs one line of transcript
+ * and keeps the footer on screen.
+ */
+const PI_HOST_ROWS_BY_MODE = { regular: 1, fullscreen: 2 } as const satisfies Record<ViewerTuiMode, number>; /**
  * Rows the viewer's own frame always costs: the breadcrumb divider, the live
  * status line beneath it, and the footer divider. Every geometry threshold below
  * is expressed against this constant rather than a literal, so the frame can
@@ -339,7 +353,9 @@ export class AgentSessionViewer implements CustomUiComponent {
       : this.#nativeLines(row, snapshot, safeWidth);
     const hostRows = finiteTerminalRows(this.tui.terminal?.rows);
     const terminalRows =
-      hostRows === undefined ? undefined : Math.max(1, hostRows - PI_HOST_FOOTER_ROWS - viewerExternalRows());
+      hostRows === undefined
+        ? undefined
+        : Math.max(1, hostRows - piHostReservedRows(this.tui.mode) - viewerExternalRows());
     const hadInput = this.#input !== undefined;
     let input = this.#syncInput(terminalRows);
     let inputLines = input?.render(safeWidth).map((line) => padLine(line, safeWidth)) ?? [];
@@ -847,6 +863,10 @@ function finiteTerminalRows(value: number | undefined): number | undefined {
   return value === undefined || !Number.isFinite(value) ? undefined : Math.max(1, Math.floor(value));
 }
 
+/** Rows Pi keeps for itself; an unreported mode is laid out like regular, as before. */
+function piHostReservedRows(mode: ViewerTuiMode | undefined): number {
+  return mode === "fullscreen" ? PI_HOST_ROWS_BY_MODE.fullscreen : PI_HOST_ROWS_BY_MODE.regular;
+}
 /**
  * Home and End as terminals actually send them, not as one terminal sends them.
  *
