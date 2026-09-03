@@ -172,6 +172,7 @@ async function flushForcedRender(tui: TUI): Promise<void> {
 afterEach(() => {
   disposeAgentSessionViewers();
   agentLiveStore.reset();
+  vi.unstubAllEnvs();
 });
 
 describe("AgentSessionViewer", () => {
@@ -365,7 +366,8 @@ describe("AgentSessionViewer", () => {
     }
   });
 
-  it("captures wheel history, keeps the selected child output anchored, and returns to the live tail", () => {
+  it("captures wheel history under LOCUS_DRILL_MOUSE, anchors the child output, and returns to the live tail", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
     const row = agentLiveStore.begin({ id: "wheel-viewer", agentName: "reviewer", label: "Review" });
     for (let index = 0; index < 12; index += 1) {
       agentLiveStore.feedSessionEvent(row.id, {
@@ -376,7 +378,7 @@ describe("AgentSessionViewer", () => {
     const execution = executionFor(row.id);
     const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
     const write = vi.fn();
-    const tui = { terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const tui = { mode: "regular" as const, terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
     const viewer = new AgentSessionViewer(execution, tui, vi.fn(), interactiveCapability(), undefined, {
       matches: () => false,
     });
@@ -412,11 +414,12 @@ describe("AgentSessionViewer", () => {
     unregister();
   });
 
-  it("keeps mouse capture until the last overlapping viewer releases the shared terminal", () => {
+  it("keeps mouse capture under the flag until the last overlapping viewer releases the shared terminal", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
     const first = agentLiveStore.begin({ id: "mouse-owner-a", agentName: "reviewer", label: "A" });
     const second = agentLiveStore.begin({ id: "mouse-owner-b", agentName: "reviewer", label: "B" });
     const write = vi.fn();
-    const tui = { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() };
+    const tui = { mode: "regular" as const, terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() };
     const firstViewer = new AgentSessionViewer(executionFor(first.id), tui, vi.fn(), capability());
     const secondViewer = new AgentSessionViewer(executionFor(second.id), tui, vi.fn(), capability());
 
@@ -429,7 +432,8 @@ describe("AgentSessionViewer", () => {
     expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
   });
 
-  it("releases mouse capture when the owning Pi session shuts down", async () => {
+  it("releases mouse capture under the flag when the owning Pi session shuts down", async () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
     const h = createHarness(process.cwd());
     agents(h.pi);
     await emit(h, "session_start");
@@ -437,7 +441,7 @@ describe("AgentSessionViewer", () => {
     const write = vi.fn();
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
+      { mode: "regular" as const, terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );
@@ -447,6 +451,65 @@ describe("AgentSessionViewer", () => {
 
     expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
     expect(viewer.render(80)).toEqual([]);
+  });
+
+  it("leaves the terminal mouse alone in regular mode without the flag, and drops wheel from the hint", () => {
+    const row = agentLiveStore.begin({ id: "no-flag-viewer", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    const write = vi.fn();
+    const tui = { mode: "regular" as const, terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(execution, tui, vi.fn(), interactiveCapability(), undefined, {
+      matches: () => false,
+    });
+
+    expect(write).not.toHaveBeenCalled();
+    const footer = viewer.render(80).at(-1) ?? "";
+    expect(footer).toContain("pgup/pgdn history · enter send");
+    expect(footer).not.toContain("wheel");
+
+    viewer.dispose();
+    expect(write).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it("writes neither enable nor disable in fullscreen even with the flag set", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
+    const row = agentLiveStore.begin({ id: "fullscreen-viewer", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 12; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `fullscreen-${index}` }], stopReason: "stop" },
+      });
+    }
+    const write = vi.fn();
+    const tui = { mode: "fullscreen" as const, terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+    expect(write).not.toHaveBeenCalled();
+    // Pi owns the wheel in fullscreen; the viewer neither decodes nor scrolls on it.
+    const tail = viewer.render(80).join("\n");
+    viewer.handleInput("\u001b[<64;10;5M");
+    expect(viewer.render(80).join("\n")).toEqual(tail);
+
+    viewer.dispose();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("stays fail-closed when the host TUI reports no mode, even with the flag set", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
+    const row = agentLiveStore.begin({ id: "unknown-mode-viewer", agentName: "reviewer", label: "Review" });
+    const write = vi.fn();
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    expect(write).not.toHaveBeenCalled();
+    viewer.dispose();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("writes a stable terminal-height viewport through Pi TUI across live and control redraws", async () => {

@@ -17,7 +17,13 @@ import { padLine, viewerExternalRows } from "../../_shared/operator/viewer-geome
 import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 
-type ViewerTui = CustomUiTui & { terminal?: { rows: number; columns: number; write?(data: string): void } };
+/** Pi's own TUI mode; host wrappers that omit it are treated as unknown. */
+type ViewerTuiMode = "regular" | "fullscreen";
+
+type ViewerTui = CustomUiTui & {
+  mode?: ViewerTuiMode;
+  terminal?: { rows: number; columns: number; write?(data: string): void };
+};
 
 interface NativeComponentModule {
   AssistantMessageComponent: new (
@@ -89,6 +95,7 @@ const PI_HOST_FOOTER_ROWS = 1;
 const MOUSE_SCROLL_LINES = 3;
 const ENABLE_MOUSE_SCROLL = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE_SCROLL = "\u001b[?1000l\u001b[?1006l";
+const MOUSE_SCROLL_ENV = "LOCUS_DRILL_MOUSE";
 
 export type AgentViewerCapabilityResult =
   { ok: true; capability: AgentViewerCapability } | { ok: false; reason: string };
@@ -205,6 +212,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   readonly #unsubscribe: () => void;
   readonly #scheduler = new RenderScheduler(() => this.tui.requestRender());
   #storeAttached = true;
+  readonly #mouseScrollOwned: boolean;
   #releaseMouseScroll = () => {};
   #releaseFleetViewedRow = () => {};
   #unregisterGlobal = () => {};
@@ -222,7 +230,10 @@ export class AgentSessionViewer implements CustomUiComponent {
     this.#title = row === undefined ? "Agent execution unavailable" : formatAgentSessionStart(row);
     if (row !== undefined) this.#releaseFleetViewedRow = acquireFleetViewedRow(row.id);
     this.#selection = rounds?.active ?? 1;
-    this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
+    // Read the flag per viewer, not per module: a test or a live session can flip
+    // it between drills, and a module-level read would freeze the first value.
+    this.#mouseScrollOwned = viewerOwnsMouseScroll(this.tui.mode, process.env[MOUSE_SCROLL_ENV]);
+    if (this.#mouseScrollOwned) this.#releaseMouseScroll = acquireTerminalMouseScroll(this.tui);
     // Row-lifecycle handling stays synchronous and unthrottled — a vanished row
     // must close or detach the overlay at once. Only the repaint is coalesced.
     const requestRender = () => {
@@ -288,11 +299,14 @@ export class AgentSessionViewer implements CustomUiComponent {
       this.#close();
       return;
     }
-    const mouse = mouseEvent(data);
-    if (mouse !== undefined) {
-      if (mouse === "wheel-up") this.#scrollHistory(MOUSE_SCROLL_LINES);
-      if (mouse === "wheel-down") this.#scrollHistory(-MOUSE_SCROLL_LINES);
-      return;
+    if (this.#mouseScrollOwned) {
+      // Only a viewer that turned reporting on decodes and swallows the reports.
+      const mouse = mouseEvent(data);
+      if (mouse !== undefined) {
+        if (mouse === "wheel-up") this.#scrollHistory(MOUSE_SCROLL_LINES);
+        if (mouse === "wheel-down") this.#scrollHistory(-MOUSE_SCROLL_LINES);
+        return;
+      }
     }
     if (this.#matches(data, "app.tools.expand", ["ctrl+o"])) {
       this.#expandedTools = !this.#expandedTools;
@@ -489,7 +503,7 @@ export class AgentSessionViewer implements CustomUiComponent {
   #footerLabel(row: AgentLiveRow | undefined, hasInput: boolean): string {
     const notice = this.#inputNotice === undefined ? "" : `${this.#inputNotice} · `;
     const controls = hasInput
-      ? "wheel/pgup/pgdn history · enter send"
+      ? `${this.#mouseScrollOwned ? "wheel/" : ""}pgup/pgdn history · enter send`
       : this.#inputSuppressedAtRows === undefined
         ? "pgup/pgdn history"
         : "resize terminal for input";
@@ -664,6 +678,16 @@ function writeTerminalControl(tui: ViewerTui, sequence: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The drill leaves the terminal's mouse alone by default, so native selection and
+ * the host scrollback keep working; `LOCUS_DRILL_MOUSE=1` restores wheel capture.
+ * Fail-closed: fullscreen (Pi owns the mouse there) and an unknown or missing mode
+ * write nothing even with the flag set.
+ */
+function viewerOwnsMouseScroll(mode: ViewerTuiMode | undefined, flag: string | undefined): boolean {
+  return flag === "1" && mode === "regular";
 }
 
 function acquireTerminalMouseScroll(tui: ViewerTui): () => void {
