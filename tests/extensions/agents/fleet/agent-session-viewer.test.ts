@@ -98,6 +98,59 @@ class FakeEditorComponent {
   dispose(): void {}
 }
 
+/**
+ * Stands in for Pi's editor as a container: nine children, drawn in order. A
+ * viewer that keeps only some of them by index loses their markers.
+ */
+class ChromeFakeEditorComponent {
+  focused = false;
+  children = Array.from({ length: 9 }, (_, index) => ({
+    render: (_width: number) => [`chrome-${index}`],
+    invalidate(): void {},
+  }));
+  constructor(
+    _tui: unknown,
+    _keybindings: unknown,
+    _title: string,
+    _prefill: string | undefined,
+    _onSubmit: (value: string) => void,
+    _onCancel: () => void,
+  ) {}
+  render(width: number): string[] {
+    return this.children.flatMap((child) => child.render(width));
+  }
+  handleInput(): void {}
+  invalidate(): void {}
+  dispose(): void {}
+}
+
+/** An editor the size of the real one: 12 rows empty, one row per typed line. */
+class TallFakeEditorComponent {
+  static readonly floorRows = 12;
+  focused = false;
+  #value = "";
+  constructor(
+    _tui: unknown,
+    _keybindings: unknown,
+    _title: string,
+    _prefill: string | undefined,
+    private readonly onSubmit: (value: string) => void,
+    private readonly onCancel: () => void,
+  ) {}
+  render(): string[] {
+    const rows = TallFakeEditorComponent.floorRows + this.#value.split("\n").length - 1;
+    const typed = this.#value.replace(/\n/gu, "|");
+    return Array.from({ length: rows }, (_, index) => (index === 1 ? `editor:${typed}` : `editor-row-${index}`));
+  }
+  handleInput(data: string): void {
+    if (data === "enter") this.onSubmit(this.#value);
+    else if (data === "escape") this.onCancel();
+    else this.#value += data;
+  }
+  invalidate(): void {}
+  dispose(): void {}
+}
+
 function capability() {
   const result = createAgentViewerCapability({
     AssistantMessageComponent: FakeAssistantComponent,
@@ -121,6 +174,16 @@ function interactiveCapability() {
     AssistantMessageComponent: FakeAssistantComponent,
     ToolExecutionComponent: FakeToolComponent,
     ExtensionEditorComponent: FakeEditorComponent,
+  });
+  if (!result.ok) throw new Error(result.reason);
+  return result.capability;
+}
+
+function editorCapability(Editor: unknown) {
+  const result = createAgentViewerCapability({
+    AssistantMessageComponent: FakeAssistantComponent,
+    ToolExecutionComponent: FakeToolComponent,
+    ExtensionEditorComponent: Editor,
   });
   if (!result.ok) throw new Error(result.reason);
   return result.capability;
@@ -731,6 +794,94 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
+  it("draws every part of the editor component instead of keeping children by index", () => {
+    const row = agentLiveStore.begin({ id: "whole-editor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    const viewer = new AgentSessionViewer(
+      execution,
+      { terminal: { rows: 30, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      editorCapability(ChromeFakeEditorComponent),
+      undefined,
+      { matches: () => false },
+    );
+
+    const rendered = viewer.render(80).map((line) => line.trimEnd());
+    for (let index = 0; index < 9; index += 1) expect(rendered).toContain(`chrome-${index}`);
+    // The editor's own hints are whatever it drew; the viewer adds none of its own.
+    expect(rendered.join("\n")).not.toContain("↵ send");
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("asks for the rows a whole editor needs before mounting one", () => {
+    const row = agentLiveStore.begin({ id: "editor-floor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    // 12 editor rows + 3 frame rows + 2 body rows + Pi's own footer row.
+    const tui = { terminal: { rows: 17, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(
+      execution,
+      tui,
+      vi.fn(),
+      editorCapability(TallFakeEditorComponent),
+      undefined,
+      {
+        matches: () => false,
+      },
+    );
+
+    const tooShort = viewer.render(80);
+    expect(tooShort.join("\n")).toContain("resize terminal for input");
+    expect(tooShort.join("\n")).not.toContain("editor:");
+    expect(tooShort.length).toBeLessThan(tui.terminal.rows);
+
+    tui.terminal.rows = 18;
+    const fits = viewer.render(80);
+    expect(fits.join("\n")).toContain("editor:");
+    expect(fits.join("\n")).toContain("enter send");
+    expect(fits).toHaveLength(tui.terminal.rows - 1);
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("lets a growing editor take the body's rows rather than dropping what was typed", () => {
+    const row = agentLiveStore.begin({ id: "growing-editor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    const unregister = agentLiveStore.registerInputForExecution(execution, send);
+    const tui = { terminal: { rows: 18, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(
+      execution,
+      tui,
+      vi.fn(),
+      editorCapability(TallFakeEditorComponent),
+      undefined,
+      {
+        matches: () => false,
+      },
+    );
+
+    viewer.render(80);
+    // Two more editor rows than the mount budget allowed: the two body rows go
+    // first, and the half-written message is still on screen.
+    viewer.handleInput("a");
+    viewer.handleInput("\n");
+    viewer.handleInput("b");
+    viewer.handleInput("\n");
+    viewer.handleInput("c");
+    const grown = viewer.render(80);
+    expect(grown.join("\n")).toContain("editor:a|b|c");
+    expect(grown).toHaveLength(tui.terminal.rows - 1);
+    expect(grown.join("\n")).not.toContain("resize terminal for input");
+
+    unregister();
+    viewer.dispose();
+  });
+
   it("mounts the installed Pi native editor inside the compact content-height viewport", async () => {
     const { initTheme } = await import("@earendil-works/pi-coding-agent");
     initTheme(undefined, false);
@@ -748,10 +899,19 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     const rendered = viewer.render(80);
-    // 12 + the status line; the editor's own row count is unchanged here.
-    expect(rendered).toHaveLength(13);
+    // Header, status, four content rows, the whole 12-row Pi editor, footer. The
+    // editor is no longer cut down to four of its children, so it costs the rows
+    // Pi charges for it and the viewer still fits inside the terminal.
+    expect(rendered).toHaveLength(19);
     expect(rendered.length).toBeLessThan(terminal.rows - 1);
-    expect(rendered.join("\n")).toContain("↵ send · ⇧↵ newline");
+    // Pi's own key hints, read from the live keybindings, instead of a
+    // hand-written line that named keys this build may not bind.
+    const text = rendered.join("\n");
+    expect(text).not.toContain("↵ send · ⇧↵ newline");
+    expect(text).toContain(" submit");
+    expect(text).toContain(" newline");
+    expect(text).toContain(" cancel");
+    expect(text).toContain("external");
     viewer.handleInput("o");
     viewer.handleInput("k");
     viewer.handleInput("\r");

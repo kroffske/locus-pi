@@ -70,7 +70,6 @@ interface NativeComponentModule {
 }
 
 interface NativeInputComponent extends Component {
-  children?: Component[];
   focused: boolean;
   handleInput(data: string): void;
   dispose?(): void;
@@ -107,7 +106,7 @@ const PI_HOST_FOOTER_ROWS = 1;
  * gain or lose a line in one place.
  */
 const VIEWER_CHROME_ROWS = 3;
-/** Body rows the input may never eat into, so a suppressed editor is a last resort. */
+/** Body rows an editor must leave behind to be worth mounting in the first place. */
 const MIN_BODY_ROWS_WITH_INPUT = 2;
 /** Bound on the `parentRowId` walk behind the header breadcrumb. */
 const MAX_LOCATION_ANCESTORS = 4;
@@ -149,21 +148,26 @@ export class AgentViewerCapability {
     for (const entry of this.#components.values()) entry.component.invalidate();
   }
 
+  /**
+   * Pi's own editor, mounted whole.
+   *
+   * It used to be dismantled here: four of its nine children were kept by index
+   * and the seventh had its `render` replaced with a hand-written `↵ send`
+   * hint. That tied the drill to one Pi build's child order — a reordered or
+   * resized editor would have silently lost its input line — and printed key
+   * names the operator's keybindings may never have had. The component now goes
+   * on screen exactly as Pi draws it, hints and all; the rows that costs are
+   * paid for in the viewer's geometry instead.
+   */
   createInput(
     tui: ViewerTui,
     keybindings: ViewerKeybindings | undefined,
     onSubmit: (value: string) => void,
     onCancel: () => void,
-    theme: unknown,
   ): NativeInputComponent | undefined {
     const Input = this.module.ExtensionEditorComponent;
     if (typeof Input !== "function" || keybindings === undefined) return undefined;
     const input = new Input(tui as TUI, keybindings, "", undefined, onSubmit, onCancel, { autocompleteMaxVisible: 4 });
-    const chrome = input.children;
-    if (chrome?.length === 9) {
-      chrome[6]!.render = (width) => [padLine(themeText(theme, "muted", "↵ send · ⇧↵ newline"), width)];
-      input.children = [chrome[0]!, chrome[4]!, chrome[6]!, chrome[8]!];
-    }
     input.focused = true;
     return input;
   }
@@ -317,14 +321,26 @@ export class AgentSessionViewer implements CustomUiComponent {
     const hostRows = finiteTerminalRows(this.tui.terminal?.rows);
     const terminalRows =
       hostRows === undefined ? undefined : Math.max(1, hostRows - PI_HOST_FOOTER_ROWS - viewerExternalRows());
+    const hadInput = this.#input !== undefined;
     let input = this.#syncInput(terminalRows);
     let inputLines = input?.render(safeWidth).map((line) => padLine(line, safeWidth)) ?? [];
-    // The editor may claim everything the frame and a readable body do not need.
-    // The frame now costs one row more than it did (status line), so the input's
-    // ceiling drops by exactly that row — the two body rows are unchanged.
+    // What the input costs was recomputed when the editor stopped being cut down
+    // to four of its children: an empty Pi editor is 12 rows — its own frame,
+    // spacers, title, hint and one text row — and it grows from there until Pi's
+    // editor caps its own text at 30% of the terminal. So the smallest terminal
+    // that still offers input is 18 rows, not the 9 the sliced editor fit into;
+    // below that the operator gets "resize terminal for input".
+    //
+    // The floor differs by moment. Mounting an editor is only worth it when a
+    // readable body survives beside it, so the first render demands those two
+    // body rows. Once it is on screen the operator may be mid-sentence, and
+    // dropping the component would drop what they typed: from then on the body
+    // gives up its rows first, and only an editor taller than the whole grant is
+    // suppressed.
+    const minBodyRows = hadInput ? 0 : MIN_BODY_ROWS_WITH_INPUT;
     if (
       terminalRows !== undefined &&
-      inputLines.length > Math.max(0, terminalRows - VIEWER_CHROME_ROWS - MIN_BODY_ROWS_WITH_INPUT)
+      inputLines.length > Math.max(0, terminalRows - VIEWER_CHROME_ROWS - minBodyRows)
     ) {
       this.#suppressInputForRows(terminalRows);
       input = undefined;
@@ -554,7 +570,6 @@ export class AgentSessionViewer implements CustomUiComponent {
       // Cancelling the editor is the same Esc the operator would press with no
       // editor on screen, so it steps back the same way.
       () => this.#close("back"),
-      this.theme,
     );
     return this.#input;
   }
