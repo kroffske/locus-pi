@@ -76,31 +76,105 @@ export class AgentLivePanel {
   }
 }
 
+/**
+ * THE shared row-set projection. Both surfaces that show live agents run their
+ * whole row set through this before any line is composed: the workflow progress
+ * panel (`progress-widget.ts:renderRoster`) and `/ps`
+ * (`fleet-menu.ts:projectFleetMenuRows` / `projectFleetMenuSnapshotRows`). The
+ * rules below therefore cannot live in `renderRow` — the panel renders one row
+ * per call, and "is this group worth a heading" and "which leaf comes first" are
+ * facts about the SET, not about a row.
+ *
+ * Three rules, in order:
+ *
+ * 1. Tree order: a child follows its parent, roots keep insertion order.
+ * 2. Group heading threshold: a group summary row earns its line only when it
+ *    aggregates two or more agents (`groupTotal >= 2`). A one-item group is a
+ *    heading over a single row, so it is dropped and its children are lifted to
+ *    the group's own parent — the leaf is never hidden, only its redundant
+ *    heading.
+ * 3. Group membership order: the children of a group row are ranked
+ *    working → failed → queued → done, stable inside each rank. Fan-out over
+ *    items has no chronology worth preserving, so the operator reads the live
+ *    work first and the failures next. This is deliberately scoped to group
+ *    children: a linear run's rows keep the order the run produced them, which
+ *    is the no-jump invariant of T-188 W4 (a row must not move when it finishes).
+ *
+ * Collapsing and the line budget are NOT here — they belong to the passive
+ * progress panel alone (`clampRosterLines`), because in `/ps` every leaf has to
+ * stay reachable by the cursor.
+ */
 export function orderAgentLiveRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const kept = dropSubThresholdGroupRows(rows);
   const byParent = new Map<string, AgentLiveRow[]>();
-  for (const row of rows) {
+  for (const row of kept) {
     if (row.parentRowId === undefined) continue;
     const siblings = byParent.get(row.parentRowId) ?? [];
     siblings.push(row);
     byParent.set(row.parentRowId, siblings);
   }
-  const byId = new Map(rows.map((row) => [row.id, row]));
+  const byId = new Map(kept.map((row) => [row.id, row]));
   const ordered: AgentLiveRow[] = [];
   const seen = new Set<string>();
+
+  function childrenOf(row: AgentLiveRow): AgentLiveRow[] {
+    const children = byParent.get(row.id) ?? [];
+    return row.groupKind === undefined ? children : orderGroupMembers(children);
+  }
 
   function appendTree(row: AgentLiveRow): void {
     if (seen.has(row.id)) return;
     ordered.push(row);
     seen.add(row.id);
-    for (const child of byParent.get(row.id) ?? []) appendTree(child);
+    for (const child of childrenOf(row)) appendTree(child);
   }
 
-  for (const row of rows) {
+  for (const row of kept) {
     if (row.parentRowId !== undefined && byId.has(row.parentRowId)) continue;
     appendTree(row);
   }
-  for (const row of rows) appendTree(row);
+  for (const row of kept) appendTree(row);
   return ordered;
+}
+
+/** Rank a group member by what the operator needs to see first (rule 3 above). */
+const GROUP_MEMBER_RANK: Record<AgentLiveStatus, number> = {
+  working: 0,
+  error: 1,
+  queued: 2,
+  done: 3,
+  cancelled: 3,
+};
+
+function orderGroupMembers(members: AgentLiveRow[]): AgentLiveRow[] {
+  return members
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const rank = (GROUP_MEMBER_RANK[a.row.status] ?? 3) - (GROUP_MEMBER_RANK[b.row.status] ?? 3);
+      return rank !== 0 ? rank : a.index - b.index;
+    })
+    .map((entry) => entry.row);
+}
+
+/**
+ * Drop group summary rows that aggregate fewer than two agents and re-parent
+ * their children onto the dropped group's own parent, so the tree stays intact
+ * and no leaf disappears with the heading.
+ */
+function dropSubThresholdGroupRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const droppedIds = new Set(
+    rows.filter((row) => row.groupKind !== undefined && (row.groupTotal ?? 0) < 2).map((row) => row.id),
+  );
+  if (droppedIds.size === 0) return rows;
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  return rows
+    .filter((row) => !droppedIds.has(row.id))
+    .map((row) => {
+      if (row.parentRowId === undefined || !droppedIds.has(row.parentRowId)) return row;
+      const nextParentRowId = byId.get(row.parentRowId)?.parentRowId;
+      const { parentRowId: _droppedParent, ...rest } = row;
+      return nextParentRowId === undefined ? rest : { ...rest, parentRowId: nextParentRowId };
+    });
 }
 
 /**

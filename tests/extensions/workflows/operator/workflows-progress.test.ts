@@ -161,10 +161,14 @@ describe("workflow progress widget", () => {
     expect(rendered).toContain("stage 3/3 · continue");
     expect(rendered).toContain("0/1 done");
     expect(rendered).toContain("tok —");
-    expect(rendered).toContain("○ inspect");
-    expect(rendered).toContain("○ operator-gate");
+    // Two stages are still declared and unreached (`inspect`, `operator-gate`);
+    // they share ONE line naming the next one and counting the rest (T-192 W1).
+    expect(rendered).toContain("○ next: inspect (+1 planned)");
+    expect(rendered).not.toContain("○ operator-gate");
 
-    tui.terminal.rows = 12;
+    // One line tighter than before: collapsing the pending stages gave the roster
+    // a line back, so the clamp starts one row later than it used to.
+    tui.terminal.rows = 11;
     const constrained = component.render(160).join("\n");
     expect(constrained).toContain("(+2 earlier agents)");
     expect(constrained).not.toContain("previous run #076c");
@@ -397,6 +401,179 @@ describe("workflow progress widget", () => {
     expect(text).not.toContain("stage 1 ");
     component.dispose();
     agentLiveStore.reset();
+  });
+
+  // ── Roster cardinality (T-192 W1) ──────────────────────────────────────────
+  //
+  // The panel and `/ps` share one set-level projection (`orderAgentLiveRows`),
+  // so what a fan-out looks like is a property of how many members it has: none,
+  // one, a few, many, some failed, or every state at once.
+  describe("roster cardinality", () => {
+    /** Start a `parallel` group of `total` members; returns their live row ids. */
+    function startFanOut(
+      component: WorkflowProgressComponent,
+      runId: string,
+      labels: string[],
+      groupId = "fan-1",
+    ): string[] {
+      pushProgress(
+        component,
+        line({ kind: "group_start", groupId, groupKind: "parallel", groupTotal: labels.length, ts: 1, runId }),
+      );
+      return labels.map((label, index) => {
+        const start = line({
+          kind: "agent_start",
+          agent: "worker",
+          label,
+          phase: "fan-out",
+          groupId,
+          groupKind: "parallel",
+          ts: 2 + index,
+          runId,
+        });
+        pushProgress(component, start);
+        return workflowAgentLiveRowId(start);
+      });
+    }
+
+    function fanOutComponent(runId: string, rows = 40, columns = 160): WorkflowProgressComponent {
+      const tui = { requestRender: vi.fn(), terminal: { rows, columns } };
+      return new WorkflowProgressComponent(tui, {}, "fan-out", runId, { scope: "workflow" });
+    }
+
+    afterEach(() => {
+      fleetMenuState.setFocused(false);
+      agentLiveStore.reset();
+    });
+
+    it("says it is waiting when the run has produced no agent yet (0)", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-zero");
+      expect(component.render(160).join("\n")).toContain("waiting for workflow agents…");
+      component.dispose();
+    });
+
+    it("gives a one-member group no heading and still shows its agent (1)", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-one");
+      startFanOut(component, "card-one", ["only item"]);
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("only item");
+      // A heading over a single row is a heading over nothing.
+      expect(text).not.toContain("parallel (1)");
+      component.dispose();
+    });
+
+    it("heads a small group and lists every member (few)", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-few");
+      startFanOut(component, "card-few", ["alpha item", "beta item", "gamma item"]);
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("parallel (3)");
+      expect(text).toContain("0/3 done");
+      for (const label of ["alpha item", "beta item", "gamma item"]) expect(text).toContain(label);
+      component.dispose();
+    });
+
+    it("keeps the heading and announces the collapse when the group outgrows the budget (many)", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-many");
+      const labels = Array.from({ length: 30 }, (_unused, index) => `item ${index} of 30`);
+      startFanOut(component, "card-many", labels);
+
+      const rendered = component.render(160);
+      const text = rendered.join("\n");
+      expect(rendered.length).toBeLessThanOrEqual(24);
+      // The summary is what survives: it still answers how the fan-out is going.
+      expect(text).toContain("parallel (30)");
+      expect(text).toMatch(/\(\+\d+ earlier agents\)/u);
+      component.dispose();
+    });
+
+    it("carries the failed count in the group heading (failed)", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-failed");
+      const ids = startFanOut(component, "card-failed", ["ok item", "broken item", "other item"]);
+      agentLiveStore.patch(ids[1]!, { status: "error" });
+      pushProgress(
+        component,
+        line({
+          kind: "group_end",
+          status: "failed",
+          groupId: "fan-1",
+          groupKind: "parallel",
+          groupTotal: 3,
+          groupCompleted: 2,
+          groupFailed: 1,
+          durationMs: 5_000,
+          ts: 90,
+          runId: "card-failed",
+        }),
+      );
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("parallel (3)");
+      expect(text).toContain("2/3 done");
+      expect(text).toContain("1 failed");
+      expect(text).toContain("broken item");
+      component.dispose();
+    });
+
+    it("ranks group members working, failed, queued, done (mixed)", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-mixed");
+      const ids = startFanOut(component, "card-mixed", ["delta done", "beta failed", "alpha working", "gamma queued"]);
+      agentLiveStore.patch(ids[0]!, { status: "done" });
+      agentLiveStore.patch(ids[1]!, { status: "error" });
+      agentLiveStore.patch(ids[2]!, { status: "working" });
+      agentLiveStore.patch(ids[3]!, { status: "queued" });
+
+      const rendered = component.render(160);
+      const at = (needle: string) => rendered.findIndex((renderedLine) => renderedLine.includes(needle));
+      expect(at("parallel (4)")).toBeGreaterThanOrEqual(0);
+      expect(at("parallel (4)")).toBeLessThan(at("alpha working"));
+      expect(at("alpha working")).toBeLessThan(at("beta failed"));
+      expect(at("beta failed")).toBeLessThan(at("gamma queued"));
+      expect(at("gamma queued")).toBeLessThan(at("delta done"));
+      component.dispose();
+    });
+
+    it("never spends more than 24 lines, however tall the terminal is", () => {
+      agentLiveStore.reset();
+      const component = fanOutComponent("card-budget", 100);
+      startFanOut(
+        component,
+        "card-budget",
+        Array.from({ length: 40 }, (_unused, index) => `budget item ${index}`),
+      );
+
+      // rows-6 would allow 94 lines here; the hard cap is 24.
+      expect(component.render(160).length).toBeLessThanOrEqual(24);
+      component.dispose();
+    });
+
+    it("collapses declared unreached phases into one line naming the next", () => {
+      agentLiveStore.reset();
+      const tui = { requestRender: vi.fn(), terminal: { rows: 40, columns: 160 } };
+      const component = new WorkflowProgressComponent(tui, {}, "fan-out", "card-pending", {
+        scope: "workflow",
+        declaredStages: [
+          { title: "fan-out", detail: "Run the items." },
+          { title: "collect", detail: "Gather the results." },
+          { title: "verify", detail: "Prove the outcome." },
+        ],
+      });
+      pushProgress(component, line({ kind: "phase", phase: "fan-out", ts: 1, runId: "card-pending" }));
+      startFanOut(component, "card-pending", ["only item"], "fan-pending");
+
+      const text = component.render(160).join("\n");
+      expect(text).toContain("○ next: collect (+1 planned)");
+      expect(text).not.toContain("○ verify");
+      expect(text).not.toContain("Gather the results.");
+      component.dispose();
+    });
   });
 
   it("keeps ordinary agent panels expanded while workflow compaction stays scope-local", () => {

@@ -554,6 +554,115 @@ describe("agent fleet menu", () => {
     component.dispose();
   });
 
+  it("shows the group heading in /ps and still reaches every leaf with the cursor", () => {
+    // A running fan-out: eight items, one of them failed. `/ps` gets the group
+    // heading and the working-first order from the shared projection, and — unlike
+    // the passive progress panel — collapses nothing, so all eight stay reachable.
+    const group = agentLiveStore.begin({
+      id: "workflow:ps-fan:group:parallel-8",
+      agentName: "workflow-group",
+      label: "parallel (8)",
+      groupKind: "parallel",
+      groupTotal: 8,
+      workflowRunId: "ps-fan",
+    });
+    agentLiveStore.patch(group.id, { status: "working", groupCompleted: 1, groupFailed: 1 });
+    const members = Array.from({ length: 8 }, (_unused, index) => {
+      const member = agentLiveStore.begin({
+        id: `ps-fan-item-${index}`,
+        parentRowId: group.id,
+        agentName: "worker",
+        label: `ps item ${index} of 8`,
+        title: `ps item ${index} of 8`,
+        workflowRunId: "ps-fan",
+      });
+      const status: AgentLiveStatus = index === 3 ? "error" : index === 5 ? "done" : "working";
+      return agentLiveStore.patch(member.id, { status })!;
+    });
+
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    // The heading is part of the `/ps` row set, with the counters the group row
+    // carries — not recomputed from the leaves.
+    const passive = renderFleetMenuRows([...agentLiveStore.rows.values()], 120, {}).join("\n");
+    expect(passive).toContain("parallel (8)");
+    expect(passive).toContain("1/8 done");
+    expect(passive).toContain("1 failed");
+
+    const visited = new Set<string>([fleetMenuState.selectedRowId!]);
+    for (let step = 0; step < members.length; step += 1) {
+      component.handleInput("down");
+      visited.add(fleetMenuState.selectedRowId!);
+      component.render(120);
+    }
+    expect([...visited].sort()).toEqual(members.map((member) => member.id).sort());
+    // Up walks back over the same leaves; the heading is never selected.
+    for (let step = 0; step < members.length; step += 1) {
+      component.handleInput("up");
+      expect(fleetMenuState.selectedRowId).not.toBe(group.id);
+      visited.add(fleetMenuState.selectedRowId!);
+    }
+    expect(visited.size).toBe(members.length);
+
+    // Working members first, the failed one next, the finished one last — and
+    // nothing is collapsed away the way the passive progress panel collapses it.
+    const focusedFrame = component.render(120);
+    const at = (needle: string) => focusedFrame.findIndex((frameLine) => frameLine.includes(needle));
+    expect(at("ps item 0 of 8")).toBeLessThan(at("ps item 3 of 8"));
+    expect(at("ps item 3 of 8")).toBeLessThan(at("ps item 5 of 8"));
+    expect(focusedFrame.join("\n")).not.toMatch(/earlier agents/u);
+    component.dispose();
+  });
+
+  it("keeps the group heading on screen in /ps while the fan-out fits the viewport", () => {
+    // The heading is rendered by the focused selector too — with eight items it
+    // is the ninth row and the eight-row viewport scrolls it off, which is the
+    // viewport's own limit and not a projection that drops group rows.
+    const group = agentLiveStore.begin({
+      id: "workflow:ps-small:group:parallel-3",
+      agentName: "workflow-group",
+      label: "parallel (3)",
+      groupKind: "parallel",
+      groupTotal: 3,
+      workflowRunId: "ps-small",
+    });
+    agentLiveStore.patch(group.id, { status: "working", groupCompleted: 1, groupFailed: 1 });
+    for (let index = 0; index < 3; index += 1) {
+      const member = agentLiveStore.begin({
+        id: `ps-small-item-${index}`,
+        parentRowId: group.id,
+        agentName: "worker",
+        label: `small item ${index}`,
+        title: `small item ${index}`,
+        workflowRunId: "ps-small",
+      });
+      agentLiveStore.patch(member.id, { status: index === 1 ? "error" : "working" });
+    }
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    const rendered = component.render(120);
+    expect(rendered.join("\n")).toContain("parallel (3)");
+    expect(rendered.join("\n")).toContain("1/3 done");
+    expect(rendered.some((frameLine) => frameLine.startsWith("> "))).toBe(true);
+    // The heading itself is never the selected row.
+    expect(rendered.find((frameLine) => frameLine.startsWith("> "))).not.toContain("parallel (3)");
+    component.dispose();
+  });
+
   it("repaints from live mutations, normalizes a removed cursor, and unsubscribes idempotently", () => {
     const first = row("live-focus-a", "first live row");
     const second = row("live-focus-b", "second live row");

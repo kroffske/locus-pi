@@ -421,17 +421,25 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   }
 
   /**
-   * The full agent roster for this run, in the order the run produced it:
-   * finished agents (`✓`, green), the agent working right now (its spinner, in the
-   * shared `accent` tone every working agent carries), then every declared stage
-   * the run has not reached yet (`○`, dim) with the detail `meta.phases` planned
-   * for it. A re-entered slot keeps ONE row and carries its `r<N>` round badge, so
-   * a loop updates a row instead of appending a duplicate.
+   * The full agent roster for this run, as the run tree: the group summary rows
+   * that earned a heading, each followed by its member agents, then every
+   * declared stage the run has not reached yet (`○`, dim). Finished agents keep
+   * `✓` and their duration, the agent working right now keeps its spinner in the
+   * shared `accent` tone, and a re-entered slot keeps ONE row carrying its `r<N>`
+   * round badge, so a loop updates a row instead of appending a duplicate.
+   *
+   * Which rows survive and in what order is `orderAgentLiveRows` — the same
+   * set-level projection `/ps` runs — so both surfaces show one structure.
+   * Everything below it is the passive panel's own business: only here is the
+   * roster collapsed to fit a budget, because only here is nothing selectable.
    */
   private renderRoster(rows: AgentLiveRow[], width: number, budget: number): string[] {
-    const leaves = selectFleetMenuLeafRows(orderAgentLiveRows(rows));
+    const projected = orderAgentLiveRows(rows);
+    const leaves = selectFleetMenuLeafRows(projected);
     const sourceRunId = this.options.continuationSourceRunId;
     const previousLeaves = sourceRunId === undefined ? [] : leaves.filter((row) => row.workflowRunId === sourceRunId);
+    const currentRows =
+      sourceRunId === undefined ? projected : projected.filter((row) => row.workflowRunId !== sourceRunId);
     const currentLeaves =
       sourceRunId === undefined ? leaves : leaves.filter((row) => row.workflowRunId !== sourceRunId);
     const current =
@@ -450,9 +458,12 @@ export class WorkflowProgressComponent implements CustomUiComponent {
       (row === current ? panel.renderRows([row], rowWidth) : [panel.renderRow(row, rowWidth)]).map(
         (line) => `  ${line}`,
       );
-    const currentAgentLines = currentLeaves.map((row) => ({
-      settled: row !== current,
-      hiddenAgents: 1,
+    // A group heading is the summary of the rows beneath it (`k/n done · f failed`),
+    // so it is never the thing the clamp gives up: when its members collapse, the
+    // heading is what still answers "how did that fan-out go".
+    const currentAgentLines = currentRows.map((row) => ({
+      settled: row.groupKind === undefined && row !== current,
+      hiddenAgents: row.groupKind === undefined ? 1 : 0,
       lines: renderAgentLines(row),
     }));
     const previousRunBlock =
@@ -498,6 +509,13 @@ export class WorkflowProgressComponent implements CustomUiComponent {
    * Declared stages the run has not reached yet — the work still ahead. Titles
    * come from `meta.phases`, so an undeclared dynamic stage never appears here
    * before it actually runs.
+   *
+   * The whole tail is ONE line. A single pending stage still gets its full
+   * `○ <title> · planned · <detail>` reading, because there is nothing to
+   * collapse and the detail is the useful part. Two or more collapse into
+   * `○ next: <title> (+k planned)`: the next stage is the only one an operator
+   * can act on, and a long declared plan otherwise eats the roster budget one
+   * line per stage.
    */
   private pendingStageLines(width: number): string[] {
     const declared = new Map(
@@ -506,13 +524,17 @@ export class WorkflowProgressComponent implements CustomUiComponent {
         return title === undefined ? [] : [[title, stage.detail] as const];
       }),
     );
-    return workflowStageFrontier(this.options.declaredStages ?? [], this.journal)
-      .filter((stage) => stage.state === "declared")
-      .map((stage) => {
-        const detail = normalizeWorkflowPhase(declared.get(stage.title));
-        const text = `  ○ ${stage.title}  ·  planned${detail === undefined ? "" : `  ·  ${detail}`}`;
-        return this.#fg("dim", truncate(text, width));
-      });
+    const pending = workflowStageFrontier(this.options.declaredStages ?? [], this.journal).filter(
+      (stage) => stage.state === "declared",
+    );
+    const next = pending[0];
+    if (next === undefined) return [];
+    if (pending.length === 1) {
+      const detail = normalizeWorkflowPhase(declared.get(next.title));
+      const text = `  ○ ${next.title}  ·  planned${detail === undefined ? "" : `  ·  ${detail}`}`;
+      return [this.#fg("dim", truncate(text, width))];
+    }
+    return [this.#fg("dim", truncate(`  ○ next: ${next.title} (+${pending.length - 1} planned)`, width))];
   }
 
   private doneLines(width: number): string[] {
