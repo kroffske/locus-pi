@@ -765,10 +765,10 @@ of the grammar and are not rendered anywhere. `<name>` is the session petname,
 clipped to twelve columns; `<title>` is the explicit title or the call label and is
 the only part that truncates when the line overflows, so the right-hand meta always
 survives. The model badge is the short model name plus the bare effort word; the
-`r<N>` round badge appears from r2 up; each right-hand segment is omitted when its
-source field is absent; and a child row is prefixed with `↳ `. Up to two indented
-sub-lines follow a row when they have content: the agent's latest message, and
-`└ <verb> · <gist>` for the tool that is running.
+`r<N>` round badge appears from r2 up; and each right-hand segment is omitted when
+its source field is absent. A multi-row roster uses recursive `├─`, `└─`, and `│`
+rails for root rows, descendants, latest messages, and tool activity. A single row
+keeps the established unprefixed grammar, with `   └` for its detail line.
 
 `parallel()` and `pipeline()` also emit local `group_start` / `group_end` journal
 lines, and their summary row is a grammar of its own — the group label, elapsed,

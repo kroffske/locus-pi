@@ -8,6 +8,19 @@ export const AGENT_LIVE_SPINNER_FRAME_COUNT = SPINNER_FRAMES.length;
 const ROW_SEP = "  ·  ";
 /** Petname column budget (REQ-001 width rule: name ≤ 12 cols). */
 const AGENT_NAME_MAX_COLS = 12;
+const TREE_BRANCH_HOOK = "├─";
+const TREE_LAST_HOOK = "└─";
+const TREE_RAIL = "│  ";
+const TREE_BLANK = "   ";
+
+interface AgentLiveTreeLayout {
+  prefix: string;
+  childPrefix: string;
+  hasChildren: boolean;
+}
+
+/** Presentation-only tree geometry attached to projected row copies, never runtime state. */
+const AGENT_LIVE_TREE_LAYOUT = new WeakMap<AgentLiveRow, AgentLiveTreeLayout>();
 
 export interface AgentLiveThemeLike {
   fg?: (color: string, text: string) => string;
@@ -31,49 +44,82 @@ export class AgentLivePanel {
   constructor(private readonly options: AgentLivePanelOptions = {}) {}
 
   renderRows(rows: AgentLiveRow[], width: number): string[] {
-    // Each row is one line, plus an optional `└ <tool-action>` sub-line BENEATH it
-    // while a tool is executing (REQ-004): `[rowLine, subLine?]` flattened.
-    return orderAgentLiveRows(withWorkflowGroupTotals(rows)).flatMap((row) => {
+    // Set-level callers project once, then the workflow and `/ps` surfaces render
+    // rows one at a time. Projected copies retain their tree geometry so those
+    // singleton calls do not collapse a recursive tree back into `↳`.
+    const talliedRows = withWorkflowGroupTotals(rows);
+    const orderedRows =
+      talliedRows.length > 0 && talliedRows.every((row) => AGENT_LIVE_TREE_LAYOUT.has(row))
+        ? talliedRows
+        : orderAgentLiveRows(talliedRows);
+    return orderedRows.flatMap((row) => {
       const rowLine = this.renderRow(row, width);
-      const latestLine = this.#renderLatestMessageSubLine(row, width);
-      const subLine = this.#renderToolActivitySubLine(row, width);
-      return [rowLine, ...(latestLine === undefined ? [] : [latestLine]), ...(subLine === undefined ? [] : [subLine])];
+      const latest = latestMessagePreview(row);
+      const activity = formatToolActivity(row, Date.now(), { showElapsed: this.options.calm !== true });
+      const layout = AGENT_LIVE_TREE_LAYOUT.get(row);
+      const detailLines: string[] = [];
+      if (latest !== undefined) {
+        detailLines.push(
+          this.#renderDetailLine(
+            latest,
+            width,
+            "muted",
+            layout,
+            treeDetailHook(layout, activity !== undefined || layout?.hasChildren === true),
+          ),
+        );
+      }
+      if (activity !== undefined) {
+        detailLines.push(
+          this.#renderDetailLine(activity, width, "dim", layout, treeDetailHook(layout, layout?.hasChildren === true)),
+        );
+      }
+      return [rowLine, ...detailLines];
     });
   }
 
   renderRow(row: AgentLiveRow, width: number): string {
     const meta = statusMeta(row.status, this.options.spinnerIndex ?? 0);
+    const line = formatAgentLiveRowLine(row, meta, width, { calm: this.options.calm === true });
+    const layout = AGENT_LIVE_TREE_LAYOUT.get(row);
     // One tone per status everywhere (`statusMeta`): a working row reads the same
     // in the fleet and in the workflow roster, so a tone means a state and not a
-    // surface. Per-panel overrides are deliberately absent.
-    return this.#fg(meta.color, formatAgentLiveRowLine(row, meta, width, { calm: this.options.calm === true }));
+    // surface. Tree rails stay dim so status color remains the strongest signal.
+    if (layout === undefined || !line.startsWith(layout.prefix) || this.options.theme?.fg === undefined) {
+      return this.#fg(meta.color, line);
+    }
+    return `${this.options.theme.fg("dim", layout.prefix)}${this.options.theme.fg(meta.color, line.slice(layout.prefix.length))}`;
   }
 
-  /** Indented, dimmed `└ <verb> · <gist>[ · <t-elapsed>]`, or nothing when idle. */
-  #renderToolActivitySubLine(row: AgentLiveRow, width: number): string | undefined {
-    const activity = formatToolActivity(row, Date.now(), { showElapsed: this.options.calm !== true });
-    if (activity === undefined) return undefined;
-    const line = `${TOOL_ACTIVITY_INDENT}${TOOL_ACTIVITY_HOOK} ${activity}`;
-    return this.#fg("dim", clampLine(line, width));
-  }
-
-  /**
-   * What the agent just said. It is the one sub-line an operator actually reads,
-   * so it takes `muted` rather than the `dim` of the mechanical tool line, and the
-   * markdown the model wrote for a document is stripped: the store keeps the text
-   * verbatim, and one collapsed line of `#`/`**`/backtick syntax reads as noise.
-   */
-  #renderLatestMessageSubLine(row: AgentLiveRow, width: number): string | undefined {
-    const latest = stripInlineMarkdown(
-      row.latestMessage ?? (row.status === "done" ? firstLineOf(row.finalAnswer) : ""),
-    );
-    if (latest === "") return undefined;
-    return this.#fg("muted", clampLine(`${TOOL_ACTIVITY_INDENT}${TOOL_ACTIVITY_HOOK} ${latest}`, width));
+  #renderDetailLine(
+    text: string,
+    width: number,
+    color: string,
+    layout: AgentLiveTreeLayout | undefined,
+    hook: string,
+  ): string {
+    const prefix = layout?.childPrefix ?? TOOL_ACTIVITY_INDENT;
+    return this.#fg(color, clampLine(`${prefix}${hook} ${text}`, width));
   }
 
   #fg(color: string, text: string): string {
     return this.options.theme?.fg ? this.options.theme.fg(color, text) : text;
   }
+}
+
+/** The latest substantive assistant text, stripped only for this one-line projection. */
+function latestMessagePreview(row: AgentLiveRow): string | undefined {
+  const latest = stripInlineMarkdown(row.latestMessage ?? (row.status === "done" ? firstLineOf(row.finalAnswer) : ""));
+  return latest === "" ? undefined : latest;
+}
+
+/**
+ * A detail line is a child of its agent. It branches while another detail or a
+ * real child follows, and closes the branch otherwise. Singleton legacy rows
+ * retain the established `   └ …` grammar.
+ */
+function treeDetailHook(layout: AgentLiveTreeLayout | undefined, hasFollowing: boolean): string {
+  return layout === undefined ? TOOL_ACTIVITY_HOOK : hasFollowing ? TREE_BRANCH_HOOK : TREE_LAST_HOOK;
 }
 
 /**
@@ -134,7 +180,56 @@ export function orderAgentLiveRows(rows: AgentLiveRow[]): AgentLiveRow[] {
     appendTree(row);
   }
   for (const row of kept) appendTree(row);
-  return ordered;
+  return ordered.length > 1 ? decorateAgentLiveTreeRows(ordered) : ordered;
+}
+
+/**
+ * Turn a parent-first row set into terminal tree geometry. Copies keep the
+ * layout presentation-only: store rows stay clean, while a surface may safely
+ * slice the projection and render each surviving row in a singleton panel call.
+ */
+function decorateAgentLiveTreeRows(rows: AgentLiveRow[]): AgentLiveRow[] {
+  const projected = rows.map((row) => ({ ...row }));
+  const byId = new Map(projected.map((row) => [row.id, row]));
+  const byParent = new Map<string, AgentLiveRow[]>();
+  const roots: AgentLiveRow[] = [];
+  for (const row of projected) {
+    if (row.parentRowId === undefined || !byId.has(row.parentRowId)) {
+      roots.push(row);
+      continue;
+    }
+    const siblings = byParent.get(row.parentRowId) ?? [];
+    siblings.push(row);
+    byParent.set(row.parentRowId, siblings);
+  }
+
+  const siblingsOf = (row: AgentLiveRow): AgentLiveRow[] => {
+    if (row.parentRowId !== undefined && byId.has(row.parentRowId)) return byParent.get(row.parentRowId) ?? [];
+    return roots;
+  };
+  const isLastSibling = (row: AgentLiveRow): boolean => siblingsOf(row).at(-1)?.id === row.id;
+
+  for (const row of projected) {
+    const ancestors: AgentLiveRow[] = [];
+    const seen = new Set<string>([row.id]);
+    let parentRowId = row.parentRowId;
+    while (parentRowId !== undefined && !seen.has(parentRowId)) {
+      const parent = byId.get(parentRowId);
+      if (parent === undefined) break;
+      ancestors.push(parent);
+      seen.add(parent.id);
+      parentRowId = parent.parentRowId;
+    }
+    ancestors.reverse();
+    const ancestorPrefix = ancestors.map((ancestor) => (isLastSibling(ancestor) ? TREE_BLANK : TREE_RAIL)).join("");
+    const last = isLastSibling(row);
+    AGENT_LIVE_TREE_LAYOUT.set(row, {
+      prefix: `${ancestorPrefix}${last ? TREE_LAST_HOOK : TREE_BRANCH_HOOK} `,
+      childPrefix: `${ancestorPrefix}${last ? TREE_BLANK : TREE_RAIL}`,
+      hasChildren: (byParent.get(row.id)?.length ?? 0) > 0,
+    });
+  }
+  return projected;
 }
 
 /** Rank a group member by what the operator needs to see first (rule 3 above). */
@@ -295,7 +390,7 @@ export function formatAgentLiveRowLine(
 ): string {
   const calm = options.calm === true;
   if (row.groupKind !== undefined) return formatAgentGroupRowLine(row, meta, width, calm);
-  const prefix = row.parentRowId !== undefined ? "↳ " : "";
+  const prefix = AGENT_LIVE_TREE_LAYOUT.get(row)?.prefix ?? (row.parentRowId !== undefined ? "↳ " : "");
   const name = truncate(agentRowName(row), AGENT_NAME_MAX_COLS);
   const title = agentRowTitle(row);
   return assembleRowLine(prefix, meta.icon, name, title, agentRowRightSegments(row, calm), width);
@@ -436,7 +531,7 @@ function clampLine(line: string, width: number): string {
 
 /** Workflow group summary row (parallel/pipeline): label + elapsed + k/n done. */
 function formatAgentGroupRowLine(row: AgentLiveRow, meta: StatusMeta, width: number, calm = false): string {
-  const prefix = row.parentRowId !== undefined ? "↳ " : "";
+  const prefix = AGENT_LIVE_TREE_LAYOUT.get(row)?.prefix ?? (row.parentRowId !== undefined ? "↳ " : "");
   const segments: string[] = [];
   const elapsed = formatRowElapsed(row, calm);
   if (elapsed !== "") segments.push(elapsed);

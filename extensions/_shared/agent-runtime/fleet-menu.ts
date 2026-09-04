@@ -438,7 +438,7 @@ function partitionEarlierWorkflowRunRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   if (newestRunId === undefined) return rows;
   const current = rows.filter((row) => row.workflowRunId === undefined || row.workflowRunId === newestRunId);
   const earlier = rows.filter((row) => row.workflowRunId !== undefined && row.workflowRunId !== newestRunId);
-  return earlier.length === 0 ? rows : [...current, ...earlier];
+  return earlier.length === 0 ? rows : orderAgentLiveRows([...current, ...earlier]);
 }
 
 export function newestWorkflowRunId(rows: readonly AgentLiveRow[]): string | undefined {
