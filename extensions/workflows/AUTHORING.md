@@ -134,20 +134,20 @@ repair, then fails closed.
 
 The remaining standard orchestration primitives are:
 
-| Primitive                            | Responsibility                                                             |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| `parallel(thunks)`                   | One fail-closed barrier over independent author-known calls.               |
-| `pipeline(items, ...stages)`         | Fixed ordered stages for each author-known item.                           |
-| `phase(name)` / `log(text)`          | Reader-visible run progress.                                               |
-| `publishArtifact(name, text)`        | Supporting exact text artifact.                                            |
-| `publishPrimaryArtifact(name, text)` | One terminal semantic document.                                            |
-| `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.                      |
-| `items()`                            | Immutable exact caller-supplied text units.                                |
-| `outputDir()`                        | Project-relative workflow workspace selected by the host.                  |
-| `invokeWorkflow(declaration)`        | One real saved or exact-Package child run with durable item checkpointing. |
-| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.                  |
-| `promptFile(path, variables)`        | Long/shared role charter; never routing.                                   |
-| `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.                  |
+| Primitive                            | Responsibility                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `parallel(thunks)`                   | One fail-closed barrier over independent author-known calls.                |
+| `pipeline(items, ...stages)`         | Fixed ordered stages for each author-known item.                            |
+| `phase(name)` / `log(text)`          | Reader-visible run progress.                                                |
+| `publishArtifact(name, text)`        | Supporting exact text artifact.                                             |
+| `publishPrimaryArtifact(name, text)` | One terminal semantic document.                                             |
+| `awaitOperator(declaration)`         | Declare a split-run human gate, then return; no suspended JavaScript stack. |
+| `items()`                            | Immutable exact caller-supplied text units.                                 |
+| `outputDir()`                        | Project-relative workflow workspace selected by the host.                   |
+| `invokeWorkflow(declaration)`        | One real saved or exact-Package child run with durable item checkpointing.  |
+| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.                   |
+| `promptFile(path, variables)`        | Long/shared role charter; never routing.                                    |
+| `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.                   |
 
 `runWorkspaceDir()` is removed. Existing source that calls it fails with
 `WorkflowRunWorkspaceRemovedError`; migrate to `outputDir()` and the single
@@ -315,12 +315,7 @@ the exact approved caller list and ordering are intentionally unchanged for the
 reused output namespace. Pass original text unchanged in `input`/`items`; the
 runtime never parses it.
 
-A fresh `agent({ handoffs })` list stays in the same-run, non-resumable inline
-worker pattern. Durable discovery is two runs: discovery first exposes a
-human-readable list for approval, then a separate caller supplies that frozen
-list and its stable identities to the durable parent. Never derive resumable
-positional keys from fresh model output, and never parse a discovery document as
-transport.
+A fresh `agent({ handoffs })` list feeds the visible same-run inline graph. A recorded discovery call can replay as part of an exactly matching prefix; it is not categorically non-resumable. Never derive resumable positional saved-child keys from newly rediscovered text. Freeze the exact list and ordering in a separate caller-owned handoff before associating it with durable `invokeWorkflow` keys.
 
 The workflow workspace is distinct from run evidence. Fresh runs default to a
 unique `.locus-pi/workspaces/<generated-run-name>/` directory; callers may select
@@ -520,10 +515,11 @@ These are all rules enforced for `meta.profile: "standard"`:
   key, `schema`/`validate` object key, regex, or `try/catch` is allowed. Inline
   callbacks containing agent edges remain visible only under `parallel`,
   `pipeline`, or `workflow` calls.
-- Assignments, augmented assignments, and updates are rejected except when the
-  `for` increment mutates one numeric identifier initialized by that same loop.
-  That counter may never be a protected DSL, collection, or `Error` binding;
-  only `++`/`--` or a numeric `+=`/`-=` step is accepted.
+- Assignments, augmented assignments, and updates are rejected except for the
+  existing numeric `for` increment and the narrow whole-value carry below.
+  A counter may never be a protected DSL, collection, or `Error` binding;
+  only `++`/`--` or a numeric `+=`/`-=` step is accepted in an ordinary loop.
+  Whole-value carry requires a stricter ascending, provably finite literal loop.
   `new` constructs only the unshadowed global `Error` constructor, and every
   `Error` argument must remain author-known or literal. Opaque/runtime values
   are rejected anywhere inside its message, options, cause, arrays, objects,
@@ -539,6 +535,44 @@ These are all rules enforced for `meta.profile: "standard"`:
   provenance independent of JavaScript scope. A nested scalar literal may reuse
   such a spelling; its real lexical block, including a `switch` body, does not
   change the outer value's provenance.
+
+### Bounded carry and author-owned records
+
+A reviewer-gated refinement is opt-in control flow, not a global retry policy.
+The [runnable refinement example](references/examples/refinement.workflow.mjs)
+uses a literal `for`, a fresh worker and exact reviewer feedback. There is no
+new `untilComplete` primitive. The checker permits scalar `let` bindings seeded
+with literal strings before that loop to receive a whole opaque answer or a
+whole runtime-owned `choice` identity. The loop must use a numeric literal start,
+ascending literal `<`/`<=` bound and positive literal step. The counter cannot be
+reset elsewhere. Carry cannot escape into a callback or mutate shared branch
+state, mix control and opaque values, replace a result with a fabricated literal,
+inspect properties or transform the answer. Carried values and aliases retain
+provenance; initializing a variable with `""` does not launder later model text.
+
+Author-known literal records may use named properties, including in visible
+`.map()` callbacks, and flat object destructuring of those records. Model output,
+caller semantic items and any composite containing them remain opaque. A map
+that captures opaque values does not produce trusted author records. No helper
+function, arbitrary object mutation, raw `schema` or `validate` becomes standard
+through this allowance.
+
+Every `agent()` call declares a literal `label`, and no two callsites in one file
+share one. Replay addresses a completed call by its `phase`, `label`, and
+occurrence, plus runtime-owned keyed group identity when supplied. A missing or
+duplicate label fails the strict source check. An optional `title` is only a
+human-readable description and never replaces stable identity.
+
+### Output acceptance is not semantic continuation
+
+Standard authoring may opt into `agent({ choice, returnVia: "tool" })` or the
+closed string `output` contract described in [output acceptance](references/output-acceptance.md).
+The workflow-only `workflow_return` tool validates a proposed value within the
+same child session; it does not certify the truth of a decision. Ordinary text,
+legacy text-choice repair and adaptive fresh-worker rounds retain separate
+contracts. The standard source grammar still does not parse model prose or
+permit raw `schema`/`validate`. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
+before selecting fixed, refinement, decomposition or human-gated execution.
 
 The owner contract separately forbids mandatory acknowledgement protocols whose
 answer has no consumer. That is an explicit design/source review rule, not a
@@ -610,6 +644,9 @@ characters per child attempt. One run admits at most 10,000 physical attempts,
 starts no new child after its 24-hour gate, and executes at most four attempts
 concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
 all consume the shared `totalAgents` counter across the root and saved children.
+Same-session tool-output corrections consume the existing child budgets instead
+of creating a new physical invocation. Structured launchers may explicitly set
+the shared budget; see [execution controls](references/execution-controls.md).
 The SDK timeout is a later transport backstop, not authored workflow policy.
 
 `meta.profile` makes authoring intent explicit. New generated source uses

@@ -207,6 +207,8 @@ export function readWorkflowReplayLog(projectRoot: string, runId: string): Workf
 }
 
 export interface CreateWorkflowReplayControllerOptions {
+  /** Crash recovery must not duplicate an already-confirmed prefix on mismatch. */
+  requireRecordedPrefix?: boolean;
   /** Run directory of the run being executed now; its record is written here. */
   runDir: string;
   /** Recorded entries from the resume source. Omit to record without replaying. */
@@ -233,6 +235,7 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
   readonly #recordedValues: ReadonlyMap<WorkflowReplayValueKind, readonly number[]>;
   readonly #replayEnabled: boolean;
   readonly #sourceScriptChanged: boolean;
+  readonly #requireRecordedPrefix: boolean;
   #readCursor = 0;
   #writeCursor = 0;
   readonly #valueCursors = new Map<WorkflowReplayValueKind, number>();
@@ -250,6 +253,7 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
     const recorded = options.recorded ?? [];
     this.#replayEnabled = options.recorded !== undefined;
     this.#sourceScriptChanged = options.sourceScriptChanged === true;
+    this.#requireRecordedPrefix = options.requireRecordedPrefix === true;
     this.#recordedAgents = recorded.filter((entry): entry is WorkflowReplayAgentEntry => entry.kind === "agent");
     const values = new Map<WorkflowReplayValueKind, number[]>();
     for (const entry of recorded) {
@@ -268,6 +272,8 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
     // return sites. The two paths that return before this helper are the two
     // that must NOT latch: replay is switched off, and the latch already holds.
     const miss = (reason: WorkflowReplayMissReason): WorkflowReplayAgentLookup => {
+      if (this.#requireRecordedPrefix && ordinal < this.#recordedAgents.length)
+        throw new Error(`Interrupted recovery refused prefix divergence at call ${ordinal}: ${reason}`);
       this.#freshCalls += 1;
       if (!this.#diverged) {
         this.#diverged = true;

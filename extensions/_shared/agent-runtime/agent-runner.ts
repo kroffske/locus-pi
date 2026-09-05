@@ -35,6 +35,22 @@ export type AgentExecutionMode = "bare" | "named";
 export type AgentRunIdentity =
   { executionMode: "bare"; agent?: never } | { executionMode: "named"; agent: AgentDefinition };
 
+/** Caller-owned output acceptance; the SDK host owns session lifecycle and cumulative budgets. */
+export interface AgentResponseAcceptance {
+  toolNames: readonly string[];
+  bindToolRestriction(restrict: () => void): void;
+  inspect():
+    | { status: "accepted"; text: string; attempts: number; toolName: string }
+    | { status: "retry"; prompt: string }
+    | { status: "failed"; reason: string; failureCause?: AgentFailureCause };
+}
+
+export interface AgentOutputAcceptance {
+  source: "tool";
+  attempts: number;
+  toolName: string;
+}
+
 export interface AgentRunRequestBase {
   task: string;
   parentSessionId: string;
@@ -61,6 +77,8 @@ export interface AgentRunRequestBase {
   /** Custom tools registered for the child session; their closures execute in the
    *  PARENT process (the workflow bridge uses this for `workflow_ask`). */
   customTools?: ReadOnlyAgentCustomTool[];
+  /** Opt-in same-session acceptance; absent for ordinary agents and legacy schemas. */
+  responseAcceptance?: AgentResponseAcceptance;
   /** Tool names excluded on top of the host defaults (e.g. the stock `ask`, which a
    *  headless child can only mis-serve: its no-UI refusal is model-visible text and
    *  its option timeout auto-answers for the operator). */
@@ -82,6 +100,7 @@ export type AgentRunRequestInput = Partial<Omit<AgentRunRequestBase, "task" | "p
 export const EXECUTED_MODEL_UNAVAILABLE = "unavailable";
 
 export interface AgentRunResult {
+  outputAcceptance?: AgentOutputAcceptance;
   status: AgentRunStatus;
   executionMode?: AgentExecutionMode;
   agentName?: string;
@@ -292,6 +311,7 @@ function copyOptionalRunFields(request: AgentRunRequestWithoutContext, input: Ag
   if (input.parentContext !== undefined) request.parentContext = input.parentContext;
   if (input.repositoryCheckScripts !== undefined) request.repositoryCheckScripts = input.repositoryCheckScripts;
   if (input.customTools !== undefined) request.customTools = input.customTools;
+  if (input.responseAcceptance !== undefined) request.responseAcceptance = input.responseAcceptance;
   if (input.additionalExcludeTools !== undefined) request.additionalExcludeTools = input.additionalExcludeTools;
   if (input.workingDirectory !== undefined) request.workingDirectory = input.workingDirectory;
 }

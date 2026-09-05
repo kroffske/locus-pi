@@ -286,3 +286,20 @@ to choose and invoke the workflow.
 
 Good: call `workflow` directly when available; otherwise send the literal
 `/workflows run ...` command to Pi JSON print mode and follow its typed receipts.
+
+## Explicit interrupted recovery and run budgets
+
+Ordinary `--resume` and Repair + Continue retain their terminal-result contract.
+Do not silently turn them into hard-crash recovery. The structured `workflow`
+tool may explicitly receive `recoverInterrupted: true` together with
+`resumeFromRunId` only after the operator authorizes that recovery. Runtime
+requires identical bound source/input/budget, a healthy fully confirmed serial
+prefix, workspace ownership and the existing lease. A started but unconfirmed
+child, grouped execution, malformed result or missing binding requires operator
+review. Never fabricate `result.json` to bypass admission. See the canonical
+[recovery contract](../../extensions/workflows/references/recovery-and-continuation.md).
+
+The same structured tool accepts optional `budget` overrides forwarded to the
+single runtime budget owner and shown in approval details. Slash syntax above
+is unchanged. See [execution controls](../../extensions/workflows/references/execution-controls.md).
+Semantic extra rounds and same-session output corrections are not crash replay.

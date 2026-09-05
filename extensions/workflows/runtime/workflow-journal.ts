@@ -274,7 +274,18 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
   if (line.kind === "error" && !hasTerminalCallId(line.callId)) return;
   const id = workflowAgentLiveRowId(line);
   const executionKey = workflowJournalExecutionKey(line);
-  if (line.kind === "agent_start") {
+  if (line.kind === "agent_queued" || line.kind === "agent_start") {
+    const previous = workflowLiveExecutions().get(executionKey);
+    // Admission promotes the row this call was queued on. A start over an already
+    // started row stays a replacement, which is what a retried call must look like.
+    if (
+      line.kind === "agent_start" &&
+      previous !== undefined &&
+      agentLiveStore.rowForExecution(previous)?.status === "queued"
+    ) {
+      agentLiveStore.patchExecution(previous, { status: "working", startedAt: Date.now() });
+      return;
+    }
     const displayName = line.agent ?? "sub-agent";
     const execution = agentLiveStore.beginExecution({
       id,
@@ -282,6 +293,7 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       workflowRunId: line.runId,
       ...(line.agent === undefined ? {} : { agentName: line.agent }),
       label: line.label !== undefined ? `${displayName} (${line.label})` : displayName,
+      ...(line.title === undefined ? {} : { title: line.title }),
       ...(line.model !== undefined ? { model: line.model } : {}),
       ...(line.thinking !== undefined ? { thinking: line.thinking } : {}),
       ...(line.slotKey !== undefined ? { slotKey: line.slotKey } : {}),
@@ -289,7 +301,10 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       noMcp: false,
     });
     workflowLiveExecutions().set(executionKey, execution);
-    agentLiveStore.patchExecution(execution, { status: "working", startedAt: Date.now() });
+    agentLiveStore.patchExecution(
+      execution,
+      line.kind === "agent_queued" ? { status: "queued" } : { status: "working", startedAt: Date.now() },
+    );
     return;
   }
   const execution = workflowLiveExecutions().get(executionKey);
@@ -560,7 +575,10 @@ function applyGroupLineToAgentLiveStore(line: WorkflowJournalLine): void {
       id,
       workflowRunId: line.runId,
       agentName: "workflow-group",
-      label: `${line.groupKind} (${line.groupTotal ?? 0})`,
+      ...(line.parentGroupId === undefined
+        ? {}
+        : { parentRowId: workflowGroupLiveRowId({ runId: line.runId, groupId: line.parentGroupId }) }),
+      label: line.groupLabel ?? `${line.groupKind} (${line.groupTotal ?? 0})`,
       groupKind: line.groupKind,
       ...(line.groupTotal !== undefined ? { groupTotal: line.groupTotal } : {}),
       isolated: false,
@@ -937,7 +955,18 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   if (!isRecord(value)) return "Expected a JSON object.";
   if (typeof value.ts !== "string") return "Field ts must be a string.";
   if (value.runId !== expectedRunId) return `Field runId must equal ${JSON.stringify(expectedRunId)}.`;
-  if (!isOneOf(value.kind, ["phase", "log", "group_start", "group_end", "agent_start", "agent_end", "error"])) {
+  if (
+    !isOneOf(value.kind, [
+      "phase",
+      "log",
+      "group_start",
+      "group_end",
+      "agent_queued",
+      "agent_start",
+      "agent_end",
+      "error",
+    ])
+  ) {
     return "Field kind is not a supported workflow journal event.";
   }
 
@@ -960,6 +989,8 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
       "message",
       "groupId",
       "groupLabel",
+      "parentGroupId",
+      "title",
       "executionMode",
       "agent",
       "displayName",
@@ -994,7 +1025,7 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
     return "Field agent must be a non-empty string when executionMode is named.";
   }
   if (
-    (eventKind === "agent_start" || eventKind === "agent_end") &&
+    (eventKind === "agent_queued" || eventKind === "agent_start" || eventKind === "agent_end") &&
     value.executionMode === undefined &&
     (typeof value.agent !== "string" || value.agent.trim() === "")
   ) {
@@ -1077,6 +1108,21 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   if (value.evidenceWarnings !== undefined && !isStringArray(value.evidenceWarnings)) {
     return "Field evidenceWarnings must be an array of strings.";
   }
+  for (const field of ["itemPath", "groupKeys"] as const) {
+    const values = value[field];
+    if (
+      values !== undefined &&
+      (!isStringArray(values) || values.some((entry) => entry.trim() === "" || entry.length > 240))
+    ) {
+      return `Field ${field} must be an array of non-blank bounded strings.`;
+    }
+  }
+  if (
+    Array.isArray(value.groupKeys) &&
+    (value.groupKeys.length !== value.groupTotal || new Set(value.groupKeys).size !== value.groupKeys.length)
+  ) {
+    return "Field groupKeys must name every group member exactly once.";
+  }
   if (value.activeToolNames !== undefined && !isStringArray(value.activeToolNames)) {
     return "Field activeToolNames must be an array of strings.";
   }
@@ -1107,6 +1153,47 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   ) {
     return "Field resumeSourceRunSummary is invalid.";
   }
+  if (value.outputAcceptance !== undefined) {
+    const receipt = value.outputAcceptance;
+    if (
+      !isRecord(receipt) ||
+      Object.keys(receipt).some((key) => !["source", "attempts", "toolName"].includes(key)) ||
+      receipt.source !== "tool" ||
+      receipt.toolName !== "workflow_return" ||
+      !Number.isInteger(receipt.attempts) ||
+      (receipt.attempts as number) < 1 ||
+      (receipt.attempts as number) > 3
+    )
+      return "Field outputAcceptance is invalid.";
+  }
+  if (value.choiceDecision !== undefined) {
+    const decision = value.choiceDecision;
+    if (
+      eventKind !== "log" ||
+      value.source !== "runtime" ||
+      value.message !== "[workflow:choice]" ||
+      !isRecord(decision)
+    )
+      return "Field choiceDecision requires a canonical runtime choice log.";
+    if (
+      Object.keys(decision).some((key) => !["value", "source", "returnVia", "attempts", "reason"].includes(key)) ||
+      typeof decision.value !== "string" ||
+      decision.value.trim() === "" ||
+      !["validated", "fallback"].includes(String(decision.source)) ||
+      !["text", "tool"].includes(String(decision.returnVia))
+    )
+      return "Field choiceDecision is invalid.";
+    if (
+      decision.attempts !== undefined &&
+      (!Number.isInteger(decision.attempts) || (decision.attempts as number) < 1 || (decision.attempts as number) > 3)
+    )
+      return "Choice attempts are invalid.";
+    if (
+      decision.source === "fallback" ? decision.reason !== "output-contract-exhausted" : decision.reason !== undefined
+    )
+      return "Choice source/reason disagree.";
+  } else if (value.message === "[workflow:choice]" && value.source === "runtime")
+    return "Canonical choice log requires choiceDecision.";
   if (value.continuation !== undefined) {
     if (eventKind !== "log" || value.source !== "runtime" || value.message !== "[workflow:continuation]") {
       return "Field continuation is only valid on the canonical runtime continuation log.";
@@ -1130,9 +1217,23 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
 const AGENT_FAILURE_CAUSE_NAMES: readonly WorkflowAgentFailureCause[] = AGENT_FAILURE_CAUSES;
 
 const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
-  phase: ["phase"],
-  log: ["source", "phase", "message", "resumeFromRunId", "resumeSourceRunSummary", "continuation"],
-  group_start: ["phase", "groupId", "groupKind", "groupLabel", "groupTotal"],
+  phase: ["phase", "groupId", "groupKind", "groupLabel"],
+  log: [
+    "source",
+    "phase",
+    "message",
+    "resumeFromRunId",
+    "resumeSourceRunSummary",
+    "continuation",
+    "choiceDecision",
+    "label",
+    "callId",
+    "groupId",
+    "groupKind",
+    "groupLabel",
+    "itemPath",
+  ],
+  group_start: ["phase", "groupId", "groupKind", "groupLabel", "groupTotal", "groupKeys", "parentGroupId"],
   group_end: [
     "phase",
     "message",
@@ -1145,6 +1246,33 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "groupFailed",
     "durationMs",
   ],
+  agent_queued: [
+    "phase",
+    "groupId",
+    "groupKind",
+    "groupLabel",
+    "executionMode",
+    "agent",
+    "readOnly",
+    "label",
+    "title",
+    "itemPath",
+    "callId",
+    "attempt",
+    "attempts",
+    "logicalCallId",
+    "slotKey",
+    "workspaceHandle",
+    "permissionMode",
+    "workspaceMode",
+    "model",
+    "requestedModel",
+    "modelRole",
+    "requireModelRole",
+    "thinking",
+    "replayed",
+    "capabilityMode",
+  ],
   agent_start: [
     "phase",
     "groupId",
@@ -1154,6 +1282,8 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "agent",
     "readOnly",
     "label",
+    "title",
+    "itemPath",
     "callId",
     "attempt",
     "attempts",
@@ -1180,6 +1310,8 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "displayName",
     "readOnly",
     "label",
+    "title",
+    "itemPath",
     "callId",
     "attempt",
     "attempts",
@@ -1197,6 +1329,7 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "childTrace",
     "resultArtifact",
     "schemaValidation",
+    "outputAcceptance",
     "durationMs",
     "worktreePath",
     "workspaceHandle",
@@ -1221,6 +1354,8 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "executionMode",
     "agent",
     "label",
+    "title",
+    "itemPath",
     "callId",
     // A failure that THREW never reaches an agent_end, so this line is the call's terminal
     // record and the only place its declared cause — and its place in a retry sequence —
@@ -1253,6 +1388,7 @@ const WORKFLOW_JOURNAL_REQUIRED_FIELDS_BY_KIND = {
   group_end: ["groupId", "groupKind", "groupTotal", "groupCompleted", "groupFailed", "status"],
   // callId was added after the first persisted journals. Keep those explicit
   // legacy rows readable, while still requiring an agent identity.
+  agent_queued: ["callId"],
   agent_start: [],
   agent_end: ["status"],
   error: ["message"],
@@ -2194,7 +2330,7 @@ export function readWorkflowRunSummary(
   let usageCost = 0;
   let sawUsage = false;
   for (const line of lines) {
-    if (line.kind === "phase" && typeof line.phase === "string") phase = line.phase;
+    if (line.kind === "phase" && line.groupId === undefined && typeof line.phase === "string") phase = line.phase;
     else if (line.kind === "agent_start") agentsStarted += 1;
     else if (line.kind === "agent_end") {
       agentsEnded += 1;

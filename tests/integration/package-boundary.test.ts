@@ -347,8 +347,9 @@ describe("npm public package boundary", () => {
     ]);
     // Directory-owned means the dotfiles inside a listed directory ship with it:
     // `skills/.ignore` rides along under `skills/` and is counted here.
-    // 238 since the shared agent-live tick module joined extensions/_shared/agent-runtime.
-    expect(dryRun.files).toHaveLength(238);
+    // 252 since output acceptance and interrupted recovery added two runtime modules,
+    // three workflow reference pages, four runnable examples and five skill cards.
+    expect(dryRun.files).toHaveLength(252);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

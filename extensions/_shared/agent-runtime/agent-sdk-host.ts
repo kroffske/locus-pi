@@ -93,6 +93,8 @@ export interface SdkAgentSessionLike {
   getLastAssistantText(): string | undefined;
   /** Pi 0.83 host readback. Required for fresh tool-free Fusion sessions. */
   getActiveToolNames?(): string[];
+  /** Pi AgentSession API; restriction applies at the next agent turn. */
+  setActiveToolsByName?(names: string[]): void;
   exportToJsonl(outputPath?: string): string; // SYNC
   /**
    * Full readable render of the same session (`AgentSession.exportToHtml`,
@@ -1259,10 +1261,102 @@ async function runChildSession(
       );
     }
 
+    const acceptance = request.responseAcceptance;
+    const restrictAcceptanceTools = (): void => {
+      if (acceptance === undefined) return;
+      session.setActiveToolsByName!([...acceptance.toolNames]);
+      const active = session.getActiveToolNames!();
+      if (
+        active.length !== acceptance.toolNames.length ||
+        acceptance.toolNames.some((name) => !active.includes(name))
+      ) {
+        throw new Error("Child host did not enforce output-only tool restriction");
+      }
+    };
+    if (acceptance !== undefined) {
+      const active = session.getActiveToolNames?.();
+      if (
+        session.setActiveToolsByName === undefined ||
+        active === undefined ||
+        acceptance.toolNames.some((name) => !active.includes(name))
+      ) {
+        const reason =
+          "Same-session output acceptance requires registered return tools and host tool-set readback/restriction";
+        patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
+        await preserveChildTrace();
+        return withChildTrace(
+          failedResult(
+            request,
+            reason,
+            "output-contract-unavailable",
+            [...diagnostics, reason],
+            undefined,
+            childSession,
+          ),
+          childTrace,
+        );
+      }
+      acceptance.bindToolRestriction(restrictAcceptanceTools);
+    }
+
     // Budget scales with maxTurns so a legitimately long multi-turn child is not
     // killed prematurely, while a stuck child still has a hard ceiling.
     const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
-    const turn = await driveChildTurn(session, kickoff, signal, turnBudgetMs, maxToolCalls, execution);
+    const ledger: ChildTurnLedger = { toolCalls: 0, assistantTurns: 0, toolNames: new Set() };
+    const deadline = Date.now() + turnBudgetMs;
+    let acceptedOutput:
+      Extract<ReturnType<NonNullable<typeof acceptance>["inspect"]>, { status: "accepted" }> | undefined;
+    let acceptanceFailure: string | undefined;
+    let acceptanceFailureCause: AgentFailureCause = "output-contract-exhausted";
+    let turn = await driveChildTurn(
+      session,
+      kickoff,
+      signal,
+      turnBudgetMs,
+      maxToolCalls,
+      execution,
+      ledger,
+      acceptance === undefined ? undefined : request.maxTurns,
+    );
+    if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+    while (
+      acceptance !== undefined &&
+      turn.settlement === "completed" &&
+      !signal.aborted &&
+      assistantProviderFailure(session.messages) === undefined
+    ) {
+      const decision = acceptance.inspect();
+      if (decision.status === "accepted") {
+        acceptedOutput = decision;
+        break;
+      }
+      if (decision.status === "failed") {
+        acceptanceFailure = decision.reason;
+        acceptanceFailureCause = decision.failureCause ?? "output-contract-exhausted";
+        break;
+      }
+      if (Date.now() >= deadline) {
+        turn = { ...turn, settlement: "timed_out" };
+        break;
+      }
+      if (ledger.assistantTurns >= request.maxTurns) {
+        turn = { ...turn, settlement: "turn_limit" };
+        break;
+      }
+      restrictAcceptanceTools();
+      turn = await driveChildTurn(
+        session,
+        decision.prompt,
+        signal,
+        Math.max(1, deadline - Date.now()),
+        maxToolCalls,
+        execution,
+        ledger,
+        request.maxTurns,
+      );
+      if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+    }
+    if (signal.aborted) turn = { ...turn, settlement: "aborted" };
 
     // THIS is the first point at which "executed" is a true word, so it is the first
     // point the evidence may say it. Everything above returns without it: a session
@@ -1276,7 +1370,12 @@ async function runChildSession(
     // rather than after the settlement branches.
     if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
 
-    if (turn.settlement === "aborted" || turn.settlement === "timed_out" || turn.settlement === "tool_limit") {
+    if (
+      turn.settlement === "aborted" ||
+      turn.settlement === "timed_out" ||
+      turn.settlement === "tool_limit" ||
+      turn.settlement === "turn_limit"
+    ) {
       // Stop the child, then still export evidence and dispose (finally below).
       await abortChild(session, abortTimeoutMs);
       await preserveChildTrace();
@@ -1285,6 +1384,14 @@ async function runChildSession(
         patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, "host-turn-timeout", [...diagnostics, reason], undefined, childSession),
+          childTrace,
+        );
+      }
+      if (turn.settlement === "turn_limit") {
+        const reason = `Child exceeded its cumulative ${request.maxTurns} assistant-turn budget`;
+        patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
+        return withChildTrace(
+          failedResult(request, reason, "assistant-turn-budget", [...diagnostics, reason], undefined, childSession),
           childTrace,
         );
       }
@@ -1306,7 +1413,7 @@ async function runChildSession(
       childSession = createSdkSessionRecord(request, stats.sessionId);
     agentLiveStore.applyExecutionStats(execution, stats);
     if (session.messages !== undefined) agentLiveStore.replaceExecutionTranscript(execution, session.messages);
-    const text = session.getLastAssistantText();
+    const text = acceptedOutput?.text ?? session.getLastAssistantText();
     await preserveChildTrace();
 
     childOutputStats = {
@@ -1338,6 +1445,14 @@ async function runChildSession(
           childOutputStats,
           childSession,
         ),
+        childTrace,
+      );
+    }
+    if (acceptance !== undefined && acceptedOutput === undefined) {
+      const reason = acceptanceFailure ?? "No accepted output proposal at successful child completion";
+      patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
+      return withChildTrace(
+        failedResult(request, reason, acceptanceFailureCause, [...diagnostics, reason], childOutputStats, childSession),
         childTrace,
       );
     }
@@ -1380,6 +1495,15 @@ async function runChildSession(
       ...agentRunResultIdentity(request),
       reason: parsed.text,
       text: parsed.text,
+      ...(acceptedOutput === undefined
+        ? {}
+        : {
+            outputAcceptance: {
+              source: "tool" as const,
+              attempts: acceptedOutput.attempts,
+              toolName: acceptedOutput.toolName,
+            },
+          }),
       evidence,
       diagnostics,
       lifecycleEntryIds: [],
@@ -1410,7 +1534,12 @@ async function runChildSession(
   }
 }
 
-type ChildTurnSettlement = "completed" | "aborted" | "timed_out" | "tool_limit";
+type ChildTurnSettlement = "completed" | "aborted" | "timed_out" | "tool_limit" | "turn_limit";
+interface ChildTurnLedger {
+  toolCalls: number;
+  assistantTurns: number;
+  toolNames: Set<string>;
+}
 const SDK_TOOL_EVIDENCE_EVENT_TYPES = new Set(["tool_execution_start", "tool_execution_update", "tool_execution_end"]);
 
 interface ChildTurnObservation {
@@ -1445,6 +1574,8 @@ async function driveChildTurn(
   turnBudgetMs: number,
   maxToolCalls: number | undefined,
   execution: AgentLiveExecutionHandle,
+  ledger: ChildTurnLedger = { toolCalls: 0, assistantTurns: 0, toolNames: new Set() },
+  maxAssistantTurns?: number,
 ): Promise<ChildTurnObservation> {
   // Subscribe BEFORE prompting so a fast agent_end is never missed.
   let resolveEnd: () => void = () => {};
@@ -1456,13 +1587,16 @@ async function driveChildTurn(
   // here would escape every try/catch below and surface as an uncaught exception
   // that kills the host process. So the whole body is guarded: a malformed or late
   // event degrades to a recorded diagnostic, never a crash.
-  const recordedToolNames = new Set<string>();
-  let toolCallCount = 0;
+  const recordedToolNames = ledger.toolNames;
   // Set the moment the transport takes the turn — see ChildTurnObservation.
   let promptAccepted = false;
   let resolveToolLimit: () => void = () => {};
   const toolLimited = new Promise<"tool_limit">((resolve) => {
     resolveToolLimit = () => resolve("tool_limit");
+  });
+  let resolveTurnLimit: () => void = () => {};
+  const turnLimited = new Promise<"turn_limit">((resolve) => {
+    resolveTurnLimit = () => resolve("turn_limit");
   });
   const unsubscribe = session.subscribe((event) => {
     try {
@@ -1473,8 +1607,12 @@ async function driveChildTurn(
       const toolName = sdkToolEventName(event);
       if (toolName !== undefined) recordedToolNames.add(toolName);
       if (eventTypeName(event) === "tool_execution_start") {
-        toolCallCount += 1;
-        if (maxToolCalls !== undefined && toolCallCount > maxToolCalls) resolveToolLimit();
+        ledger.toolCalls += 1;
+        if (maxToolCalls !== undefined && ledger.toolCalls > maxToolCalls) resolveToolLimit();
+      }
+      if (eventTypeName(event) === "turn_start") {
+        ledger.assistantTurns += 1;
+        if (maxAssistantTurns !== undefined && ledger.assistantTurns > maxAssistantTurns) resolveTurnLimit();
       }
       agentLiveStore.feedExecutionEvent(execution, event);
       // Pi emits `agent_end` after each model cycle, including a cycle followed
@@ -1524,7 +1662,7 @@ async function driveChildTurn(
       await ended;
       return "completed";
     })();
-    const settlement = await Promise.race([completed, aborted, timedOut, toolLimited]);
+    const settlement = await Promise.race([completed, aborted, timedOut, toolLimited, turnLimited]);
     return { settlement, recordedToolNames: [...recordedToolNames].sort(), promptAccepted };
   } finally {
     unregisterInput();
