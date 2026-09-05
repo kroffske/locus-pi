@@ -14,6 +14,11 @@
  *   Hard VM/worker isolation is a pending seam — see TODO(trust-model) marker below.
  */
 
+import {
+  readInterruptedWorkflowResumeBinding,
+  workflowRecoveryInputHash,
+  confirmedRecoveryAgentCount,
+} from "./workflow-interrupted-recovery.js";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync, realpathSync } from "node:fs";
@@ -313,15 +318,16 @@ export interface RunWorkflowScriptOptions {
   /** Host-owned exact source workspace proof for a validated handoff continuation. */
   operatorHandoffWorkspaceReuse?: WorkflowHandoffWorkspaceReuseBinding;
   resumeFromRunId?: string;
+  /** Explicit conservative hard-crash admission; absent terminal result, identical serial source, no in-flight effects. */
+  recoverInterrupted?: boolean;
   /**
    * Per-run narrowing or raising of the package budget contract, axis by axis.
    * Unstated axes take `DEFAULT_WORKFLOW_BUDGET`. Narrowing is silent; a raise is
    * journalled, never quiet.
    *
-   * Host-side by design (D3): neither production entrypoint passes it and a
-   * `*.workflow.mjs` cannot reach it, so the three run-level axes — `concurrency`,
-   * `totalAgents`, `runtimeMs` — are overridable by embedders and tests only. The
-   * four per-call axes additionally have an author surface in `agent(prompt, opts)`.
+   * The workflow tool and command launcher pass explicit operator-approved overrides.
+   * Workflow source cannot raise this shared execution-tree budget itself; four
+   * per-call axes additionally have an author surface in `agent(prompt, opts)`.
    */
   budget?: Partial<WorkflowBudget>;
   /**
@@ -1118,6 +1124,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
   let resumeSourceWorkspace: WorkflowResumeWorkspaceIdentity | undefined;
   let resumeSourceBinding: WorkflowResumeSourceBinding | undefined;
+  let interruptedRecovery = false;
   let replayPlan: WorkflowReplayPlan | undefined;
   let replayController: WorkflowReplayController | undefined;
   let resourceLoader: WorkflowResourceLoader | undefined;
@@ -1230,12 +1237,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
               handoffReuseOutput === undefined
                 ? resumeSourceWorkspace?.explicit === true || opts.outputDir !== undefined
                 : opts.operatorHandoffWorkspaceReuse?.explicit === true,
-            ...(targetForMetadata !== undefined && isPostCodeReviewTarget(targetForMetadata, projectRoot)
-              ? {
-                  semanticInputPresent: requestedSemanticInput.present,
-                  semanticInputSha256: requestedSemanticInput.sha256,
-                }
-              : {}),
+            // Every new root launch has a binding; its result must project the same input identity.
+            semanticInputPresent: requestedSemanticInput.present,
+            semanticInputSha256: requestedSemanticInput.sha256,
             stableOutputDir: stableOutput.absolutePath,
             stableOutputDirRelative: stableOutput.relativePath,
           }),
@@ -1727,6 +1731,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
   }
   try {
+    if (opts.recoverInterrupted !== undefined && typeof opts.recoverInterrupted !== "boolean")
+      throw new Error("recoverInterrupted must be boolean");
+    if (opts.recoverInterrupted === true && resumeFromRunId === undefined)
+      throw new Error("recoverInterrupted requires resumeFromRunId");
     if (opts.operatorHandoffWorkspaceReuse !== undefined) {
       if (opts.operatorHandoffClaim === undefined || opts.continuation === undefined) {
         throw new Error("Workflow handoff workspace reuse requires a validated claim and continuation");
@@ -1742,9 +1750,26 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     if (resumeFromRunId !== undefined) {
       let sourceResult = readWorkflowRunResult(projectRoot, resumeFromRunId);
+      if (opts.recoverInterrupted === true) {
+        sourceResult = readInterruptedWorkflowResumeBinding(projectRoot, resumeFromRunId, {
+          target: { kind: target.kind, ref: target.ref, source: target.source },
+          scriptSha256: scriptIdentity.scriptSha256,
+          recoveryInputSha256: workflowRecoveryInputHash({
+            ...(opts.input === undefined ? {} : { input: opts.input }),
+            items,
+            budget,
+            ...(noOperator === undefined ? {} : { noOperator }),
+          }),
+        });
+        interruptedRecovery = true;
+      }
       let sourceLaunchBinding: WorkflowLaunchBinding | undefined;
       const currentOwner = isPostCodeReviewTarget(target, projectRoot);
-      const sourceLaunchBindingPresent = workflowLaunchBindingExists(projectRoot, resumeFromRunId);
+      // Every root now writes a launch binding, but only owner resume and explicit
+      // interrupted recovery treat it as admission authority. Ordinary resume keeps
+      // reading the persisted result envelope, including pre-binding runs.
+      const sourceLaunchBindingPresent =
+        (currentOwner || interruptedRecovery) && workflowLaunchBindingExists(projectRoot, resumeFromRunId);
       if (sourceLaunchBindingPresent) {
         if (sourceResult === null) {
           throw new Error(`Cannot resume workflow: source run ${resumeFromRunId} has no readable result.`);
@@ -1968,7 +1993,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       if (resumeSourceBinding === undefined) {
         throw new Error(`Cannot resume workflow: source run ${resumeFromRunId} has no validated binding.`);
       }
-      if (resumeSourceBinding.owner) {
+      if (resumeSourceBinding.owner || interruptedRecovery) {
         const sourceInput =
           resumeSourceBinding.launchBinding?.semanticInput ??
           readWorkflowResumeSemanticInputIdentity(resumeSourceBinding.result, resumeFromRunId);
@@ -1999,10 +2024,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // Persist the independent owner binding before acquiring the lease or
     // starting any child work. The result envelope written at terminal time is
     // only a projection and cannot be the source of resume/handoff authority.
-    if (inheritedCoordination === undefined && isPostCodeReviewTarget(target, projectRoot)) {
+    if (inheritedCoordination === undefined) {
       const launchBinding: WorkflowLaunchBinding = {
         schema: "locus-pi.workflow-launch-binding.v1",
         runId,
+        recoveryInputSha256: workflowRecoveryInputHash({
+          ...(opts.input === undefined ? {} : { input: opts.input }),
+          items,
+          budget,
+          ...(noOperator === undefined ? {} : { noOperator }),
+        }),
         target: { kind: target.kind, ref: target.ref, source: target.source },
         scriptIdentity,
         workspace: {
@@ -2035,6 +2066,18 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     if (inheritedCoordination === undefined) {
       rootLease = acquireWorkflowRootLease({ projectRoot, output: stableOutput, rootRunId: runId });
+      if (interruptedRecovery && resumeFromRunId !== undefined) {
+        readInterruptedWorkflowResumeBinding(projectRoot, resumeFromRunId, {
+          target: { kind: target.kind, ref: target.ref, source: target.source },
+          scriptSha256: scriptIdentity.scriptSha256,
+          recoveryInputSha256: workflowRecoveryInputHash({
+            ...(opts.input === undefined ? {} : { input: opts.input }),
+            items,
+            budget,
+            ...(noOperator === undefined ? {} : { noOperator }),
+          }),
+        });
+      }
       writeWorkflowRunGroupReport(
         { projectRoot, runId, storageRootRunId, workspaceDir: stableOutput.absolutePath, workflow: target.ref },
         rootLease,
@@ -2132,9 +2175,24 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       ...resultMetadata(),
     });
   }
+  if (
+    interruptedRecovery &&
+    (!replayPlan.record || replayPlan.recorded === undefined || replayPlan.refusedReason !== undefined)
+  ) {
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: currentJournal(runtime),
+      error: "Interrupted recovery could not activate exact prefix replay",
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
+  }
   if (replayPlan.record) {
     replayController = createWorkflowReplayController({
       runDir,
+      ...(interruptedRecovery ? { requireRecordedPrefix: true } : {}),
       ...(replayPlan.recorded === undefined ? {} : { recorded: replayPlan.recorded }),
       ...(replayPlan.sourceScriptChanged === true ? { sourceScriptChanged: true } : {}),
     });
@@ -2142,6 +2200,15 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   // Silent on the default path. A plain run that records normally is the norm,
   // and announcing it would turn every zero-event run into an eventful one; the
   // record itself and the `replay` envelope in result.json carry that fact.
+  if (interruptedRecovery)
+    emitPrelude({
+      ts: new Date().toISOString(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: "[workflow:interrupted-recovery] exact confirmed serial prefix; no terminal success inferred",
+      ...(resumeFromRunId === undefined ? {} : { resumeFromRunId }),
+    });
   const replayPlanNote = describeWorkflowReplayPlan(replayPlan);
   if (replayPlanNote !== undefined) {
     emitPrelude({
@@ -2366,6 +2433,21 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   const journalLines = currentJournal(runtime);
   const prepared = prepareWorkflowResult(result);
+  if (
+    interruptedRecovery &&
+    replayPlan?.recorded !== undefined &&
+    (replayController?.counts().replayedCalls ?? 0) < confirmedRecoveryAgentCount(replayPlan.recorded)
+  ) {
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: currentJournal(runtime),
+      error: "Interrupted recovery ended before consuming the confirmed prefix",
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
+  }
   const semanticOk = prepared.diagnostic === undefined && !isWorkflowResultExplicitFailure(prepared.value);
   try {
     // Result normalization can invoke script-defined toJSON(). Verify only after

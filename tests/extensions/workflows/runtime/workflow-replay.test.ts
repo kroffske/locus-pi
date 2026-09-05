@@ -869,7 +869,9 @@ export default async function runWorkflow(dsl) {
       expect(resumed.error).toContain(mode === "mismatch" ? "post-code-review" : "malformed persisted metadata");
       expect(resumed.error).toContain(
         mode === "mismatch"
-          ? "no valid host launch binding"
+          ? // Ordinary roots now write a launch binding too, so a non-owner source is
+            // refused by its recorded ownership rather than by a missing binding.
+            "ownership differs"
           : mode === "absent"
             ? "script identity is malformed"
             : "target is malformed",

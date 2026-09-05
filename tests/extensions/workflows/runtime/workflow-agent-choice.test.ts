@@ -69,7 +69,14 @@ describe("agent({ choice }) exact routing output", () => {
     expect(fallback.getJournal().at(-1)).toMatchObject({
       kind: "log",
       source: "runtime",
-      message: expect.stringContaining('choice fallback "compose" selected after 2 schema mismatch attempts'),
+      message: "[workflow:choice]",
+      choiceDecision: {
+        value: "compose",
+        source: "fallback",
+        returnVia: "text",
+        attempts: 2,
+        reason: "output-contract-exhausted",
+      },
     });
   });
 
@@ -81,7 +88,9 @@ describe("agent({ choice }) exact routing output", () => {
         choiceFallback: "compose",
       }),
     ).resolves.toBe("ask_operator");
-    expect(valid.getJournal().filter((line) => line.kind === "log" && line.source === "runtime")).toEqual([]);
+    expect(valid.getJournal().filter((line) => line.choiceDecision !== undefined)).toMatchObject([
+      { choiceDecision: { value: "ask_operator", source: "validated", returnVia: "text" } },
+    ]);
 
     const failed = createWorkflowRuntime({
       runId: "agent-choice-fallback-execution-failure",

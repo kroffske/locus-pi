@@ -1,9 +1,9 @@
 /**
- * Host-owned launch binding for owner-specific resume and handoff admission.
+ * Host-owned launch binding for resume, interrupted recovery and handoff admission.
  *
  * `runtime/result.json` is a mutable presentation envelope. This sidecar is
  * written atomically from validated runtime values and is the authority for
- * post-code-review source/workspace/input identity.
+ * source/workspace/input identity. New root runs also carry an exact recovery-input fingerprint.
  */
 
 import path from "node:path";
@@ -29,6 +29,8 @@ const WORKFLOW_LAUNCH_BINDING_TEMP_FILENAME = "launch-binding.json.tmp";
 export interface WorkflowLaunchBinding {
   schema: typeof WORKFLOW_LAUNCH_BINDING_SCHEMA;
   runId: string;
+  /** New root launches bind exact recovery inputs; old bindings remain readable, not crash-resumable. */
+  recoveryInputSha256?: string;
   target: {
     kind: "name" | "scriptPath";
     ref: string;
@@ -115,7 +117,15 @@ function parseWorkflowLaunchBinding(
 ): WorkflowLaunchBinding {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["schema", "runId", "target", "scriptIdentity", "workspace", "semanticInput"]) ||
+    !hasOnlyKeys(value, [
+      "schema",
+      "runId",
+      "target",
+      "scriptIdentity",
+      "workspace",
+      "semanticInput",
+      "recoveryInputSha256",
+    ]) ||
     value.schema !== WORKFLOW_LAUNCH_BINDING_SCHEMA ||
     value.runId !== runId
   ) {
@@ -146,8 +156,14 @@ function parseWorkflowLaunchBinding(
   if (!isSemanticInput(value.semanticInput)) {
     throw new Error("workflow launch binding semantic identity is invalid");
   }
+  if (
+    value.recoveryInputSha256 !== undefined &&
+    (typeof value.recoveryInputSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(value.recoveryInputSha256))
+  )
+    throw new Error("workflow recovery input identity is invalid");
   return {
     schema: WORKFLOW_LAUNCH_BINDING_SCHEMA,
+    ...(value.recoveryInputSha256 === undefined ? {} : { recoveryInputSha256: value.recoveryInputSha256 as string }),
     runId,
     target: parsed.target,
     scriptIdentity: parsed.scriptIdentity as WorkflowScriptIdentity,

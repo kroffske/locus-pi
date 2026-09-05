@@ -2,6 +2,24 @@
 
 This is the advanced implementation reference for the `workflows` extension. New operators should start with [`README.md`](README.md) and [`../../docs/workflows.md`](../../docs/workflows.md); workflow authors should start with [`AUTHORING.md`](AUTHORING.md).
 
+## Read only the required contract
+
+This file remains the compatibility index and owner of unchanged DSL semantics
+and numeric defaults. New, separately owned extensions are:
+
+- [Output acceptance](references/output-acceptance.md): opt-in `workflow_return`,
+  same-session clarification and persisted decision origin; no new global judge.
+- [Execution controls](references/execution-controls.md): local concurrency,
+  business keys/titles, branch phases, queued/started evidence and tool budget.
+- [Recovery and continuation](references/recovery-and-continuation.md): explicit
+  conservative interrupted recovery and the separate split-run human lifecycle.
+
+Authors select one of four [pattern cards](../../skills/locus-pi-workflow-create/references/INDEX.md).
+The canonical source grammar remains [AUTHORING.md](AUTHORING.md#machine-enforced-standard-source-shape).
+The complete manual is not a prerequisite for authoring a fixed chain. Existing
+section anchors remain stable; a new field's detailed contract is not duplicated
+in the short skill router.
+
 ## What it is
 
 A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / items / outputDir /
@@ -18,7 +36,8 @@ One way a workflow reaches a model:
   its exact non-empty final text, routed through the same code path as the `task`
   tool. With `opts.choice` it returns one declared exact string; with
   `opts.handoffs` it returns a bounded list of complete text work units. Both use
-  the runtime-owned repair path. Trusted compatibility scripts may still use
+  the runtime-owned repair path. A choice may opt into `returnVia: "tool"`
+  instead; see [output acceptance](references/output-acceptance.md). Trusted compatibility scripts may still use
   `opts.schema` for a larger validated value.
 - **`fusion()`** — validates a panel of 2–10 explicit model selectors and one
   homogeneous capability mode, runs isolated members, and asks a separate judge
@@ -1346,7 +1365,8 @@ duplicates, are unchanged; there is no Locus items count or character policy.
 Physical constraints still include caller/tool JSON, context, memory, total
 attempts, and time. A source array, caller items, or bounded model-discovered
 `agent({ handoffs })` result may feed the same visible `pipeline()` plus inline
-`dsl.workflow()` mini-flow. This fresh model-discovery path is non-resumable.
+`dsl.workflow()` mini-flow. Recorded discovery can replay in an exactly matching
+prefix. Fresh rediscovery must not be attached to old positional saved-child keys.
 Durable execution instead begins in a separate invocation with a caller-frozen,
 approved list and stable caller-owned keys. Positional keys are safe only when
 that exact list and ordering are intentionally unchanged for the reused output
@@ -1559,7 +1579,7 @@ cycles fail before model work.
 
 Before durable execution, the caller supplies the complete frozen work list and
 the runtime validates all keys before the first child. Fresh model discovery
-must remain non-resumable in the same run, or finish in a separate run before a
+must remain an inline same-run graph without rediscovered saved-child keys, or finish in a separate run before a
 human/caller approves and transports the frozen list. Never derive resumable
 positional keys from fresh model output. Terminal-success checkpoints are committed atomically
 and keyed by parent source hash, child source hash, workflow workspace, and
@@ -2212,13 +2232,14 @@ for everyone — but never silently: the runtime writes a `[workflow:budget] cal
 raised …` journal line naming the axis, the default and the requested value.
 
 **Which axes a script can override.** The four per-call axes — `maxToolCalls`,
-`timeoutMs`, `maxTurns`, `maxAnswerChars` — are ordinary `agent()` options. The
-three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — are **host-side
-only**: they are overridable through `RunWorkflowScriptOptions.budget`, which
-embedders and tests pass, and through nothing a `*.workflow.mjs` can reach.
-Neither production entrypoint passes it, so in practice every real run uses the
-package values. Giving scripts a run-level surface means deciding where
-operator-changeable knobs live, which is an open owner decision.
+`timeoutMs`, `maxTurns`, `maxAnswerChars` — remain ordinary `agent()` options.
+The three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — remain
+host-owned rather than writable from workflow JavaScript. The structured
+`workflow` tool and command launcher now accept an optional `budget` object
+forwarded to the existing `RunWorkflowScriptOptions.budget`; approval displays
+the resolved values. Unspecified axes keep the defaults above. There are no
+new slash-command flags. See [execution controls](references/execution-controls.md)
+for the exact boundary and local group concurrency.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
 applied budget. The selected execution's `outputs/README.md` carries a `## Budget`
@@ -2227,8 +2248,8 @@ For the root it is under `.locus-pi/runs/<storageRootRunId>/`; children and resu
 attempts use their fixed nested execution directories. The measured values are:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
-intervals, because `agent_start` is written before the gate is acquired — counting
-overlapping intervals would report queued children as concurrent. Replayed calls
+intervals. `agent_queued` records demand; `agent_start` is now emitted only
+after gate admission. Neither event claims a provider token has arrived. Replayed calls
 are counted only where they really spend: one invocation against `totalAgents`,
 but no child, so the row reads `N invocations (M replayed, no child ran)` and
 their durations and tokens are excluded — a run served entirely from records
@@ -2410,6 +2431,11 @@ Refusal is never silent — the reason is written to the journal and to
 
 ### Replay-safety is scanned, not asserted
 
+Ordinary resume still requires a trustworthy terminal result. Explicit
+`recoverInterrupted: true` is a separate conservative structured-tool route for
+a fully confirmed serial prefix and absent `result.json`. See [recovery admission](references/recovery-and-continuation.md);
+corrupt results and uncertain effects are not automatically recovered.
+
 There is no `meta.replaySafe` field, deliberately. An author assertion fails
 open: a script that claims to be replay-safe and calls `Date.now()` would replay
 answers produced in a different world and look green. Instead the same AST scan
@@ -2530,7 +2556,7 @@ A replayed call reports **no** token usage, so the run budget shown by
   runtime/
     script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
     journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
-                      kinds: phase | log | agent_start | agent_end |
+                      kinds: phase | log | agent_queued | agent_start | agent_end |
                              group_start | group_end | error
     replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
                       absent for scripts that are not replay-safe (see "Resume and replay")

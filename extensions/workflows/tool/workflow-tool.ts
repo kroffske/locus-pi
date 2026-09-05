@@ -61,7 +61,24 @@ import {
   WORKFLOW_WORKSPACES_STORAGE_PREFIX,
   workflowRunOutputsDir,
 } from "../runtime/workflow-run-layout.js";
-
+import {
+  resolveWorkflowBudget,
+  formatWorkflowBudgetPrelude,
+  WORKFLOW_AGENT_MAX_TURNS,
+  WORKFLOW_MAX_TIMEOUT_MS,
+} from "../runtime/workflow-budget.js";
+const WorkflowBudgetParams = Type.Object(
+  {
+    concurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    totalAgents: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    runtimeMs: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: WORKFLOW_MAX_TIMEOUT_MS })),
+    toolCalls: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    turns: Type.Optional(Type.Integer({ minimum: 1, maximum: WORKFLOW_AGENT_MAX_TURNS })),
+    answerChars: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+  },
+  { additionalProperties: false },
+);
 const WorkflowArtifactRefParams = Type.Object(
   {
     runId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
@@ -129,6 +146,13 @@ const WorkflowParams = Type.Object(
       }),
     ),
     continuation: Type.Optional(WorkflowContinuationParams),
+    budget: Type.Optional(WorkflowBudgetParams),
+    recoverInterrupted: Type.Optional(
+      Type.Boolean({
+        description:
+          "Explicit recovery of a confirmed serial prefix after hard crash; requires resumeFromRunId and identical source/inputs.",
+      }),
+    ),
     resumeFromRunId: Type.Optional(
       Type.String({
         description: "Optional prior workflow run id used as persisted retry metadata",
@@ -176,6 +200,20 @@ function workflowApprovalDetails(args: unknown, projectRoot: string): string[] {
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
     `Workflow workspace: ${workspace}`,
+    // Only an explicit override is approval-worthy; the default budget is the run's
+    // own prelude and would otherwise repeat itself in every approval dialog.
+    ...(record.budget !== null &&
+    typeof record.budget === "object" &&
+    Object.keys(record.budget as Record<string, unknown>).length > 0
+      ? [
+          formatWorkflowBudgetPrelude(
+            resolveWorkflowBudget(record.budget as Parameters<typeof resolveWorkflowBudget>[0]).budget,
+          ),
+        ]
+      : []),
+    ...(record.recoverInterrupted === true
+      ? ["Recovery: explicit hard-crash recovery of a confirmed serial prefix; no unresolved child effects allowed"]
+      : []),
     "Surface: trusted-file workflow runner",
     "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
     "Isolation: none — exec approval is consent, not a sandbox",
@@ -199,7 +237,23 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.registerTool({
     name: "workflow",
     label: "workflow",
-    description: `Run a reviewed trusted-file workflow script by saved name or project-relative path with optional semantic text, optional exact text work units exposed through dsl.items(), an optional confined workflow workspace, and optional host-verified continuation artifacts. Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name> workspaces; runName selects .locus-pi/workspaces/<runName> for new names and reuses an existing legacy-only .locus-pi/plans/<runName>; resume repeats the original workspace. Root evidence is stored under ${WORKFLOW_RUN_GROUP_STORAGE_PATTERN}{outputs,runtime}; saved children and resume attempts use ${WORKFLOW_NESTED_RUN_STORAGE_PATTERN}{outputs,runtime}. The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain standalone compatibility entries. The DSL orchestrates sub-agents; bare agent() starts a clean child, while an explicit agent name selects a project or user profile. agent() returns exact non-empty child text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, use the packaged \`locus-pi-workflow-create\` skill: a raw request writes and reviews .locus-pi/workflows/<name>/<name>.design.md before writing exactly the design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the workflow. The contract is skills/locus-pi-workflow-create/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
+    description:
+      `Run a reviewed trusted-file workflow script by saved name or project-relative path with an optional explicit shared budget, optional semantic text, ` +
+      `optional exact text work units exposed through dsl.items(), an optional confined workflow workspace, and optional host-verified continuation artifacts. ` +
+      `Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name> workspaces; runName selects .locus-pi/workspaces/<runName> for new names and ` +
+      `reuses an existing legacy-only .locus-pi/plans/<runName>; resume repeats the original workspace. Root evidence is stored under ` +
+      `${WORKFLOW_RUN_GROUP_STORAGE_PATTERN}{outputs,runtime}; saved children and resume attempts use ${WORKFLOW_NESTED_RUN_STORAGE_PATTERN}{outputs,runtime}. ` +
+      `The saved JavaScript executes with full Node.js/module access in the Pi host process; it is not sandboxed, and exec approval is consent rather than ` +
+      `capability isolation. A canonical folder <name>/ may own <name>.workflow.mjs plus direct child entries addressable as <name>/<child>, or may be group-only ` +
+      `with direct children and no runnable root; the nearest Project namespace wins as a whole, then User, then Package. Existing flat Project/User files remain ` +
+      `standalone compatibility entries. The DSL orchestrates sub-agents; bare agent() starts a clean child, while an explicit agent name selects a project or ` +
+      `user profile. agent() returns exact non-empty child text or a runtime-owned exact choice, while parallel/pipeline provide fail-closed grouping. A root may ` +
+      `invoke one source-bound sibling with invokeWorkflow({ child }); child work shares cancellation, concurrency, physical-call budget, workspace, and durable ` +
+      `item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, use the ` +
+      `packaged \`locus-pi-workflow-create\` skill: a raw request writes and reviews .locus-pi/workflows/<name>/<name>.design.md before writing exactly the ` +
+      `design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses ` +
+      `before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the ` +
+      `workflow. The contract is skills/locus-pi-workflow-create/SKILL.md → extensions/workflows/AUTHORING.md → extensions/workflows/REFERENCE.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",
@@ -215,6 +269,8 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       );
       if (targetFields.length !== 1)
         return errorResult("workflow: exactly one of name, scriptPath, or script is required", { owner: "workflows" });
+      if (valid.value.recoverInterrupted === true && valid.value.resumeFromRunId === undefined)
+        return errorResult("workflow: recoverInterrupted requires resumeFromRunId", { owner: "workflows" });
       if (valid.value.continuation !== undefined && valid.value.resumeFromRunId !== undefined) {
         return errorResult("workflow: continuation and resumeFromRunId are mutually exclusive", {
           owner: "workflows",
@@ -272,8 +328,12 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
           ...(valid.value.items !== undefined ? { items: valid.value.items } : {}),
           ...(valid.value.outputDir !== undefined ? { outputDir: valid.value.outputDir } : {}),
           ...(valid.value.runName !== undefined ? { runName: valid.value.runName } : {}),
+          ...(valid.value.budget === undefined ? {} : { budget: valid.value.budget }),
           ...(valid.value.continuation !== undefined ? { continuation: valid.value.continuation } : {}),
           ...(valid.value.resumeFromRunId !== undefined ? { resumeFromRunId: valid.value.resumeFromRunId } : {}),
+          ...(valid.value.recoverInterrupted === undefined
+            ? {}
+            : { recoverInterrupted: valid.value.recoverInterrupted }),
           // Same default as the command surface: in a headless (`print`/`json`)
           // host there is no operator to reach, so the mode is on unless the
           // caller explicitly passes `noOperator: false`.

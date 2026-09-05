@@ -7,6 +7,7 @@
  * so tests can mock createSession and prove the wiring.
  */
 
+import { createWorkflowReturnController } from "./workflow-return.js";
 import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import {
@@ -493,6 +494,12 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
             },
           })
         : undefined;
+    const returnController =
+      req.returnContract === undefined ? undefined : createWorkflowReturnController(req.returnContract);
+    const customTools = [
+      ...(askTool === undefined ? [] : [askTool]),
+      ...(returnController === undefined ? [] : [returnController.tool]),
+    ];
     const requestInput = {
       maxTurns,
       approvalTier,
@@ -509,7 +516,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // travel only through the injected `workflow_ask` when the stage declared
       // `ask: true`.
       additionalExcludeTools: ["ask"],
-      ...(askTool !== undefined ? { customTools: [askTool] } : {}),
+      ...(customTools.length === 0 ? {} : { customTools }),
+      ...(returnController === undefined ? {} : { responseAcceptance: returnController.acceptance }),
       ...(worktreePath !== undefined ? { workingDirectory: worktreePath } : {}),
       ...(options.args !== undefined || worktreePath !== undefined
         ? {
@@ -587,6 +595,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     const round = slotRowId !== undefined ? nextRound(roundByRowId, slotRowId) : undefined;
     const live: AgentSdkSessionExecutorOptions["live"] = {
       ...(req.label !== undefined ? { label: req.label } : {}),
+      ...(req.title !== undefined ? { title: req.title } : {}),
       ...(slotRowId !== undefined ? { rowId: slotRowId } : {}),
       ...(workflowParentRowId !== undefined ? { parentRowId: workflowParentRowId } : {}),
       ...(options.workflowRunId !== undefined ? { workflowRunId: options.workflowRunId } : {}),
@@ -807,6 +816,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // Carried, never re-derived: the host declared the cause where it was known.
       ...(boundary.failureCause !== undefined ? { failureCause: boundary.failureCause } : {}),
       ...(boundary.text !== undefined ? { text: boundary.text } : {}),
+      ...(boundary.outputAcceptance === undefined ? {} : { outputAcceptance: boundary.outputAcceptance }),
       diagnostics: [...(degradationConfirmed ? [tier.fallback!] : []), ...boundary.diagnostics, ...askNotes],
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
       ...resultIdentity,

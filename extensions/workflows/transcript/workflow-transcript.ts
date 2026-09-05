@@ -104,7 +104,7 @@ export function createWorkflowTranscript(
       // Capturing it here is what lets every replayed row name its source run
       // instead of the anonymous "a recorded run" the digest used to print.
       if (line.resumeFromRunId !== undefined && line.resumeFromRunId !== "") replaySourceRunId = line.resumeFromRunId;
-      if (line.kind === "phase") {
+      if (line.kind === "phase" && line.groupId === undefined) {
         const phase = (line.phase ?? "").trim();
         if (phase !== "") currentPhase = compactTranscriptText(phase);
         return;
@@ -468,8 +468,8 @@ function workflowAgentTranscriptDirectory(journal: readonly WorkflowJournalLine[
 
 /** Main status omits agent transport markers already represented by the fleet. */
 export function renderMainWorkflowStatus(line: WorkflowJournalLine): string | undefined {
-  if (line.kind === "phase") return `[phase] ${line.phase ?? ""}`;
-  if (line.kind === "agent_start") return undefined;
+  if (line.kind === "phase") return line.groupId === undefined ? `[phase] ${line.phase ?? ""}` : undefined;
+  if (line.kind === "agent_start" || line.kind === "agent_queued") return undefined;
   if (line.kind === "agent_end") {
     const warnings = line.evidenceWarnings?.filter((warning) => warning.trim() !== "") ?? [];
     if (warnings.length > 0) return `warning: ${warnings.join("; ")}`;
@@ -478,6 +478,10 @@ export function renderMainWorkflowStatus(line: WorkflowJournalLine): string | un
     return undefined;
   }
   if (line.kind === "log") {
+    if (line.choiceDecision !== undefined) {
+      const decision = line.choiceDecision;
+      return `[decision ${line.label ?? "agent"}] ${decision.value} (${decision.source}, ${decision.returnVia}${decision.attempts === undefined ? "" : `, ${decision.attempts} attempt(s)`})`;
+    }
     const label = line.source === "script" ? "script" : line.source === "runtime" ? "runtime" : "journal";
     return `[${label}] ${line.message ?? ""}`;
   }

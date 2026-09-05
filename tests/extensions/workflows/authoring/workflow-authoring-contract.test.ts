@@ -192,11 +192,11 @@ describe("design-first readable workflow authoring", () => {
     expect(storage).toContain("must never resolve to the same directory");
   });
 
-  it("checks every AUTHORING and installed-SKILL standard teaching fragment", () => {
+  it("checks canonical AUTHORING fragments while keeping the installed router code-free", () => {
     const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
     expect(authoring).toHaveLength(5);
-    expect(skill).toHaveLength(1);
+    expect(skill).toHaveLength(0); // Entrypoint routes to tested complete examples; it duplicates no harness.
 
     const fragments = [
       {
@@ -217,7 +217,6 @@ ${authoring[1] ?? ""}
         label: `AUTHORING complete snippet ${index + 1}`,
         source: snippet,
       })),
-      { label: "SKILL standard harness", source: standardSource(skill[0] ?? "") },
     ];
     for (const fragment of fragments) {
       expect(standardWorkflowSourceShapeErrors(fragment.source), fragment.label).toEqual([]);
@@ -225,11 +224,7 @@ ${authoring[1] ?? ""}
   });
 
   it("keeps unused acknowledgement protocols review-owned instead of parsing prompt English", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
+    for (const relativePath of ["extensions/workflows/AUTHORING.md", "extensions/workflows/REFERENCE.md"]) {
       const text = source(relativePath);
       expect(text).toMatch(/acknowledgement/iu);
       expect(text).toMatch(/review/iu);
@@ -484,195 +479,80 @@ ${authoring[1] ?? ""}
     );
   });
 
-  it("makes a raw request design-review-build and reserves design-only for explicit pauses", () => {
-    const author = source("skills/locus-pi-workflow-create/SKILL.md");
-    expect(author).toContain("This skill owns authoring only.");
-    expect(author).toContain("no package-provided catalog agent is required");
-    expect(author).toContain("A plain request to create, design, write, or author a workflow runs one visible");
-    expect(author).toContain("before any source");
-    expect(author).toMatch(/Stop\s+after the design only when the user explicitly asks/u);
-    expect(author).toMatch(/it does not run the new\s+workflow/u);
-    expect(author).toMatch(/material\s+(?:algorithm\s+)?(?:mismatch|change)/u);
-    expect(author).toMatch(/A `group-only`\s+namespace has no root source/u);
-    expect(author).toContain("Build does not run");
+  it("routes one continuous Design-review-Build process without copying the runtime manual", () => {
+    const router = source("skills/locus-pi-workflow-create/SKILL.md");
+    const design = source("skills/locus-pi-workflow-create/references/design-and-build.md");
+    expect(router).toContain("This skill owns authoring only.");
+    expect(router).toContain("references/design-and-build.md");
+    expect(router).toContain("AUTHORING.md#machine-enforced-standard-source-shape");
+    expect(router).toContain("REFERENCE.md");
+    expect(router).toContain("Build does not run");
+    expect(router).toContain("exact copyable launch command");
+    expect(router).toContain("/workflows run <name>");
+    expect(router.split("\n").length).toBeLessThan(100);
+    expect(design).toContain("before any source");
+    expect(design).toContain("## Entries");
+    expect(design).toContain("group-only");
+    expect(design).toContain("<name>/<child>");
+    expect(design).toContain("workflow_check_source");
+    expect(design).toContain("material algorithm mismatch");
   });
 
-  it("requires Build to return the exact copyable workflow launch command", () => {
-    const author = source("skills/locus-pi-workflow-create/SKILL.md");
-
-    expect(author).toContain("/workflows run <name>");
-    expect(author).toMatch(/exact\s+copyable launch command/u);
+  it("keeps source grammar, labels, output and failure authority in canonical references", () => {
+    const authoring = source("extensions/workflows/AUTHORING.md");
+    const manual = source("extensions/workflows/REFERENCE.md");
+    const output = source("extensions/workflows/references/output-acceptance.md");
+    expect(authoring).toContain("exact text");
+    expect(authoring).toContain("choice:");
+    expect(authoring).toContain("handoffs:");
+    expect(authoring).toContain("literal `label`");
+    expect(authoring).toContain("provenance");
+    expect(authoring).toContain("Markdown/table/report renderers");
+    expect(authoring).toContain("raw `schema`");
+    expect(authoring).toContain("dsl.items()");
+    expect(manual).toContain("10,000 physical attempts/run");
+    expect(manual).toContain("output-acceptance.md");
+    expect(manual).toContain("execution-controls.md");
+    expect(manual).toContain("recovery-and-continuation.md");
+    expect(output).toContain("returnVia");
+    expect(output).toContain("workflow_return");
+    expect(output).toContain("same");
+    expect(output).toContain("fallback");
   });
 
-  it("defines an optional runnable root or group-only direct child contract", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
-      const text = source(relativePath);
-      expect(text).toContain(".locus-pi/workflows/<name>/<name>.design.md");
-      expect(text).toContain("runnable root");
-      expect(text).toContain("group-only");
-      expect(text).toMatch(/<(?:name|root)>\/<child>/u);
-      expect(text).toMatch(/## Entries|`Entries` table/u);
-      expect(text).toMatch(/direct child|direct sibling/iu);
-    }
-  });
-
-  it("teaches exact text, choice, and handoffs as the standard answer forms", () => {
-    for (const relativePath of ["skills/locus-pi-workflow-create/SKILL.md", "extensions/workflows/AUTHORING.md"]) {
-      const text = source(relativePath);
-      expect(text).toContain("exact text");
-      expect(text).toContain("choice:");
-      expect(text).toContain("handoffs:");
-      expect(text).toMatch(/raw `schema`|Raw `schema`/u);
-      expect(text).toMatch(/advanced compatibility/u);
-    }
-  });
-
-  it("keeps the source graph visible and rejects hidden orchestration machinery", () => {
-    const author = source("skills/locus-pi-workflow-create/SKILL.md");
-    expect(author).toMatch(/Keep every prompt,\s+call, branch, and exact handoff visible where it executes/u);
-    expect(author).toMatch(/input splitting, JSON\/prose parsers/u);
-    expect(author).toContain("domain validators");
-    expect(author).toContain("Markdown/table/report renderers");
-    expect(author).toContain("hand-written retries");
-    expect(author).toContain("broad `try/catch`");
-    expect(author).toMatch(/wrappers or registries around `agent\(\)`/u);
-  });
-
-  it("keeps workflow-create examples orchestration-only", () => {
+  it("keeps workflow-create snippets free of file parsing and default fuse boilerplate", () => {
     const authoredDocs = [
       "skills/locus-pi-workflow-create/SKILL.md",
       ...readdirSync(path.join(root, "skills/locus-pi-workflow-create/references"))
         .filter((name) => name.endsWith(".md"))
         .map((name) => `skills/locus-pi-workflow-create/references/${name}`),
     ];
-    const forbiddenFileDslCalls =
-      /\b(?:consumeTextArtifact|continuationArtifacts|outputDir|projectRoot|promptFile|publishPrimaryFile|workspace|now|random)\s*\(/u;
-
     for (const relativePath of authoredDocs) {
       for (const snippet of javascriptDocSnippets(relativePath)) {
-        expect(snippet, relativePath).not.toMatch(forbiddenFileDslCalls);
+        expect(snippet, relativePath).not.toMatch(
+          /\b(?:consumeTextArtifact|projectRoot|promptFile|publishPrimaryFile|workspace|now|random)\s*\(/u,
+        );
+        expect(snippet, relativePath).not.toMatch(/\b(?:maxToolCalls|timeoutMs)\s*:/u);
       }
     }
-
-    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
-    expect(skill).toContain("Workflow source is orchestration only");
-    expect(skill).toContain('mode: "orchestration-only"');
-    expect(skill).toMatch(/Agents own interpretation, any source inspection requested by their prompt/u);
-  });
-
-  it("requires a unique literal agent label so a generated workflow can be repaired and continued", () => {
-    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
-    expect(skill).toContain("Every `agent()` call declares a literal `label`, and no two calls in one file\nshare one");
-    // The rule is only worth writing if the author is told what it buys and what
-    // breaks without it, so the generated workflow is not merely compliant.
-    expect(skill).toContain("addresses a completed call by its `phase`, `label`, and occurrence");
-    expect(skill).toContain("Both cases fail the strict source check");
-  });
-
-  it("keeps semantic input out of hidden branch protocols", () => {
-    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
-    const card = source("skills/locus-pi-workflow-create/references/fixed-fan-out.md");
-    expect(skill).toContain("does not encode a hidden");
-    expect(skill).toContain("`split`, regex-match, or parse");
+    const card = source("skills/locus-pi-workflow-create/references/fixed-graph.md");
     expect(card).toContain("author-known");
-    expect(card).toContain("Do not encode them as newline/CSV/JSON");
+    expect(card).toContain("do not encode them as newline/CSV/JSON");
+    const human = source("skills/locus-pi-workflow-create/references/human-continuation.md");
+    expect(human).toContain("integration/compatibility");
+    expect(human).toContain("Do not label that example standard");
   });
 
-  it("teaches native caller items as one exact list source for the existing pipeline", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-      "extensions/workflows/references/patterns.md",
-    ]) {
-      const text = source(relativePath);
-      expect(text).toContain("dsl.items()");
-      expect(text).toContain("pipeline");
-    }
-    const authoring = source("extensions/workflows/AUTHORING.md");
-    expect(authoring).toContain("author-known array");
-    expect(authoring).toContain("agent({ handoffs })");
-    expect(authoring).toContain("requires at least one work item");
-    expect(authoring).not.toContain("requires at least one caller-supplied item");
-    expect(authoring).not.toContain("[...items]");
-    expect(source("extensions/workflows/REFERENCE.md")).toContain("10,000 physical attempts/run");
-  });
-
-  it("omits default per-attempt fuse fields from standard authoring output", () => {
-    const standardSnippets = [
-      "extensions/workflows/AUTHORING.md",
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/REFERENCE.md",
-    ].flatMap((relativePath) => declaredStandardDocSnippets(relativePath));
-
-    for (const snippet of standardSnippets) {
-      expect(snippet).not.toMatch(/\b(?:maxToolCalls|timeoutMs)\s*:/u);
-    }
-
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
-      const text = source(relativePath);
-      expect(text).toMatch(/omit(?:s)? `maxToolCalls` and `timeoutMs`/iu);
-      expect(text).toMatch(/operator explicitly request/u);
-      expect(text).toMatch(/narrower\s+or\s+raised/u);
-    }
-
-    expect(source("extensions/workflows/references/patterns.md")).not.toMatch(/\b(?:maxToolCalls|timeoutMs)\s*:/u);
-  });
-
-  it("uses design-derived handoff bounds instead of a magic authoring limit", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/SKILL.md",
-      "skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
-      const text = source(relativePath);
-      expect(text).not.toMatch(/maxItems\s*:\s*64/u);
-      expect(text).toContain("MAX_DAGS_IN_SCOPE");
-      expect(text).toMatch(/transport safety|protects one\s+structured/u);
-      expect(text).toMatch(/not\s+a default business limit/u);
-      expect(text).toMatch(/1\.\.100|1–100/u);
-      expect(text).toMatch(/one\s+repair|repairs\s+one/u);
-      expect(text).toMatch(/fail(?:s|ure)?[- ]closed/u);
-    }
-  });
-
-  it("links canonical agent, authority, event, and human-unit budget semantics", () => {
-    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
+  it("keeps unchanged defaults and legacy handoff limits in the runtime owner, not the router", () => {
     const manual = source("extensions/workflows/REFERENCE.md");
-    const agentsManual = source("extensions/agents/README.md");
-
-    expect(manual).toContain('agent("Apply the bounded edit.", { agent: "my-project-worker" })');
-    expect(manual).toContain("project/user catalog name");
-    expect(manual).toContain("`~/.agents/agents/`");
-    expect(manual).toContain("The package ships no agent profiles");
-    expect(manual).toContain("full host-exposed tool surface");
-    expect(manual).toContain("is not authorization");
-    expect(manual).toContain("presentation metadata");
-    expect(manual).toMatch(/`phase\(\)` is the\s+call that journals actual execution/u);
-    expect(manual).toContain("one readable script event");
-    for (const text of [skill, manual]) {
-      expect(text).toMatch(/1,000 (?:tool )?calls/u);
-      expect(text).toMatch(/24-hour/u);
-      expect(text).toMatch(/20 turns/u);
-      expect(text).toMatch(/500,000\s+(?:answer\s+)?characters/u);
-      expect(text).toMatch(/10,000\s+physical attempts/u);
-      expect(text).toMatch(/four attempts concurrently|concurrency four|4 attempts at once/u);
-      expect(text).toMatch(
-        /Review.*retry attempts consume|reviewer.*retry.*consume|review.*transport-retry.*consume/isu,
-      );
-      expect(text).toMatch(/SDK timeout.*later transport backstop/isu);
-    }
-    expect(agentsManual).toContain("project -> user precedence");
-    expect(manual).toContain("no Locus items count or character policy");
+    expect(manual).toContain("MAX_DAGS_IN_SCOPE");
+    expect(manual).toMatch(/1\.\.100|1–100/u);
+    expect(manual).toMatch(/1,000 (?:tool )?calls/u);
+    expect(manual).toMatch(/24-hour/u);
+    expect(manual).toMatch(/20 turns/u);
+    expect(manual).toMatch(/500,000\s+(?:answer\s+)?characters/u);
+    expect(manual).toMatch(/SDK timeout.*later transport backstop/isu);
+    expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain("10,000");
   });
 
   it("keeps ordered stages separate from the caller-item inline mini-workflow pattern", () => {
@@ -690,65 +570,39 @@ ${authoring[1] ?? ""}
     expect(callerItems).toContain("requires caller-supplied items");
   });
 
-  it("ships compact progressive-disclosure cards with the required decision facts", () => {
-    const referencesDir = path.join(root, "skills/locus-pi-workflow-create/references");
-    const cards = readdirSync(referencesDir)
-      .filter((name) => name.endsWith(".md") && name !== "INDEX.md")
-      .sort();
-    expect(cards).toEqual([
-      "bounded-candidate-search.md",
-      "bounded-review-loop.md",
-      "dynamic-orchestrator-workers.md",
-      "fixed-fan-out.md",
-      "human-gate.md",
-      "sequential-text.md",
-    ]);
+  it("ships four pattern cards and keeps legacy names as redirects, not conflicting recipes", () => {
+    const base = "skills/locus-pi-workflow-create/references";
+    const cards = ["fixed-graph.md", "bounded-refinement.md", "decomposition.md", "human-continuation.md"];
+    const index = source(`${base}/INDEX.md`);
     for (const name of cards) {
-      const text = source(`skills/locus-pi-workflow-create/references/${name}`);
-      expect(text).toMatch(/Use |Use this card/u);
-      expect(text).toMatch(/Avoid |Allowed redesigns/u);
-      expect(text).toContain("Graph");
-      expect(text).toContain("Cost");
-      expect(text).toContain("Handoff");
-      expect(text).toContain("Failure");
-      expect(text).toMatch(/Primitive|Required primitives/u);
+      expect(index).toContain(name);
+      const text = source(`${base}/${name}`);
+      for (const word of ["Use", "Avoid", "Graph", "Cost", "Handoff", "Failure", "Primitives"])
+        expect(text, name).toContain(word);
+      expect(text).toContain(".workflow.mjs");
+    }
+    for (const name of [
+      "sequential-text",
+      "fixed-fan-out",
+      "bounded-review-loop",
+      "bounded-candidate-search",
+      "dynamic-orchestrator-workers",
+      "human-gate",
+    ]) {
+      const text = source(`${base}/${name}.md`);
+      expect(text.split("\n").length).toBeLessThan(12);
+      expect(text).not.toContain("```js");
     }
   });
 
-  it("teaches bounded dynamic handoffs without manufacturing a recursive manager", () => {
-    const card = source("skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md");
+  it("distinguishes recorded discovery replay from unsafe rediscovered checkpoint identity", () => {
+    const card = source("skills/locus-pi-workflow-create/references/decomposition.md");
     expect(card).toContain("agent({ handoffs })");
     expect(card).toContain("complete non-blank unique text unit");
-    expect(card).toContain("child `spawn_agent`/`task`, which remains unavailable");
-    expect(card).toContain("intentionally non-resumable");
-    expect(card).toContain("separate caller");
-    expect(card).toContain("Never derive resumable positional");
-  });
-
-  it("keeps file-oriented compatibility documented outside generated workflow examples", () => {
-    for (const relativePath of ["extensions/workflows/AUTHORING.md", "extensions/workflows/REFERENCE.md"]) {
-      const text = source(relativePath);
-      expect(text).toContain("invokeWorkflow");
-      expect(text).toContain("publishPrimaryFile");
-      expect(text).toContain("outputDir");
-      expect(text).toContain('profile: "standard"');
-    }
-    const skill = source("skills/locus-pi-workflow-create/SKILL.md");
-    expect(skill).toContain("orchestration-only subset");
-    expect(skill).toMatch(/Do not generate `consumeTextArtifact`/u);
-  });
-
-  it("keeps fresh model discovery outside resumable positional checkpointing", () => {
-    for (const relativePath of [
-      "skills/locus-pi-workflow-create/references/dynamic-orchestrator-workers.md",
-      "extensions/workflows/AUTHORING.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
-      const text = source(relativePath);
-      expect(text).toMatch(/fresh model (?:output|discovery)/iu);
-      expect(text).toMatch(/Never\s+derive\s+resumable\s+positional/iu);
-      expect(text).toMatch(/exact same|exact list and ordering|frozen/iu);
-    }
+    expect(card).toContain("prefix");
+    expect(card).toContain("keys");
+    expect(card).not.toContain("intentionally non-resumable");
+    expect(source("extensions/workflows/AUTHORING.md")).toContain("Never derive resumable positional");
   });
 
   it("classifies every existing Package registry entry", () => {
@@ -1730,12 +1584,16 @@ ${authoring[1] ?? ""}
     expect(standardWorkflowSourceShapeErrors(text)).not.toEqual([]);
   });
 
-  it("reviews every paid bounded-loop revision and reports truthful call cost", () => {
-    const card = source("skills/locus-pi-workflow-create/references/bounded-review-loop.md");
-    expect(card).toContain("maximum\nis `1 + 2R + (R - 1) = 3R` calls");
-    expect(card).toContain("every paid revision is reviewed");
-    expect(card.indexOf("if (round === MAX_REVIEWS) break;")).toBeLessThan(
-      card.indexOf("document = await agent(`Return a complete revision"),
-    );
+  it("reviews every paid revision and reports cap/no-progress without a final unreviewed worker", () => {
+    const card = source("skills/locus-pi-workflow-create/references/bounded-refinement.md");
+    const example = source("extensions/workflows/references/examples/refinement.workflow.mjs");
+    expect(card).toContain("3R");
+    expect(card).toContain("cap/no-progress");
+    expect(card).toContain("returnVia");
+    expect(example).toContain('summary: "round_cap"');
+    expect(example).toContain('summary: "no_progress"');
+    expect(example.indexOf('label: "worker"')).toBeLessThan(example.indexOf('label: "reviewer"'));
+    expect(example.indexOf('label: "reviewer"')).toBeLessThan(example.indexOf('route === "complete"'));
+    expect((example.match(/label: "worker"/gu) ?? []).length).toBe(1);
   });
 });

@@ -10,6 +10,15 @@
 // Public types
 // ---------------------------------------------------------------------------
 
+import {
+  normalizeWorkflowReturnContract,
+  workflowReturnInstructions,
+  workflowReturnValueError,
+  type WorkflowReturnContract,
+  type WorkflowStringOutput,
+  type WorkflowOutputRepair,
+} from "./workflow-return.js";
+import type { AgentOutputAcceptance } from "../../_shared/agent-runtime/agent-runner.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DEFAULT_WORKFLOW_BUDGET,
@@ -275,6 +284,8 @@ interface WorkflowFusionPreparation {
 }
 
 export interface WorkflowAgentRequest {
+  /** Host-owned immutable contract; only the bridge injects its return tool. */
+  returnContract?: WorkflowReturnContract;
   prompt: string;
   executionMode?: "bare" | "named";
   agent?: string | undefined; // project/user catalog name; absent in bare mode
@@ -301,6 +312,10 @@ export interface WorkflowAgentRequest {
    *  uses for its own child deadline, which is why it is a budget axis and not a detail. */
   maxTurns?: number;
   label?: string;
+  /** Human display only; not a callsite or replay identity. */
+  title?: string;
+  /** Runtime-owned business path from keyed parallel groups. */
+  itemPath?: readonly string[];
   phase?: string;
   /** @deprecated use permissionMode / workspaceMode (P2-2) — this field remains a compatible alias; worktree isolation only, not a security boundary */
   sandbox?: "read-only" | "workspace-write";
@@ -317,6 +332,7 @@ export interface WorkflowAgentRequest {
 }
 
 export interface WorkflowAgentResult {
+  outputAcceptance?: AgentOutputAcceptance;
   ok: boolean; // true when status === "completed"
   status: "completed" | "failed" | "cancelled" | "blocked";
   summary: string;
@@ -332,6 +348,8 @@ export interface WorkflowAgentResult {
   /** Session-scoped petname from the live execution row; additive to durable `agent`. */
   displayName?: string;
   label?: string;
+  title?: string;
+  itemPath?: readonly string[];
   childSessionId?: string;
   childTrace?: WorkflowAgentChildTrace;
   resultArtifact?: string;
@@ -445,7 +463,7 @@ export interface WorkflowDsl {
   /** Caller-supplied exact text work units as an immutable snapshot. */
   items(): readonly string[];
   /** Run independent branches behind one fail-closed barrier and preserve input order. */
-  parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]>;
+  parallel<T>(thunks: Array<() => Promise<T>>, options?: WorkflowParallelOptions): Promise<T[]>;
   /** Run ordered stages for every item; a failed item stops before its later stages. */
   pipeline<T>(items: readonly T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]>;
   /** Change the current reader-visible stage and append a phase line to the run journal. */
@@ -499,6 +517,10 @@ export interface WorkflowSavedChildResult {
 export type WorkflowSavedChildRunner = (input: WorkflowSavedChildInvocation) => Promise<WorkflowSavedChildResult>;
 
 export interface WorkflowAgentOptions {
+  /** Opt-in accepted tool value. Ordinary exact text and legacy schema repair are unchanged. */
+  returnVia?: "tool";
+  output?: WorkflowStringOutput;
+  repair?: WorkflowOutputRepair;
   agent?: string; // project/user catalog name; omit for a clean child session
   /** @deprecated ignored; workflow children always receive all tools and can write. */
   readOnly?: true;
@@ -570,6 +592,8 @@ export interface WorkflowAgentOptions {
    */
   attempts?: number;
   label?: string;
+  /** Human display only; use a literal label for callsite identity. */
+  title?: string;
   /** Logical name for the exact returned answer in the run artifact index. */
   artifact?: string;
   phase?: string;
@@ -664,6 +688,7 @@ type WorkflowAgentAnyOptions =
 const FUSION_INVOCATION_RESERVATION = Symbol("fusion-invocation-reservation");
 const FUSION_REPLAY_REQUIRED = Symbol("fusion-replay-required");
 const FUSION_CAPABILITY_MODE = Symbol("fusion-capability-mode");
+const WORKFLOW_RETURN_CONTRACT = Symbol("workflow-return-contract");
 
 interface WorkflowInvocationReservation {
   remaining: number;
@@ -671,6 +696,7 @@ interface WorkflowInvocationReservation {
 }
 
 type WorkflowInternalAgentOptions = WorkflowAgentAnyOptions & {
+  [WORKFLOW_RETURN_CONTRACT]?: WorkflowReturnContract;
   [FUSION_INVOCATION_RESERVATION]?: WorkflowInvocationReservation;
   [FUSION_REPLAY_REQUIRED]?: true;
   [FUSION_CAPABILITY_MODE]?: WorkflowFusionMode;
@@ -680,9 +706,20 @@ export type WorkflowStage<T> = (item: T, index: number) => Promise<unknown>;
 
 export type WorkflowGroupKind = "parallel" | "pipeline";
 
+/** Bounds branch wrappers, never the global leaf-agent gate. Keys are declared before any branch starts. */
+export interface WorkflowParallelOptions {
+  concurrency?: number;
+  title?: string;
+  keys?: readonly string[];
+}
+
 interface WorkflowGroupContext {
   readonly group: { id: string; kind: WorkflowGroupKind; label: string };
   readonly member?: WorkflowAgentRowOccurrence;
+  /** Branch-local phase changes never leak into sibling branches or their parent. */
+  phase: string | undefined;
+  readonly memberPath: readonly string[];
+  readonly hasBusinessKeys: boolean;
 }
 
 export interface WorkflowBranchFailure {
@@ -802,10 +839,20 @@ export interface WorkflowJournalSink {
   write(line: WorkflowJournalLine): void; // sync append; never throws into the DSL
 }
 
+export interface WorkflowChoiceDecision {
+  value: string;
+  source: "validated" | "fallback";
+  returnVia: "text" | "tool";
+  attempts?: number;
+  reason?: "output-contract-exhausted";
+}
+
 export interface WorkflowJournalLine {
+  outputAcceptance?: AgentOutputAcceptance;
+  choiceDecision?: WorkflowChoiceDecision;
   ts: string;
   runId: string;
-  kind: "phase" | "log" | "group_start" | "group_end" | "agent_start" | "agent_end" | "error";
+  kind: "phase" | "log" | "group_start" | "group_end" | "agent_queued" | "agent_start" | "agent_end" | "error";
   /** Provenance for log lines. Absent means legacy/unknown and must not be inferred. */
   source?: "script" | "runtime";
   phase?: string;
@@ -813,6 +860,8 @@ export interface WorkflowJournalLine {
   groupId?: string;
   groupKind?: "parallel" | "pipeline";
   groupLabel?: string;
+  parentGroupId?: string;
+  groupKeys?: readonly string[];
   groupTotal?: number;
   groupCompleted?: number;
   groupFailed?: number;
@@ -824,6 +873,8 @@ export interface WorkflowJournalLine {
   /** Host-enforced read-only capability boundary for this child. */
   readOnly?: boolean;
   label?: string;
+  title?: string;
+  itemPath?: readonly string[];
   /** Runtime-owned stable identity for this concrete child attempt. */
   callId?: string;
   answerArtifact?: WorkflowArtifactRef;
@@ -1038,10 +1089,10 @@ export function snapshotWorkflowItems(value: unknown, field = "workflow items"):
  */
 const SCHEDULER_WIDTH = 4;
 
-async function runScheduled<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
+async function runScheduled<T>(thunks: Array<() => Promise<T>>, width = SCHEDULER_WIDTH): Promise<T[]> {
   const out: T[] = new Array(thunks.length);
   let next = 0;
-  const workerCount = Math.min(SCHEDULER_WIDTH, thunks.length);
+  const workerCount = Math.min(width, thunks.length);
   // SCHEDULER_WIDTH bounds width PER runScheduled call, not globally.
   // Nested orchestration wrappers create their OWN pool, so nested dsl.agent()
   // inside a parallel() wrapper does NOT deadlock against leaf agent slots.
@@ -1055,6 +1106,37 @@ async function runScheduled<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
   }
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return out;
+}
+
+function assertWorkflowDisplayTitle(value: unknown, field: string): asserts value is string {
+  if (typeof value !== "string" || value.trim() === "" || value.length > 240 || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new Error(`${field} must be non-blank text of at most 240 characters without control characters`);
+  }
+}
+
+function normalizeWorkflowParallelOptions(
+  value: WorkflowParallelOptions | undefined,
+  count: number,
+): WorkflowParallelOptions {
+  if (value === undefined) return {};
+  if (!isRecord(value) || Object.keys(value).some((key) => !["concurrency", "title", "keys"].includes(key))) {
+    throw new Error("parallel options accept only concurrency, title, and keys");
+  }
+  if (
+    value.concurrency !== undefined &&
+    (typeof value.concurrency !== "number" || !Number.isSafeInteger(value.concurrency) || value.concurrency < 1)
+  ) {
+    throw new Error("parallel concurrency must be a positive safe integer");
+  }
+  if (value.title !== undefined) assertWorkflowDisplayTitle(value.title, "parallel title");
+  if (value.keys !== undefined) {
+    if (!Array.isArray(value.keys) || value.keys.length !== count)
+      throw new Error("parallel keys must name every branch exactly once");
+    for (const key of value.keys) assertWorkflowDisplayTitle(key, "parallel key");
+    if (new Set(value.keys).size !== value.keys.length)
+      throw new Error("parallel keys must be unique within the group");
+  }
+  return { ...value, ...(value.keys === undefined ? {} : { keys: [...value.keys] }) };
 }
 
 interface AgentConcurrencyGate {
@@ -1285,6 +1367,26 @@ function normalizeAgentAttempts(attempts: number | undefined): number {
     throw new Error(`agent attempts must be a safe integer between 1 and ${MAX_AGENT_TRANSPORT_ATTEMPTS}`);
   }
   return attempts;
+}
+
+/**
+ * Options refused by same-session output acceptance.
+ *
+ * Declared beside the transport budget rather than inside the shaped call, so the
+ * shape path keeps reading no transport option at all: this REFUSES `attempts`, it
+ * never spends it, and one clarification session is not a second physical child.
+ */
+function assertWorkflowToolReturnOptions(options: WorkflowAgentAnyOptions): void {
+  const { schema, validate, handoffs, attempts } = options as {
+    schema?: unknown;
+    validate?: unknown;
+    handoffs?: unknown;
+    attempts?: number;
+  };
+  if (schema !== undefined || validate !== undefined || handoffs !== undefined)
+    throw new Error("returnVia: tool supports choice or string output, not raw schema, validate, or handoffs");
+  if ((attempts ?? 1) !== 1)
+    throw new Error("returnVia: tool does not combine output clarification with transport retries");
 }
 
 /**
@@ -2027,6 +2129,9 @@ interface AgentSchemaCheck {
 /** Result of ONE child execution: the exact child text plus, for a shaped call, its verdict. */
 interface AgentAttemptOutcome {
   text: string;
+  callId: string;
+  replayed: boolean;
+  outputAcceptance?: AgentOutputAcceptance;
   schemaCheck?: AgentSchemaCheck;
 }
 
@@ -2551,6 +2656,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   let insideValidate = false;
   let groupCounter = 0;
   const groupContext = new AsyncLocalStorage<WorkflowGroupContext>();
+  const currentPhase = (): string | undefined => {
+    const context = groupContext.getStore();
+    return context === undefined ? _currentPhase : context.phase;
+  };
 
   function emit(line: WorkflowJournalLine): void {
     journalMirror.push(line);
@@ -2585,7 +2694,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         kind: "log",
         source: "runtime",
         message: formatWorkflowBudgetRaise({ axis, applied, requested }, "call"),
-        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+        ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
       });
     }
   }
@@ -2616,7 +2725,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (opts?.workspaceHandle !== undefined && options.workspaceManager === undefined) {
       throw new Error("workflow workspace manager is not configured");
     }
-    const effectivePhase = opts?.phase ?? _currentPhase;
+    const effectivePhase = opts?.phase ?? currentPhase();
+    if (opts?.title !== undefined) assertWorkflowDisplayTitle(opts.title, "agent title");
+    const groupScope = groupContext.getStore();
+    const itemPath = groupScope?.hasBusinessKeys === true ? [...groupScope.memberPath] : undefined;
     const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls ?? defaultMaxToolCalls, "agent maxToolCalls");
     // Resolved here rather than at the check site below, so a call that declares
     // NOTHING is held to the run's bound. Gating the check on `opts.maxAnswerChars`
@@ -2660,6 +2772,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
             };
     const req: WorkflowAgentRequest = {
       prompt,
+      ...(opts?.title === undefined ? {} : { title: opts.title }),
+      ...(itemPath === undefined ? {} : { itemPath }),
+      ...(opts?.[WORKFLOW_RETURN_CONTRACT] === undefined ? {} : { returnContract: opts[WORKFLOW_RETURN_CONTRACT] }),
       executionMode: agentName === undefined ? "bare" : "named",
       ...(agentName === undefined ? {} : { agent: agentName }),
       tools: ["*"],
@@ -2826,32 +2941,36 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     const req: WorkflowAgentRequest = { ...input.req, callId };
     const replayed = replayedText !== undefined;
     const requestedLiveModel = liveModelFromSelector(req.model);
-    emit({
-      ts: nowFn(),
-      runId,
-      kind: "agent_start",
-      ...workflowExecutionIdentity(req),
-      ...(replayed ? { replayed: true } : {}),
-      ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
-      permissionMode,
-      workspaceMode,
-      ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
-      ...activeGroupFields(),
-      // Both facts, neither fabricated: `model` keeps its documented live-row display
-      // meaning for existing readers, `requestedModel` says out loud that at this point
-      // in the run the value is a request and nothing has executed yet.
-      ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
-      ...(requestedLiveModel?.model !== undefined ? { requestedModel: requestedLiveModel.model } : {}),
-      ...(req.modelRole !== undefined ? { modelRole: req.modelRole } : {}),
-      ...(req.requireModelRole === true ? { requireModelRole: true } : {}),
-      ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
-      ...(req.label !== undefined ? { label: req.label } : {}),
-      callId,
-      ...attemptFields,
-      ...(req.phase !== undefined ? { phase: req.phase } : {}),
-      // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
-      ...(req.workflowSlot !== undefined ? { slotKey: req.workflowSlot.key } : {}),
-    });
+    const emitAdmission = (kind: "agent_queued" | "agent_start"): void =>
+      emit({
+        ts: nowFn(),
+        runId,
+        kind,
+        ...workflowExecutionIdentity(req),
+        ...(replayed ? { replayed: true } : {}),
+        ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
+        permissionMode,
+        workspaceMode,
+        ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
+        ...activeGroupFields(),
+        // Both facts, neither fabricated: `model` keeps its documented live-row display
+        // meaning for existing readers, `requestedModel` says out loud that at this point
+        // in the run the value is a request and nothing has executed yet.
+        ...(requestedLiveModel?.model !== undefined ? { model: requestedLiveModel.model } : {}),
+        ...(requestedLiveModel?.model !== undefined ? { requestedModel: requestedLiveModel.model } : {}),
+        ...(req.modelRole !== undefined ? { modelRole: req.modelRole } : {}),
+        ...(req.requireModelRole === true ? { requireModelRole: true } : {}),
+        ...(requestedLiveModel?.thinking !== undefined ? { thinking: requestedLiveModel.thinking } : {}),
+        ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(req.title !== undefined ? { title: req.title } : {}),
+        ...(req.itemPath !== undefined ? { itemPath: req.itemPath } : {}),
+        callId,
+        ...attemptFields,
+        ...(req.phase !== undefined ? { phase: req.phase } : {}),
+        // Slot descriptor for round correlation (REQ-009); only labelled agents anchor a slot.
+        ...(req.workflowSlot !== undefined ? { slotKey: req.workflowSlot.key } : {}),
+      });
+    emitAdmission(replayed ? "agent_start" : "agent_queued");
     let executionStartedAtMs = Date.now();
     let finalResult: WorkflowAgentResult;
     if (replayedText !== undefined) {
@@ -2868,6 +2987,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         permissionMode,
         workspaceMode,
         ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(req.title !== undefined ? { title: req.title } : {}),
+        ...(req.itemPath !== undefined ? { itemPath: req.itemPath } : {}),
       };
     } else {
       try {
@@ -2877,6 +2998,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
             try {
               executionStartedAtMs = Date.now();
               sharedExecution.assertDeadline();
+              emitAdmission("agent_start");
               return await agentRunner(req);
             } finally {
               sharedExecution.releaseAgent();
@@ -2907,6 +3029,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
           ...attemptFields,
           ...(req.label !== undefined ? { label: req.label } : {}),
+          ...(req.title !== undefined ? { title: req.title } : {}),
+          ...(req.itemPath !== undefined ? { itemPath: req.itemPath } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
           ...(thrownCause !== undefined ? { failureCause: thrownCause } : {}),
           message: err instanceof Error ? err.message : String(err),
@@ -2914,6 +3038,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         });
         throw err;
       }
+    }
+    if (
+      !replayed &&
+      req.returnContract !== undefined &&
+      finalResult.ok &&
+      finalResult.status === "completed" &&
+      finalResult.outputAcceptance?.source !== "tool"
+    ) {
+      finalResult = {
+        ...finalResult,
+        ok: false,
+        status: "failed",
+        failureCause: "output-contract-unavailable",
+        summary: "Runner returned no accepted workflow tool receipt",
+      };
     }
     if (opts?.sandbox !== undefined) {
       finalResult.diagnostics = finalResult.diagnostics ?? [];
@@ -2981,6 +3120,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           ...attemptFields,
           replayed,
           ...(req.label !== undefined ? { label: req.label } : {}),
+          ...(req.title !== undefined ? { title: req.title } : {}),
+          ...(req.itemPath !== undefined ? { itemPath: req.itemPath } : {}),
           ...(req.phase !== undefined ? { phase: req.phase } : {}),
           ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
           ...executedModelEvidence(finalResult),
@@ -3038,6 +3179,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ...attemptFields,
         replayed,
         ...(req.label !== undefined ? { label: req.label } : {}),
+        ...(req.title !== undefined ? { title: req.title } : {}),
+        ...(req.itemPath !== undefined ? { itemPath: req.itemPath } : {}),
         ...(req.phase !== undefined ? { phase: req.phase } : {}),
         ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
         // The call already HAD a classification when adoption failed — this record is the
@@ -3069,6 +3212,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.status !== "completed" ? { failureCause: workflowAgentFailureCause(finalResult) } : {}),
       // Shape verdict for THIS attempt; absent on every call that declared no schema.
       ...(schemaCheck !== undefined ? { schemaValidation: schemaCheck.validation } : {}),
+      ...(finalResult.outputAcceptance === undefined ? {} : { outputAcceptance: finalResult.outputAcceptance }),
       permissionMode: finalResult.permissionMode ?? permissionMode,
       workspaceMode: finalResult.workspaceMode ?? workspaceMode,
       ...activeGroupFields(),
@@ -3090,6 +3234,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(artifactEvidence?.result !== undefined ? { resultEnvelopeArtifact: artifactEvidence.result } : {}),
       ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
       ...(req.label !== undefined ? { label: req.label } : {}),
+      ...(req.title !== undefined ? { title: req.title } : {}),
+      ...(req.itemPath !== undefined ? { itemPath: req.itemPath } : {}),
       ...(req.phase !== undefined ? { phase: req.phase } : {}),
       // Round record for the drill submenu (REQ-009): (slotKey,round,usage) from the bridge.
       // Absent on old journals ⇒ read side treats the run as no-rounds (submenu hidden).
@@ -3105,7 +3251,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return {
       ok: true,
       text: finalResult.text,
-      outcome: { text: finalResult.text, ...(schemaCheck !== undefined ? { schemaCheck } : {}) },
+      outcome: {
+        text: finalResult.text,
+        callId,
+        replayed,
+        ...(finalResult.outputAcceptance === undefined ? {} : { outputAcceptance: finalResult.outputAcceptance }),
+        ...(schemaCheck !== undefined ? { schemaCheck } : {}),
+      },
     };
   }
 
@@ -3139,13 +3291,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "log",
       source: "runtime",
       message: `[fusion:start] ${fusionId} mode=${fusion.mode} context=${fusion.contextMode} strategy=${fusion.strategy} members=${fusion.members.length} judge=${fusion.judge.key}`,
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
     try {
       options.artifactPorts?.publishText(
         `${fusionId}-packet.md`,
         workflowFusionPacket(fusionId, fusion),
-        _currentPhase,
+        currentPhase(),
       );
 
       const answers = await parallel(
@@ -3196,7 +3348,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         kind: "log",
         source: "runtime",
         message: `[fusion:end] ${fusionId} status=completed`,
-        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+        ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
       });
       return result;
     } catch (error) {
@@ -3206,7 +3358,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         kind: "log",
         source: "runtime",
         message: `[fusion:end] ${fusionId} status=failed`,
-        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+        ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
       });
       throw error;
     }
@@ -3296,6 +3448,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     const declaredChoiceFallback = opts?.choiceFallback;
     const declaredHandoffs = opts?.handoffs;
     const declaredValidate = opts?.validate;
+    if (opts?.returnVia !== undefined && opts.returnVia !== "tool")
+      throw new Error("agent returnVia must be tool when supplied");
+    if (opts?.returnVia === "tool") return runToolReturningAgent(prompt, opts);
+    if (opts?.output !== undefined || opts?.repair !== undefined)
+      throw new Error("agent output and repair require returnVia: tool");
     if (declaredChoice === undefined && declaredChoiceFallback !== undefined) {
       throw new Error("agent choiceFallback requires choice");
     }
@@ -3307,10 +3464,12 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       const choiceFallback = normalizeAgentChoiceFallback(declaredChoiceFallback, choices);
       const { choice: _choice, choiceFallback: _choiceFallback, ...baseOptions } = opts as WorkflowAgentChoiceOptions;
       try {
-        return await agentDsl(prompt, {
+        const value = await agentDsl(prompt, {
           ...baseOptions,
           schema: { type: "string", enum: [...choices] },
         });
+        recordChoiceDecision(opts, { value: value as string, source: "validated", returnVia: "text" });
+        return value;
       } catch (error) {
         if (choiceFallback === undefined || !(error instanceof SchemaValidationError)) throw error;
         emit({
@@ -3319,7 +3478,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           kind: "log",
           source: "runtime",
           message: `choice fallback ${JSON.stringify(choiceFallback)} selected after ${error.attempts} schema mismatch attempts: ${error.errors.join("; ")}`,
-          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+          ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
+        });
+        recordChoiceDecision(opts, {
+          value: choiceFallback,
+          source: "fallback",
+          returnVia: "text",
+          attempts: error.attempts,
+          reason: "output-contract-exhausted",
         });
         return choiceFallback;
       }
@@ -3388,8 +3554,99 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     throw new SchemaValidationError(lastErrors, maxAttempts);
   }
 
-  async function parallel<T>(thunks: Array<() => Promise<T>>): Promise<T[]> {
-    return runGrouped("parallel", thunks.length, () => runGroupBranches("parallel", thunks));
+  function recordChoiceDecision(
+    opts: WorkflowAgentAnyOptions | undefined,
+    decision: WorkflowChoiceDecision,
+    callId?: string,
+  ): void {
+    const context = groupContext.getStore();
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: "[workflow:choice]",
+      choiceDecision: decision,
+      ...(opts?.label === undefined ? {} : { label: opts.label }),
+      ...(callId === undefined ? {} : { callId }),
+      ...(currentPhase() === undefined ? {} : { phase: currentPhase()! }),
+      ...activeGroupFields(),
+      ...(context?.hasBusinessKeys ? { itemPath: [...context.memberPath] } : {}),
+    });
+  }
+
+  async function runToolReturningAgent(prompt: string, opts: WorkflowAgentAnyOptions): Promise<string> {
+    assertWorkflowToolReturnOptions(opts);
+    const choices = opts.choice === undefined ? undefined : normalizeAgentChoices(opts.choice);
+    if (choices === undefined && opts.choiceFallback !== undefined)
+      throw new Error("agent choiceFallback requires choice");
+    const fallback = choices === undefined ? undefined : normalizeAgentChoiceFallback(opts.choiceFallback, choices);
+    const contract = normalizeWorkflowReturnContract({
+      ...(choices === undefined ? {} : { choices }),
+      ...(opts.output === undefined ? {} : { output: opts.output }),
+      ...(opts.repair === undefined ? {} : { repair: opts.repair }),
+    });
+    try {
+      const outcome = await runAgentAttempt(
+        `${prompt}\n\n${workflowReturnInstructions(contract)}`,
+        { ...opts, [WORKFLOW_RETURN_CONTRACT]: contract },
+        (text) => {
+          let value: unknown;
+          try {
+            value = JSON.parse(text);
+          } catch {
+            return {
+              validation: { status: "mismatch", attempts: 1, errors: ["accepted output is not canonical JSON"] },
+            };
+          }
+          const error = workflowReturnValueError(value, contract);
+          return error === undefined
+            ? { value, validation: { status: "valid", attempts: 1, errors: [] } }
+            : { validation: { status: "mismatch", attempts: 1, errors: [error] } };
+        },
+      );
+      if (outcome.schemaCheck?.validation.status !== "valid" || typeof outcome.schemaCheck.value !== "string")
+        throw new SchemaValidationError(outcome.schemaCheck?.validation.errors ?? ["missing output validation"], 1);
+      const value = outcome.schemaCheck.value;
+      if (choices !== undefined)
+        recordChoiceDecision(
+          opts,
+          {
+            value,
+            source: "validated",
+            returnVia: "tool",
+            ...(outcome.outputAcceptance === undefined ? {} : { attempts: outcome.outputAcceptance.attempts }),
+          },
+          outcome.callId,
+        );
+      return value;
+    } catch (error) {
+      // Cancellation, provider/auth failures and budgets NEVER become a classifier decision.
+      if (
+        fallback === undefined ||
+        !(error instanceof WorkflowAgentExecutionError) ||
+        error.result.failureCause !== "output-contract-exhausted"
+      )
+        throw error;
+      recordChoiceDecision(opts, {
+        value: fallback,
+        source: "fallback",
+        returnVia: "tool",
+        attempts: contract.maxAttempts,
+        reason: "output-contract-exhausted",
+      });
+      return fallback;
+    }
+  }
+
+  async function parallel<T>(thunks: Array<() => Promise<T>>, input?: WorkflowParallelOptions): Promise<T[]> {
+    const groupOptions = normalizeWorkflowParallelOptions(input, thunks.length);
+    return runGrouped(
+      "parallel",
+      thunks.length,
+      () => runGroupBranches("parallel", thunks, groupOptions),
+      groupOptions,
+    );
   }
 
   async function pipeline<T>(items: readonly T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]> {
@@ -3422,13 +3679,20 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     return runGrouped("pipeline", itemThunks.length, () => runGroupBranches("pipeline", itemThunks));
   }
 
-  async function runGroupBranches<T>(kind: WorkflowGroupKind, thunks: Array<() => Promise<T>>): Promise<T[]> {
+  async function runGroupBranches<T>(
+    kind: WorkflowGroupKind,
+    thunks: Array<() => Promise<T>>,
+    groupOptions?: WorkflowParallelOptions,
+  ): Promise<T[]> {
     const groupId = groupContext.getStore()!.group.id;
     const wrapped: Array<() => Promise<WorkflowGroupSlot<T>>> = thunks.map((thunk, index) => async () => {
       const currentContext = groupContext.getStore();
       const memberContext: WorkflowGroupContext = {
         group: currentContext!.group,
         member: { groupId, memberIndex: index },
+        phase: currentPhase(),
+        memberPath: [...currentContext!.memberPath, groupOptions?.keys?.[index] ?? `#${index}`],
+        hasBusinessKeys: currentContext!.hasBusinessKeys || groupOptions?.keys !== undefined,
       };
       try {
         const value = await groupContext.run(memberContext, thunk);
@@ -3456,7 +3720,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         };
       }
     });
-    const slots = await runScheduled(wrapped);
+    const slots = await runScheduled(wrapped, groupOptions?.concurrency);
     if (slots.some((slot) => slot.status === "failed")) {
       throw new WorkflowGroupFailureError(kind, groupId, slots);
     }
@@ -3469,14 +3733,16 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       runId,
       kind: "error",
       message: failure.message,
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
       ...activeGroupFields(),
     });
   }
 
   function phase(name: string): void {
-    _currentPhase = name;
-    emit({ ts: nowFn(), runId, kind: "phase", phase: name });
+    const context = groupContext.getStore();
+    if (context === undefined) _currentPhase = name;
+    else context.phase = name;
+    emit({ ts: nowFn(), runId, kind: "phase", phase: name, ...activeGroupFields() });
   }
 
   function log(msg: string): void {
@@ -3486,7 +3752,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "log",
       source: "script",
       message: msg,
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
   }
 
@@ -3503,7 +3769,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         kind: "log",
         source: "runtime",
         message: `[workflow:no-operator] ${message}`,
-        ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+        ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
       });
       throw new Error(message);
     }
@@ -3524,7 +3790,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "log",
       source: "runtime",
       message: "[workflow:enter]",
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
     const result = await subFn(dsl, input);
     emit({
@@ -3533,7 +3799,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "log",
       source: "runtime",
       message: "[workflow:exit]",
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
     return result;
   }
@@ -3552,7 +3818,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "log",
       source: "runtime",
       message,
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
   }
 
@@ -3560,9 +3826,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     kind: "parallel" | "pipeline",
     total: number,
     run: () => Promise<T>,
+    groupOptions?: WorkflowParallelOptions,
   ): Promise<T> {
     const id = `${kind}-${++groupCounter}`;
-    const label = `${kind} ${total}`;
+    const label = groupOptions?.title ?? `${kind} ${total}`;
+    const parentContext = groupContext.getStore();
     emit({
       ts: nowFn(),
       runId,
@@ -3571,11 +3839,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       groupKind: kind,
       groupLabel: label,
       groupTotal: total,
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(groupOptions?.keys === undefined ? {} : { groupKeys: [...groupOptions.keys] }),
+      ...(parentContext === undefined ? {} : { parentGroupId: parentContext.group.id }),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
-    const parentContext = groupContext.getStore();
     const currentContext: WorkflowGroupContext = {
       group: { id, kind, label },
+      phase: currentPhase(),
+      memberPath: parentContext?.memberPath ?? [],
+      hasBusinessKeys: parentContext?.hasBusinessKeys ?? false,
       ...(parentContext?.member === undefined ? {} : { member: parentContext.member }),
     };
     return groupContext.run(currentContext, async () => {
@@ -3593,7 +3865,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           groupTotal: total,
           groupCompleted: total,
           groupFailed: 0,
-          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+          ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
           durationMs: Date.now() - start,
         });
         return results;
@@ -3610,7 +3882,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           groupTotal: total,
           groupCompleted: groupFailure?.completed ?? 0,
           groupFailed: groupFailure?.failed ?? total,
-          ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+          ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
           message: workflowErrorMessage(err),
           durationMs: Date.now() - start,
         });
@@ -3659,14 +3931,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
 
   function publishArtifact(name: string, text: string): WorkflowArtifactRef {
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
-    return options.artifactPorts.publishText(name, text, _currentPhase);
+    return options.artifactPorts.publishText(name, text, currentPhase());
   }
 
   let primaryArtifactPublished = false;
   function publishPrimaryArtifact(name: string, text: string, stage?: string): WorkflowArtifactRef {
     if (primaryArtifactPublished) throw new Error("workflow already published its primary output");
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
-    const ref = options.artifactPorts.publishText(name, text, stage ?? _currentPhase, "primary");
+    const ref = options.artifactPorts.publishText(name, text, stage ?? currentPhase(), "primary");
     primaryArtifactPublished = true;
     return ref;
   }
@@ -3685,14 +3957,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       kind: "log",
       source: "runtime",
       message: `[workflow:primary-file] path=${JSON.stringify(reference.relativePath)} sha256=${reference.sha256} bytes=${reference.bytes}`,
-      ...(_currentPhase !== undefined ? { phase: _currentPhase } : {}),
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
     return reference;
   }
 
   function consumeTextArtifact(ref: WorkflowArtifactRef): WorkflowConsumedTextArtifact {
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
-    return options.artifactPorts.consumeText(ref, _currentPhase);
+    return options.artifactPorts.consumeText(ref, currentPhase());
   }
 
   function continuationArtifacts(): readonly WorkflowContinuationArtifact[] {
@@ -3743,7 +4015,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     getJournal: () => [...journalMirror],
     recordRuntimeLog,
     getArgs: () => args,
-    currentPhase: () => _currentPhase,
+    currentPhase,
     peakAgentConcurrency: () => sharedExecution.peakAgentConcurrency(),
   };
 }
@@ -3833,6 +4105,9 @@ function canonicalAgentRequest(req: WorkflowAgentRequest): string {
   // make an unchanged mapped call miss replay whenever surrounding group numbering moved.
   return JSON.stringify({
     prompt: req.prompt,
+    ...(req.returnContract === undefined ? {} : { returnContract: req.returnContract }),
+    // Display title is not identity. Explicit business keys are: a reordered mapping must not reuse a different item's answer.
+    ...(req.itemPath === undefined ? {} : { itemPath: req.itemPath }),
     executionMode: workflowExecutionIdentity(req).executionMode,
     agent: req.agent,
     maxToolCalls: req.maxToolCalls ?? null,

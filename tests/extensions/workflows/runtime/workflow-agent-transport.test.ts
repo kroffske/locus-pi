@@ -37,6 +37,10 @@ import {
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import type { WorkflowReplayController } from "../../../../extensions/workflows/runtime/workflow-replay.js";
 import type { AgentDefinition } from "../../../../extensions/_shared/agent-runtime/agents.js";
+import {
+  createWorkflowReturnController,
+  normalizeWorkflowReturnContract,
+} from "../../../../extensions/workflows/runtime/workflow-return.js";
 import { createHarness } from "../../../test-harness.js";
 
 /**
@@ -861,6 +865,113 @@ describe("agent failure cause — runtime", () => {
     expect(result.failureCause).toBe("ask-evidence-persistence");
     expect(result.text).toBeUndefined();
     expect(await retriesOn(result.failureCause)).toBe(false);
+  });
+});
+
+describe("same-session output acceptance — the causes the return contract owns", () => {
+  /**
+   * One real return controller per case: the causes below are produced by the
+   * production acceptance object, not by a stub that merely names them.
+   */
+  async function runAcceptanceHost(config: {
+    submissions?: (readonly unknown[])[];
+    maxAttempts?: number;
+    maxTurns?: number;
+    withRestriction?: boolean;
+  }) {
+    const contract = normalizeWorkflowReturnContract({
+      output: { type: "string", singleLine: true },
+      repair: { maxAttempts: config.maxAttempts ?? 1 },
+    });
+    const { tool, acceptance } = createWorkflowReturnController(contract);
+    const exportDir = mkdtempSync(path.join(tmpdir(), "locus-transport-acceptance-"));
+    let active = ["read", tool.name];
+    let prompts = 0;
+    let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+    const session: SdkAgentSessionLike = {
+      sessionId: "sdk-child",
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt() {
+        const submission = config.submissions?.[prompts];
+        prompts += 1;
+        listener?.({ type: "turn_start" });
+        if (submission !== undefined) {
+          listener?.({ type: "tool_execution_start", toolName: tool.name, toolCallId: `t${prompts}` });
+          for (const value of submission) {
+            await tool.execute(`t${prompts}`, { value }, new AbortController().signal);
+          }
+        }
+        listener?.({ type: "agent_end", willRetry: false });
+      },
+      getSessionStats: () => ({ sessionId: "sdk-child", toolCalls: prompts, toolResults: prompts }),
+      getLastAssistantText: () => "narrative the host must not accept",
+      getActiveToolNames: () => active,
+      ...(config.withRestriction === false
+        ? {}
+        : {
+            setActiveToolsByName(names: string[]) {
+              active = [...names];
+            },
+          }),
+      exportToJsonl(outputPath) {
+        const target = outputPath ?? path.join(exportDir, "session.jsonl");
+        writeFileSync(target, `${JSON.stringify({ type: "session", id: "sdk-child" })}\n`, "utf8");
+        return target;
+      },
+      dispose: vi.fn(),
+      abort: vi.fn(async () => {}),
+    };
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+    const result = record(
+      await executor.run(
+        {
+          ...hostRequest(),
+          ...(config.maxTurns === undefined ? {} : { maxTurns: config.maxTurns }),
+          customTools: [tool],
+          responseAcceptance: acceptance,
+        },
+        new AbortController().signal,
+      ),
+    );
+    return { result, prompts: () => prompts };
+  }
+
+  it("exhausts the contract when every submission stays invalid", async () => {
+    const { result } = await runAcceptanceHost({ submissions: [["multi\nline"]] });
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("output-contract-exhausted");
+    expect(result.text).toBeUndefined();
+  });
+
+  it("refuses a second, different proposal as a protocol conflict", async () => {
+    const { result } = await runAcceptanceHost({ submissions: [["first answer", "second answer"]] });
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("output-contract-conflict");
+  });
+
+  it("fails before the first prompt when the host cannot restrict the tool set", async () => {
+    const { result, prompts } = await runAcceptanceHost({
+      submissions: [["only answer"]],
+      withRestriction: false,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("output-contract-unavailable");
+    expect(prompts()).toBe(0);
+  });
+
+  it("stops at the cumulative assistant-turn budget instead of clarifying forever", async () => {
+    const { result } = await runAcceptanceHost({ submissions: [], maxAttempts: 3, maxTurns: 1 });
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("assistant-turn-budget");
   });
 });
 
