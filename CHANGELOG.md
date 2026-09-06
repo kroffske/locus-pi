@@ -4,6 +4,8 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-07
+
 ### Changed
 
 - Workflow authoring now has one short router and four explicit forms: fixed graph, bounded refinement, bounded decomposition and split-run human continuation. The source checker admits narrowly bounded whole-value carry and author-owned record fields without making model output inspectable. Runnable examples and negative contract fixtures accompany the change.
