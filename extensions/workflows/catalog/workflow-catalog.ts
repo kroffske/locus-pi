@@ -3,7 +3,7 @@ import path from "node:path";
 import { Lang, parse } from "@ast-grep/napi";
 import type { SgNode } from "@ast-grep/napi";
 import {
-  listWorkflowRunIds,
+  listWorkflowRuns,
   readWorkflowRunScriptSnapshot,
   type WorkflowRunResultEnvelope,
   type WorkflowRunScriptSnapshot,
@@ -15,6 +15,7 @@ import {
   workflowTargetComposition,
 } from "../runtime/workflow-discovery.js";
 import { isWorkflowSavedName } from "../runtime/workflow-saved-name.js";
+import { WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT } from "../runtime/workflow-run-layout.js";
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
 import { buildWorkflowRunCommand, formatWorkflowCommandToken, workflowRunUsage } from "../command/command-parser.js";
 
@@ -454,7 +455,7 @@ function workflowContractLines(): string[] {
     "workspaces: workspace() allocates one retained linked worktree and returns an opaque handle reusable by multiple agent() calls",
     "DSL: agent(), parallel(), pipeline(), phase(), log(), workflow(), outputDir(), invokeWorkflow(), publishPrimaryFile(), promptFile(), workspace()",
     "durability: outputDir() selects a confined stable project namespace distinct from run evidence; invokeWorkflow() runs one saved child level with source-bound item checkpoints and shared cancellation/concurrency/physical-call budget; publishPrimaryFile() exposes a verified non-empty file reference",
-    "resolver: the nearest Project namespace wins, checking .pi/workflows, .claude/workflows, and .agents/workflows at each level; then User; then Package",
+    `resolver: the nearest Project ${WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT} namespace wins at each level; then User ~/${WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT}; then Package`,
     "registration: a canonical folder owns an optional <workflow>.workflow.mjs plus direct child entries; without the root it is a non-runnable group-only namespace; existing flat Project/User entries remain standalone workflows",
   ];
 }
@@ -568,8 +569,10 @@ export function safeRecentWorkflowLabel(
 
 function recentWorkflowRows(projectRoot: string): WorkflowCatalogHistoryRow[] {
   const recent: WorkflowCatalogHistoryRow[] = [];
-  for (const runId of listWorkflowRunIds(projectRoot)) {
-    const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId);
+  for (const run of listWorkflowRuns(projectRoot)) {
+    if (run.kind === "child") continue;
+    const { runId, runDir } = run;
+    const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId, runDir);
     const target = snapshot.target;
     if (target === undefined) continue;
     const safeName = safeRecentWorkflowLabel(target, projectRoot);

@@ -38,7 +38,7 @@ function project(): string {
     path.join(agents, "default.md"),
     "---\nname: default\ndescription: Continuation test agent\nevidence:\n  mode: none\n---\nAnswer.\n",
   );
-  const workflowDir = path.join(root, ".pi", "workflows");
+  const workflowDir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(workflowDir, { recursive: true });
   writeFileSync(
     path.join(workflowDir, "continuation.workflow.mjs"),

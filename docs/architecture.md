@@ -55,7 +55,8 @@ The current direct feature graph has two edges:
 Local runtime state is intentionally outside the public source surface and ignored by Git:
 
 - `.locus-pi/runs/<runId>/` — workflow outputs and machine evidence;
-- `.locus-pi/plans/<generated-run-name>/` — workflow-authored working files, including task drafts, plans, review files, and implementation history;
+- `.locus-pi/workspaces/<generated-run-name>/` — workflow-authored working files, including task drafts, generated workflows, review files, and implementation history;
+- `.locus-pi/plans/<plan-slug>.md` — checkout-local documents authored through `/plan`; legacy home files are migration input only;
 - `.locus-pi/workflow-state/v1/<hash>/` — active workspace leases and saved-child checkpoints; the directory may be empty after a lease is released;
 - `.locus-pi/fusion/config.json` — project-local Fusion configuration;
 - `.locus-pi/config.json` — project-local settings the package reads at load time; currently only the `beta` opt-in list described in [getting started](getting-started.md#beta-extensions). It is the one file here a project may want to commit;

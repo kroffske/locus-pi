@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   renderOperatorBlock,
   renderOperatorBlockPlain,
+  styleActiveSelection,
   type OperatorBlock,
   type OperatorSurfaceType,
   type OperatorThemeLike,
@@ -41,6 +42,26 @@ const surfaceTypes: OperatorSurfaceType[] = [
 ];
 
 describe("typed operator block renderer", () => {
+  it("owns the fixed purple selection fill and keeps its plain fallback ANSI-free", () => {
+    const theme = ansiTheme("36");
+
+    expect(styleActiveSelection(theme, "[Project]")).toBe(
+      "\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m[Project]\u001b[0m",
+    );
+    expect(styleActiveSelection(undefined, "[Project]")).toBe("[Project]");
+  });
+
+  it("uses the purple-family border for SELECT while INPUT keeps the host accent border", () => {
+    const theme = ansiTheme("36");
+    const select = renderOperatorBlock({ type: "SELECT", subject: "Choice", primary: "Pick" }, 48, theme);
+    const input = renderOperatorBlock({ type: "INPUT", subject: "Value", primary: "Type" }, 48, theme);
+
+    expect(select[0]).toContain("\u001b[38;2;196;167;231m╭─ \u001b[39m");
+    expect(select.at(-1)).toContain("\u001b[38;2;196;167;231m");
+    expect(input[0]).toContain("\u001b[36m╭─ \u001b[0m");
+    expect(input.join("\n")).not.toContain("\u001b[38;2;196;167;231m");
+  });
+
   it.each([146, 80, 48])("keeps themed and plain projections width-safe at %i columns", (width) => {
     const theme = ansiTheme("36");
 

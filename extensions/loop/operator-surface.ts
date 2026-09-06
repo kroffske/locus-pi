@@ -8,10 +8,16 @@
  * Pure block construction stays in `operator-ui.ts`.
  */
 
-import type { ExtensionCommandContext, ExtensionContext, ToolResult } from "../_shared/host/pi-api.js";
+import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import type {
+  CustomUiComponent,
+  ExtensionCommandContext,
+  ExtensionContext,
+  ToolResult,
+} from "../_shared/host/pi-api.js";
 import { clearOperatorStatus, setOperatorStatus } from "../_shared/operator/operator-status.js";
 import type { OperatorBlock } from "../_shared/operator/operator-ui.js";
-import { setOperatorWidget } from "../_shared/operator/widget-render.js";
+import { LIVE_WORK_PLACEMENT, setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { loopWarningBlock } from "./operator-ui.js";
 
 const LOOP_STATUS_ID = "loop.manual";
@@ -43,6 +49,10 @@ export function presentLoopResult(ctx: ExtensionCommandContext, result: ToolResu
     compact: `LOOP: ${source}`,
     narrow: "LOOP",
   });
+  if (source === "workflow") {
+    presentInlineWorkflowContinuation(ctx, firstResultText(result));
+    return;
+  }
   presentLoopBlock(ctx, {
     type: "RESULT",
     subject: "Loop continuation",
@@ -56,6 +66,26 @@ export function presentLoopResult(ctx: ExtensionCommandContext, result: ToolResu
     ],
     controls: ["Inspect: /loop status"],
   });
+}
+
+function presentInlineWorkflowContinuation(ctx: ExtensionCommandContext, text: string): void {
+  const content = `[RESULT] Loop continuation [WORKFLOW]\n${text}`;
+  ctx.ui.setWidget("loop", () => new InlineWorkflowContinuationWidget(content), {
+    placement: LIVE_WORK_PLACEMENT,
+  });
+}
+
+class InlineWorkflowContinuationWidget implements CustomUiComponent {
+  constructor(private readonly content: string) {}
+
+  render(width: number): string[] {
+    const safeWidth = Math.max(1, Math.floor(width));
+    return this.content.split(/\r?\n/u).flatMap((line) => wrapTextWithAnsi(line, safeWidth));
+  }
+
+  invalidate(): void {
+    // Content is immutable and rendered directly from the continuation result.
+  }
 }
 
 export function presentLoopBlock(

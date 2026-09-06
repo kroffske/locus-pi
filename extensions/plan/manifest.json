@@ -24,7 +24,7 @@
     "Plan mode is shown by two warning-tone visual cues: one shared-status PLAN route contribution and a recolored input-editor border (installed via ui.setEditorComponent at session_start)",
     "session_start clears persisted active mode before installing visual cues, so restart/reload cannot silently arm planning for the next workflow turn",
     "No keyboard shortcut changes behavioral mode and the extension never edits Pi keybindings",
-    "Authored plan artifacts persist to ~/.pi/locus-pi/<project-slug>/plans/<plan-slug>.md",
+    "Authored plan artifacts persist to checkout-local .locus-pi/plans/<plan-slug>.md; regular legacy Markdown under ~/.pi/locus-pi/<project-slug>/plans is verified and copied atomically without deletion",
     "Active mode reference persists within the current session at .locus/runtime/mode/state.json; session_start clears it",
     "Leaving plan mode with a composed plan via /plan exit or explicit /mode default prompts the user with ctx.ui.select for a plan->execution handoff: execute in-context, execute after a context reset (ctx.newSession), tweak-then-execute through typed input, or keep planning",
     "Cancelling the exit selector or tweak input keeps plan mode and queues no execution turn",
@@ -39,7 +39,8 @@
     ".tasks/<task-dir>/artifacts/review-prompt.md",
     ".tasks/<task-dir>/artifacts/todos-prompt.md",
     ".locus/runtime/mode/state.json",
-    "~/.pi/locus-pi/<project-slug>/plans/*.md",
+    ".locus-pi/plans/*.md",
+    "~/.pi/locus-pi/<project-slug>/plans/*.md (legacy migration input only)",
     "status:locus (plan.mode contribution)",
     "typed operator widgets for goal state and prompt shelves",
     "locus-goal-state custom entry"
@@ -103,6 +104,7 @@
         ".locus/runtime/mode/state.json",
         ".tasks/index.json",
         ".tasks/**/artifacts/*-prompt.md",
+        ".locus-pi/plans/*.md",
         "~/.pi/locus-pi/**/plans/*.md"
       ],
       "write": [
@@ -110,7 +112,7 @@
         ".locus/runtime/goal/*",
         ".locus/runtime/mode/state.json",
         ".tasks/**/artifacts/*-prompt.md",
-        "~/.pi/locus-pi/**/plans/*.md",
+        ".locus-pi/plans/*.md",
         "~/.pi/agent/keybindings.json"
       ]
     },

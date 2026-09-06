@@ -3,8 +3,8 @@ import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import {
   assertWorkflowRunDirectoryPath,
+  assertWorkflowRunDir,
   ensureWorkflowDirectoryNoSymlink,
-  ensureWorkflowRunDir,
   workflowRunRuntimeDir,
 } from "./workflow-run-layout.js";
 
@@ -16,6 +16,7 @@ export interface WorkflowWorktreeInfo {
 export interface WorkflowWorktreeOptions {
   projectRoot: string;
   runId: string;
+  runDir: string;
   safeCallId: string;
   ref?: string;
   baseDir?: string;
@@ -23,7 +24,7 @@ export interface WorkflowWorktreeOptions {
 
 export function createWorkflowWorktree(options: WorkflowWorktreeOptions): WorkflowWorktreeInfo {
   const repoRoot = resolveGitRepoRoot(options.projectRoot);
-  const runDir = ensureWorkflowRunDir(options.projectRoot, options.runId);
+  const runDir = assertWorkflowRunDir(options.projectRoot, options.runId, options.runDir);
   const baseDir = options.baseDir ?? path.join(workflowRunRuntimeDir(runDir), "worktrees");
   ensureWorkflowDirectoryNoSymlink(runDir, baseDir);
   assertWorkflowRunDirectoryPath(runDir, baseDir, true);
@@ -67,6 +68,7 @@ export interface WorkflowWorkspaceManager {
 export interface WorkflowWorkspaceManagerOptions {
   projectRoot: string;
   runId: string;
+  runDir: string;
 }
 
 export function createWorkflowWorkspaceManager(options: WorkflowWorkspaceManagerOptions): WorkflowWorkspaceManager {
@@ -125,6 +127,7 @@ export function createWorkflowWorkspaceManager(options: WorkflowWorkspaceManager
       const worktree = createWorkflowWorktree({
         projectRoot: original.repoRoot,
         runId: options.runId,
+        runDir: options.runDir,
         safeCallId: `${ordinal}-${label}`,
         ref: head,
       });

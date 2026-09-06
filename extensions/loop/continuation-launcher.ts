@@ -2,10 +2,10 @@
  * extensions/loop/continuation-launcher.ts — The one bounded-continuation
  * pipeline both loop triggers share.
  *
- * `/loop once …` and `loop {action:"once"}` both land here: it resolves
- * the source, writes the goal or workflow continuation artifact, and projects
- * the saved artifact into the tool result. Nothing is auto-dispatched; every
- * refusal fails closed through `unsupportedOnce`.
+ * `/loop once …` and `loop {action:"once"}` both land here. It resolves the
+ * source, preserves the goal artifact contract, and returns workflow prompts
+ * inline. Nothing is auto-dispatched; every refusal fails closed through
+ * `unsupportedOnce`.
  */
 
 import type { ExtensionAPI, ExtensionCommandContext, ToolResult } from "../_shared/host/pi-api.js";
@@ -79,26 +79,25 @@ export async function runLoopOnce(
     if (runId === undefined || runId.trim() === "") {
       return unsupportedOnce("workflow continuation requires /loop once workflow <runId>");
     }
-    const result = await createWorkflowLoopContinuation(projectRoot, runId, prompt ?? "");
-    const text = renderLoopWorkflowContinuationResult(result);
+    const continuation = await createWorkflowLoopContinuation(projectRoot, runId, prompt ?? "");
+    const text = renderLoopWorkflowContinuationResult(continuation);
     return textResult(text, {
       owner: "loop",
       source: "workflow",
       sourceId: runId,
-      path: result.artifact.path,
-      autoDispatch: result.artifact.autoDispatch,
-      status: result.artifact.status,
-      stopReason: result.artifact.stopReason,
-      createdAt: result.artifact.createdAt,
-      maxSteps: result.artifact.maxSteps,
-      prompt: result.artifact.prompt,
-      runStatus: result.artifact.runStatus,
-      sourceSummary: result.sourceSummary,
-      workflowContinuation: result.artifact,
+      autoDispatch: continuation.autoDispatch,
+      status: continuation.status,
+      stopReason: continuation.stopReason,
+      createdAt: continuation.createdAt,
+      maxSteps: continuation.maxSteps,
+      prompt: continuation.prompt,
+      runStatus: continuation.runStatus,
+      sourceSummary: continuation.sourceSummary,
+      workflowContinuation: continuation,
       sourceMetadata: {
         runId,
-        runStatus: result.artifact.runStatus,
-        sourcePath: result.artifact.sourcePath,
+        runStatus: continuation.runStatus,
+        sourcePath: continuation.sourcePath,
       },
     });
   } catch (error) {

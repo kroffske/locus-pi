@@ -19,6 +19,8 @@
 
 Tools: `workflow`, read-only `workflow_check_source`, and opt-in `fusion`. Compatibility command: `/workflow-stop`.
 
+At normal interactive heights, `/workflows list` keeps the Project, User, Package, and History tabs directly below the catalog heading. The existing compact projection may omit the heading or put the selected row first when only a few lines fit. Wherever tabs are shown, the active tab uses the shared high-contrast purple selection background. The source view uses the same treatment for its left-to-right Back, Start, Edit, Review, and copy actions. A parent description starts one column to the right of its child's `└` branch, so the description remains attached to the parent instead of reading like a heading for the child. See the cross-extension [TUI visual language](../../docs/tui-design.md).
+
 `/workflows skills` exposes the package's action-named workflow skills to
 external agents. Pi already loads the packaged skills. The command manages
 fail-closed symlinks in Codex `.agents/skills` and Claude Code `.claude/skills`;
@@ -33,12 +35,15 @@ The `workflow` tool is the structured execution surface for agents. It supports 
 
 ## Evidence and workspaces
 
-- Run evidence: `.locus-pi/runs/<runId>/outputs/` and `runtime/`.
-- Default workflow workspace: a unique `.locus-pi/plans/<generated-run-name>/` directory.
-- Any workflow supports `--run-name <name>` to select `.locus-pi/plans/<name>/`.
+- Откройте `.locus-pi/runs/<storageRootRunId>/README.md`: это общая папка первого запуска, дочерних executions и попыток resume. Первый запуск сохраняет `outputs/` и `runtime/` прямо в ней; дочерние находятся в `children/<runId>/`, попытки resume — в `attempts/<runId>/`.
+- У каждого выполнения отдельный `runId`. Команды status/result/resume находят его независимо от вложенности; старые flat runs остаются на месте и читаются без миграции.
+- В workspace файл `.workflow-runs.md` содержит обратные ссылки на группы. README и backlink атомарно заменяются только под действующим root lease. Неполный runtime-owned README восстанавливается, а неполный backlink требует явного recovery без потери прежних ссылок. Это навигация, не сводка текущего статуса: состояние каждого выполнения находится в его `runtime/result.json` и `runtime/journal.ndjson`.
+- Default workflow workspace: a unique `.locus-pi/workspaces/<generated-run-name>/` directory.
+- Any workflow supports `--run-name <name>` to select `.locus-pi/workspaces/<name>/`; an existing legacy-only `.locus-pi/plans/<name>/` stays in place so resume and checkpoint identity remain stable.
 - Explicit output directories must remain safe, project-relative paths.
 - Run evidence and the workflow workspace are separate ownership zones.
 - `.locus-pi/workflow-state/v1/<hash>/` is active lease and saved-child checkpoint state. A normal run can leave an empty state directory after releasing its temporary workspace lock.
+- `.locus-pi/plans/*.md` is owned by the `plan` extension and is not workflow workspace storage.
 
 ## Trust
 

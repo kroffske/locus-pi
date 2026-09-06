@@ -3,15 +3,14 @@
  * their two continuation sources.
  *
  * Reports which source (goal, workflow, review) can produce a bounded next prompt
- * and renders that report, and writes the workflow continuation artifact itself.
- * Nothing here auto-dispatches; a continuation is a saved prompt, never a run.
+ * and renders that report. Nothing here auto-dispatches; workflow continuations
+ * are returned inline, never saved or run.
  *
  * The workflow side reads run persistence through `workflows/run-read.js` — the
  * read-only facade — rather than the workflow journal directly, so the loop holds
  * no handle on the journal's sink or its live-row retention.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "../_shared/host/pi-api.js";
 import {
@@ -21,11 +20,9 @@ import {
   type GoalContinuationArtifact,
 } from "../_shared/project/goal-mode.js";
 import {
-  listWorkflowRunIds,
   readWorkflowRunSummary,
-  workflowJournalFile,
-  workflowResultFile,
-  workflowRunDir,
+  resolveWorkflowRunDir,
+  resolveWorkflowRunId,
   workflowRunsRootDir,
   type WorkflowRunSummary,
 } from "../workflows/run/run-read.js";
@@ -52,13 +49,12 @@ export interface LoopStatusReport {
   recommendedSourceId?: string;
 }
 
-export interface LoopWorkflowContinuationArtifact {
+export interface LoopWorkflowContinuation {
   version: 1;
   source: "workflow";
   runId: string;
   runStatus: string;
   sourcePath: string;
-  path: string;
   prompt: string;
   autoDispatch: false;
   status: "manual";
@@ -66,26 +62,15 @@ export interface LoopWorkflowContinuationArtifact {
   createdAt: string;
   maxSteps: 1;
   sourceSummary: string;
-  journalPath?: string;
-  resultPath?: string;
-}
-
-export interface LoopWorkflowContinuationResult {
-  artifact: LoopWorkflowContinuationArtifact;
-  sourceSummary: string;
 }
 
 const LOOP_STOP_REASON = "continuation is a bounded next prompt artifact, not auto-dispatch";
-const WORKFLOW_LOOP_STOP_REASON = "workflow continuation is a bounded next prompt artifact, not auto-dispatch";
+const WORKFLOW_LOOP_STOP_REASON = "workflow continuation is a bounded next prompt, not auto-dispatch";
 const LOOP_STATUS_LINE_WIDTH = 80;
 const LOOP_STATUS_ID_WIDTH = 20;
 
 export function loopRootPath(projectRoot: string): string {
   return path.join(runtimeStateDir(projectRoot), "loop");
-}
-
-export function workflowLoopContinuationPath(projectRoot: string, runId: string): string {
-  return path.join(loopRootPath(projectRoot), "workflow", `${runId}.json`);
 }
 
 export async function readLoopStatus(projectRoot: string): Promise<LoopStatusReport> {
@@ -179,16 +164,15 @@ export async function createWorkflowLoopContinuation(
   projectRoot: string,
   runId: string,
   rawPrompt: string,
-): Promise<LoopWorkflowContinuationResult> {
+): Promise<LoopWorkflowContinuation> {
   const summary = await loadWorkflowContinuationSummary(projectRoot, runId);
   const prompt = buildWorkflowContinuationPrompt(runId, summary, rawPrompt);
-  const artifact = normalizeWorkflowLoopContinuationArtifact({
+  const continuation: LoopWorkflowContinuation = {
     version: 1,
     source: "workflow",
     runId,
     runStatus: summary.status,
-    sourcePath: workflowRunDir(projectRoot, runId),
-    path: workflowLoopContinuationPath(projectRoot, runId),
+    sourcePath: resolveWorkflowRunDir(projectRoot, runId),
     prompt,
     autoDispatch: false,
     status: "manual",
@@ -196,50 +180,43 @@ export async function createWorkflowLoopContinuation(
     createdAt: new Date().toISOString(),
     maxSteps: 1,
     sourceSummary: renderWorkflowSummary(summary),
-    journalPath: workflowJournalFile(workflowRunDir(projectRoot, runId)),
-    resultPath: workflowResultFile(workflowRunDir(projectRoot, runId)),
-  });
-
-  persistWorkflowLoopContinuationArtifact(artifact);
-  return {
-    artifact,
-    sourceSummary: artifact.sourceSummary,
   };
+
+  return continuation;
 }
 
-export function renderLoopWorkflowContinuationResult(result: LoopWorkflowContinuationResult): string {
-  return ["Loop continuation saved.", `source: workflow`, renderLoopWorkflowContinuationArtifact(result.artifact)].join(
-    "\n",
-  );
+export function renderLoopWorkflowContinuationResult(continuation: LoopWorkflowContinuation): string {
+  return [
+    "Loop continuation ready.",
+    "source: workflow",
+    ...renderLoopWorkflowContinuationMetadata(continuation),
+    "sourceSummary:",
+    ...boundLoopMetadataLines(continuation.sourceSummary.split(/\r?\n/u)),
+    "prompt:",
+    continuation.prompt,
+  ].join("\n");
 }
 
 export function renderGoalLoopContinuationResult(goalArtifact: GoalContinuationArtifact): string {
   return ["Loop continuation saved.", `source: goal`, renderGoalContinuationArtifact(goalArtifact)].join("\n");
 }
 
-export function renderLoopWorkflowContinuationArtifact(artifact: LoopWorkflowContinuationArtifact): string {
-  return boundLoopArtifactLines([
-    `runId: ${artifact.runId}`,
-    `runStatus: ${artifact.runStatus}`,
-    `path: ${artifact.path}`,
-    `autoDispatch: ${artifact.autoDispatch}`,
-    `status: ${artifact.status}`,
-    `createdAt: ${artifact.createdAt}`,
-    `maxSteps: ${artifact.maxSteps}`,
-    "prompt/sourceSummary: stored in artifact; omitted from command widget",
-  ]).join("\n");
+function renderLoopWorkflowContinuationMetadata(continuation: LoopWorkflowContinuation): string[] {
+  return boundLoopMetadataLines([
+    `runId: ${continuation.runId}`,
+    `runStatus: ${continuation.runStatus}`,
+    `autoDispatch: ${continuation.autoDispatch}`,
+    `status: ${continuation.status}`,
+    `createdAt: ${continuation.createdAt}`,
+    `maxSteps: ${continuation.maxSteps}`,
+  ]);
 }
 
-function boundLoopArtifactLines(lines: string[]): string[] {
+function boundLoopMetadataLines(lines: string[]): string[] {
   return lines.map((line) => {
     if (line.length <= 80) return line;
     return `${line.slice(0, 77)}...`;
   });
-}
-
-export function readLatestWorkflowRunId(projectRoot: string): string | undefined {
-  const runIds = listWorkflowRunIds(projectRoot);
-  return runIds[0];
 }
 
 async function resolveGoalSource(
@@ -274,14 +251,30 @@ async function resolveGoalSource(
 }
 
 async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSourceReport> {
-  const latestRunId = readLatestWorkflowRunId(projectRoot);
-  if (latestRunId === undefined) {
+  const latest = resolveWorkflowRunId(projectRoot, "latest");
+  if (latest.status === "not-found") {
     return {
       source: "workflow",
       availability: "missing",
       reason: `no workflow run metadata found under ${workflowRunsRootDir(projectRoot)}`,
     };
   }
+  if (latest.status === "ambiguous") {
+    return {
+      source: "workflow",
+      availability: "blocked",
+      reason: `latest workflow run is ambiguous across ${latest.matched} executions; use an exact runId`,
+    };
+  }
+  if (latest.status === "legacy") {
+    return {
+      source: "workflow",
+      availability: "blocked",
+      reason: latest.message,
+      id: latest.runId,
+    };
+  }
+  const latestRunId = latest.runId;
 
   const summary = readWorkflowRunSummary(projectRoot, latestRunId);
   const hasMetadata = summary.hasJournal === true || summary.hasResult;
@@ -292,7 +285,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
       reason: "workflow run folder exists but has no journal/result metadata yet",
       id: latestRunId,
       status: summary.status,
-      path: workflowRunDir(projectRoot, latestRunId),
+      path: resolveWorkflowRunDir(projectRoot, latestRunId),
     };
   }
 
@@ -302,7 +295,7 @@ async function resolveWorkflowSource(projectRoot: string): Promise<LoopStatusSou
     reason: "workflow run metadata is available for /loop once workflow <runId>",
     id: latestRunId,
     status: summary.status,
-    path: workflowRunDir(projectRoot, latestRunId),
+    path: resolveWorkflowRunDir(projectRoot, latestRunId),
     summary: renderWorkflowSummary(summary),
   };
 }
@@ -354,35 +347,11 @@ function buildWorkflowContinuationPrompt(runId: string, summary: WorkflowRunSumm
     "- Outcome type: prompt",
     "",
     "Expected result:",
-    "- one bounded next prompt artifact",
+    "- one bounded continuation prompt",
     "",
     "Final result:",
     nextStep,
   ].join("\n");
-}
-
-function normalizeWorkflowLoopContinuationArtifact(
-  artifact: LoopWorkflowContinuationArtifact,
-): LoopWorkflowContinuationArtifact {
-  return {
-    ...artifact,
-    version: 1,
-    source: "workflow",
-    autoDispatch: false,
-    status: "manual",
-    stopReason: artifact.stopReason.trim() || WORKFLOW_LOOP_STOP_REASON,
-    createdAt: artifact.createdAt.trim() || new Date().toISOString(),
-    maxSteps: 1,
-  };
-}
-
-function persistWorkflowLoopContinuationArtifact(artifact: LoopWorkflowContinuationArtifact): void {
-  try {
-    mkdirSync(path.dirname(artifact.path), { recursive: true });
-    writeFileSync(artifact.path, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
-  } catch {
-    // Never throw from a continuation write path.
-  }
 }
 
 function renderWorkflowSummary(summary: WorkflowRunSummary): string {

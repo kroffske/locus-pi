@@ -76,7 +76,7 @@ each fresh review child before it runs instead of silently inheriting the parent
 session model. A resumed call may reuse that original child's recorded answer;
 replay starts no child and remains marked as not-fresh evidence.
 
-The runtime creates a unique `.locus-pi/plans/<generated-run-name>` workspace.
+The runtime creates a unique `.locus-pi/workspaces/<generated-run-name>` workspace.
 To provide additional comment and style criteria before launch, select an
 explicit fresh workspace with `--output-dir <path>` and create
 `<path>/style.md`. The runtime preserves an existing regular file byte-for-byte
@@ -118,7 +118,7 @@ action, or verification. `NO_ACTION` items receive no fix snippet.
 Apply the default REQUIRED set with the separate Package workflow `implement`:
 
 ```text
-/workflows run implement --output-dir .locus-pi/plans/<generated-run-name> apply REQUIRED fixes from post-code-review.md
+/workflows run implement --output-dir .locus-pi/workspaces/<generated-run-name> apply REQUIRED fixes from post-code-review.md
 ```
 
 Reuse the review workspace so the workflow can read the exact report. To include

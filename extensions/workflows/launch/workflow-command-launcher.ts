@@ -32,7 +32,9 @@ export interface WorkflowCommandLaunchRequest {
   input?: string;
   outputDir?: string;
   runName?: string;
+  budget?: RunWorkflowScriptOptions["budget"];
   resumeFromRunId?: string;
+  recoverInterrupted?: boolean;
   /** Run-level no-operator mode (operator input fails closed). */
   noOperator?: true;
   continuation?: WorkflowContinuation;
@@ -147,7 +149,9 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
           ...(request.input === undefined ? {} : { input: request.input }),
           ...(request.outputDir === undefined ? {} : { outputDir: request.outputDir }),
           ...(request.runName === undefined ? {} : { runName: request.runName }),
+          ...(request.budget === undefined ? {} : { budget: request.budget }),
           ...(request.resumeFromRunId === undefined ? {} : { resumeFromRunId: request.resumeFromRunId }),
+          ...(request.recoverInterrupted === undefined ? {} : { recoverInterrupted: request.recoverInterrupted }),
           ...(request.noOperator === undefined ? {} : { noOperator: request.noOperator }),
           ...(request.continuation === undefined ? {} : { continuation: request.continuation }),
           ...(request.operatorHandoffClaim === undefined ? {} : { operatorHandoffClaim: request.operatorHandoffClaim }),

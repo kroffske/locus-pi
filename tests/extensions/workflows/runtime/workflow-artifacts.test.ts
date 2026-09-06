@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowArtifactStore,
@@ -27,6 +27,7 @@ import {
   workflowRunArtifactsDir,
   workflowRunRuntimeDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import * as workflowRunLayout from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { parseWorkflowPersistedBinding } from "../../../../extensions/workflows/runtime/workflow-persisted-binding.js";
 import {
@@ -39,6 +40,7 @@ import { createHarness } from "../../../test-harness.js";
 const roots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -55,6 +57,17 @@ function runDir(root: string, runId: string): string {
 }
 
 describe("workflow run artifact store", () => {
+  it("refuses an unclaimed execution directory instead of creating a flat run", () => {
+    const root = project();
+    const id = "unclaimed-child";
+    const directory = path.join(root, ".locus-pi", "runs", id);
+    assert.throws(
+      () => createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: directory }),
+      /claimed execution|missing|ENOENT/u,
+    );
+    assert.equal(existsSync(directory), false);
+  });
+
   it("reads persisted indexes and bytes without creating missing runtime state", () => {
     const root = project();
     const absent = readWorkflowArtifactIndex(root, "absent-run");
@@ -73,6 +86,66 @@ describe("workflow run artifact store", () => {
     if (record.status === "ready") assert.equal(record.bytes.toString("utf8"), "reader bytes");
     assert.equal(readWorkflowArtifactRecord(root, id, "missing-id").status, "missing");
     assert.equal(readWorkflowArtifactIndex(root, "../escape").status, "invalid");
+  });
+
+  it("indexes operator answers under a stable identity and detects payload tampering", () => {
+    const root = project();
+    const id = "operator-ask-run";
+    const directory = runDir(root, id);
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: directory });
+    const record = {
+      tool: "workflow_ask" as const,
+      toolCallId: "tool-call-7",
+      declined: false,
+      entries: [
+        {
+          id: "storage",
+          question: "Which storage?",
+          status: "answered" as const,
+          answer: "sqlite",
+          kind: "option" as const,
+        },
+      ],
+    };
+
+    const ref = store.recordOperatorAskEvidence("call-0003", record.toolCallId, 2, record);
+
+    assert.equal(ref.artifactId, "call-0003-operator-ask-0002");
+    const indexed = store.list().find((entry) => entry.artifactId === ref.artifactId);
+    assert.deepEqual(indexed, {
+      runId: id,
+      artifactId: ref.artifactId,
+      name: "operator-ask-0002.json",
+      sha256: ref.sha256,
+      kind: "operator-ask",
+      mediaType: "application/json",
+      size: Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`, "utf8"),
+      relativePath: path.join("operator-asks", "call-0003", "operator-ask-0002.json"),
+      provenance: "fresh",
+      createdAt: indexed?.createdAt,
+      callId: "call-0003",
+      toolCallId: "tool-call-7",
+      sequence: 2,
+    });
+    const read = readWorkflowArtifactRecord(root, id, ref.artifactId);
+    assert.equal(read.status, "ready");
+    if (read.status === "ready") assert.deepEqual(JSON.parse(read.bytes.toString("utf8")), record);
+
+    writeFileSync(path.join(workflowRunArtifactsDir(directory), indexed!.relativePath), "tampered\n");
+    assert.equal(readWorkflowArtifactRecord(root, id, ref.artifactId).status, "tampered");
+  });
+
+  it("rejects mismatched operator-answer identity before writing an artifact", () => {
+    const root = project();
+    const id = "operator-ask-invalid";
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
+    const record = { tool: "workflow_ask" as const, toolCallId: "tool-a", declined: true, entries: [] };
+
+    assert.throws(
+      () => store.recordOperatorAskEvidence("call-0001", "tool-b", 1, record),
+      /toolCallId does not match/u,
+    );
+    assert.equal(store.list().length, 0);
   });
 
   it("classifies a dangling index as invalid and refuses to replace it", () => {
@@ -292,12 +365,22 @@ describe("workflow run artifact store", () => {
       runId: "snapshot-binding-valid-consumer",
       runDir: runDir(root, "snapshot-binding-valid-consumer"),
     });
+    const originalResolve = workflowRunLayout.resolveWorkflowRunDir;
+    const resolve = vi.spyOn(workflowRunLayout, "resolveWorkflowRunDir").mockImplementation((projectRoot, runId) => {
+      const resolved = originalResolve(projectRoot, runId);
+      if (runId === sourceRunId) {
+        mkdirSync(path.join(runDir(root, "duplicate-source-group"), "children", sourceRunId), { recursive: true });
+      }
+      return resolved;
+    });
     assert.equal(current.consumeText(sourceRef).text, "exact plan");
+    assert.equal(resolve.mock.calls.length, 1);
   });
 
   it("binds present Package sources to inventory depth while preserving removed history", () => {
     const root = project();
     const runId = "inventory-binding";
+    mkdirSync(runDir(root, runId), { recursive: true });
     const snapshotPath = path.join(
       root,
       ".locus-pi",
@@ -322,8 +405,8 @@ describe("workflow run artifact store", () => {
     });
     const present = parseWorkflowPersistedBinding(
       {
-        target: { kind: "name", ref: "task/substep", source: "package" },
-        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/substep.workflow.mjs")),
+        target: { kind: "name", ref: "task/plan", source: "package" },
+        scriptIdentity: identity(path.resolve("extensions/workflows/examples/task/plan.workflow.mjs")),
       },
       root,
       runId,
@@ -343,7 +426,9 @@ describe("workflow run artifact store", () => {
     const removedPersonal = parseWorkflowPersistedBinding(
       {
         target: { kind: "name", ref: "plan", source: "personal" },
-        scriptIdentity: identity(path.join(homedir(), ".pi", "workflows", "removed", "deep", "plan.workflow.mjs")),
+        scriptIdentity: identity(
+          path.join(homedir(), ".locus-pi", "workflows", "removed", "deep", "plan.workflow.mjs"),
+        ),
       },
       root,
       runId,
@@ -615,7 +700,7 @@ describe("workflow run artifact store", () => {
         runDir: runDir(root, sourceRunId),
       });
       const sourceRef = source.publishText("plan.md", "exact plan");
-      const targetPath = path.join(root, ".pi", "workflows", "target.workflow.mjs");
+      const targetPath = path.join(root, ".locus-pi", "workflows", "target.workflow.mjs");
       mkdirSync(path.dirname(targetPath), { recursive: true });
       if (kind === "external") {
         const external = path.join(path.dirname(root), "external-target-only.workflow.mjs");
@@ -631,7 +716,7 @@ describe("workflow run artifact store", () => {
         `${JSON.stringify({
           runId: sourceRunId,
           ok: true,
-          target: { kind: "scriptPath", ref: ".pi/workflows/target.workflow.mjs", source: "project" },
+          target: { kind: "scriptPath", ref: ".locus-pi/workflows/target.workflow.mjs", source: "project" },
           artifactRefs: [sourceRef],
         })}\n`,
       );
@@ -776,8 +861,8 @@ describe("workflow run artifact store", () => {
     });
 
     await runtime.dsl.parallel([
-      () => runtime.dsl.agent("one", { label: "same" }),
-      () => runtime.dsl.agent("two", { label: "same" }),
+      () => runtime.dsl.agent("one", { label: "one" }),
+      () => runtime.dsl.agent("two", { label: "two" }),
     ]);
     await assert.rejects(runtime.dsl.agent("bad"), WorkflowAgentExecutionError);
 
@@ -827,9 +912,9 @@ describe("workflow run artifact store", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "evidence.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "evidence.workflow.mjs"),
       'export default async function runWorkflow(dsl) { return { ok: true, answer: await dsl.agent("answer", { artifact: "review.md" }) }; }\n',
     );
     const harness = createHarness(root, { sessionId: "artifact-parent" });
@@ -884,9 +969,9 @@ describe("workflow run artifact store", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "replay.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "replay.workflow.mjs"),
       'export default async function runWorkflow(dsl) { return { ok: true, answer: await dsl.agent("same") }; }\n',
     );
     const harness = createHarness(root, { sessionId: "replay-parent" });
@@ -943,9 +1028,9 @@ describe("workflow run artifact store", () => {
         path.join(root, ".agents", "agents", "default.md"),
         "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
       );
-      mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+      mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
       writeFileSync(
-        path.join(root, ".pi", "workflows", "replay-snapshot.workflow.mjs"),
+        path.join(root, ".locus-pi", "workflows", "replay-snapshot.workflow.mjs"),
         'export default async function runWorkflow(dsl) { return { answer: await dsl.agent("same") }; }\n',
       );
       const harness = createHarness(root, { sessionId: `replay-snapshot-${mutation}` });

@@ -39,6 +39,25 @@ const NARROW_WIDTH = 60;
 const WIDE_WIDTH = 100;
 const FRAME_SIDE_WIDTH = 4;
 const MIN_FRAMED_WIDTH = 12;
+// Selection is a Locus interaction state, not a Pi theme accent. Keep one
+// contrast-tested palette so user themes cannot turn active choices neutral.
+const ACTIVE_SELECTION_BACKGROUND = "\u001b[48;2;88;61;121m";
+const ACTIVE_SELECTION_FOREGROUND = "\u001b[38;2;248;241;255m";
+const ACTIVE_SELECTION_BORDER = "\u001b[38;2;196;167;231m";
+const ACTIVE_SELECTION_RESET = "\u001b[0m";
+const ACTIVE_SELECTION_BORDER_RESET = "\u001b[39m";
+
+/** Render one active choice with the shared purple fill and a plain fallback. */
+export function styleActiveSelection(theme: OperatorThemeLike | undefined, text: string): string {
+  return hasLiveTheme(theme)
+    ? `${ACTIVE_SELECTION_BACKGROUND}${ACTIVE_SELECTION_FOREGROUND}${text}${ACTIVE_SELECTION_RESET}`
+    : text;
+}
+
+/** Render an active selection boundary in the lighter edge color of the same palette. */
+function styleSelectionBorder(theme: OperatorThemeLike | undefined, text: string): string {
+  return hasLiveTheme(theme) ? `${ACTIVE_SELECTION_BORDER}${text}${ACTIVE_SELECTION_BORDER_RESET}` : text;
+}
 
 /**
  * Render a semantic operator block for the interactive TUI.
@@ -72,17 +91,19 @@ function renderOperatorBlockUnbounded(block: OperatorBlock, safeWidth: number, t
   const headingWidth = Math.max(0, innerWidth - 1);
   const heading = truncateToWidth(renderHeading(block, safeWidth, theme), headingWidth);
   const topFill = "─".repeat(Math.max(0, headingWidth - visibleWidth(heading)));
-  const lines = [`${style(theme, borderTone, "╭─ ")}${heading}${style(theme, borderTone, ` ${topFill}╮`)}`];
+  const frame = (text: string) =>
+    block.type === "SELECT" ? styleSelectionBorder(theme, text) : style(theme, borderTone, text);
+  const lines = [`${frame("╭─ ")}${heading}${frame(` ${topFill}╮`)}`];
 
   for (const content of contentLines(block)) {
     const styled = styleContentLine(content, theme);
     for (const wrapped of wrapTextWithAnsi(styled, innerWidth)) {
       const padding = " ".repeat(Math.max(0, innerWidth - visibleWidth(wrapped)));
-      lines.push(`${style(theme, borderTone, "│ ")}${wrapped}${padding}${style(theme, borderTone, " │")}`);
+      lines.push(`${frame("│ ")}${wrapped}${padding}${frame(" │")}`);
     }
   }
 
-  lines.push(style(theme, borderTone, `╰${"─".repeat(safeWidth - 2)}╯`));
+  lines.push(frame(`╰${"─".repeat(safeWidth - 2)}╯`));
   return lines.map((line) => truncateToWidth(line, safeWidth));
 }
 
@@ -149,6 +170,10 @@ function style(
   text: string,
 ): string {
   return typeof theme?.fg === "function" ? theme.fg(tone, text) : text;
+}
+
+function hasLiveTheme(theme: OperatorThemeLike | undefined): boolean {
+  return typeof theme?.fg === "function";
 }
 
 function surfaceTone(type: OperatorSurfaceType): OperatorTone {

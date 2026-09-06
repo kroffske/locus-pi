@@ -46,8 +46,8 @@ describe("focused workflow catalog", () => {
 
     expect(harness.customComponents).toHaveLength(1);
     expect(harness.customRenderFrames[0]?.join("\n")).toContain("[SELECT] Workflow catalog");
-    expect(harness.customRenderFrames[0]?.join("\n")).toContain("[Package 18]");
-    expect(harness.customRenderFrames[0]?.join("\n")).toContain("> implement · [PKG]");
+    expect(harness.customRenderFrames[0]?.join("\n")).toContain("[Package 11]");
+    expect(harness.customRenderFrames[0]?.join("\n")).toContain("> live-smoke · [PKG]");
     expect(harness.widgets.get("workflows")).toBe("");
   });
 
@@ -86,23 +86,23 @@ describe("focused workflow catalog", () => {
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toContain(model.current[0]!.originPath);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("    · Alpha workflow");
+    expect(lines[row + 1]).toContain("   · Alpha workflow");
     expect(lines.join("\n")).not.toContain("profile=");
     expect(lines.join("\n")).not.toContain(model.current[0]!.originPath);
-    expect(lines.join("\n")).toContain(`Catalog: ${path.join(root, ".pi", "workflows")}`);
+    expect(lines.join("\n")).toContain(`Catalog: ${path.join(root, ".locus-pi", "workflows")}`);
 
     viewer.handleInput("down");
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> beta · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
-    expect(lines[row + 1]).toContain("    · Beta workflow");
+    expect(lines[row + 1]).toContain("   · Beta workflow");
 
     viewer.handleInput("left");
     lines = viewer.render(146);
     row = lines.findIndex((line) => line.includes("> alpha · run 20260101-000001-alpha · [P]"));
     expect(row).toBeGreaterThanOrEqual(0);
     expect(lines[row]).not.toMatch(/\b(?:Project|User|Package)\b/u);
-    expect(lines[row + 1]).toContain("    · historical run snapshot");
+    expect(lines[row + 1]).toContain("   · historical run snapshot");
   });
 
   it("keeps source sections and folder hierarchy readable at narrow widths", () => {
@@ -116,21 +116,21 @@ describe("focused workflow catalog", () => {
       const narrow = lines.join("\n");
       expect(narrow).toContain(width < 64 ? "P 1" : "Project 1");
       expect(narrow).toContain(width < 64 ? "U 0" : "User 0");
-      expect(narrow).toContain(width < 64 ? "[PKG 18]" : "[Package 18]");
+      expect(narrow).toContain(width < 64 ? "[PKG 11]" : "[Package 11]");
       expect(narrow).toContain("necessity");
-      expect(narrow).toContain("  └ necessity");
+      expect(lines.some((line) => /^ {2}└ necessity/u.test(line))).toBe(true);
       expect(narrow).toContain("7 children");
     }
     const rendered = viewer.render(80).join("\n");
     expect(rendered).toContain("post-code-review · [PKG] · 7 children");
-    expect(rendered).toContain("  └ necessity · [PKG]");
+    expect(rendered).toMatch(/^ {2}└ necessity · \[PKG\]$/mu);
     expect(rendered).toContain("      · Challenge behavioral and code-shape fixes");
     expect(rendered).not.toContain("    └ Challenge behavioral and code-shape fixes");
   });
 
   it("renders a group-only header once and keeps its filtered children selectable", () => {
     const root = emptyProject();
-    const namespace = path.join(root, ".pi", "workflows", "airflow-dag-builder");
+    const namespace = path.join(root, ".locus-pi", "workflows", "airflow-dag-builder");
     writeWorkflow(namespace, "implement", source("airflow-dag-builder/implement", "Implement DAG"));
     writeWorkflow(namespace, "plan", source("airflow-dag-builder/plan", "Plan DAG"));
     const model = buildWorkflowCatalogModel(root, root, "airflow-dag-builder");
@@ -143,7 +143,7 @@ describe("focused workflow catalog", () => {
     expect(initial.match(/└ plan · \[P\]/gu)).toHaveLength(1);
 
     viewer.handleInput("down");
-    expect(viewer.render(100).join("\n")).toContain(">   └ plan · [P]");
+    expect(viewer.render(100).join("\n")).toContain("> └ plan · [P]");
     viewer.handleInput("enter");
     expect(viewer.render(100).join("\n")).toContain("[VIEW] [P] airflow-dag-builder/plan");
   });
@@ -156,8 +156,8 @@ describe("focused workflow catalog", () => {
     focusProject(viewer);
 
     const rendered = viewer.render(48).join("\n");
-    expect(rendered).toContain("    · Alpha workflow description uses complete");
-    expect(rendered).toContain("      words across the available terminal width");
+    expect(rendered).toContain("   · Alpha workflow description uses complete");
+    expect(rendered).toContain("     words across the available terminal width");
     expect(rendered).not.toContain("profile=");
     expect(rendered).not.toContain(model.current[0]!.originPath);
   });
@@ -168,38 +168,66 @@ describe("focused workflow catalog", () => {
     const model = buildWorkflowCatalogModel(root, root);
     const { viewer } = createViewer(model, root, 48);
 
-    expect(viewer.render(146).join("\n")).toContain("Project 1  User 0  [Package 18]  History 1");
+    expect(viewer.render(146).join("\n")).toContain("Project 1  User 0  [Package 11]  History 1");
     viewer.handleInput("left");
-    expect(viewer.render(146).join("\n")).toContain("Project 1  [User 0]  Package 18  History 1");
+    expect(viewer.render(146).join("\n")).toContain("Project 1  [User 0]  Package 11  History 1");
     viewer.handleInput("left");
-    expect(viewer.render(146).join("\n")).toContain("[Project 1]  User 0  Package 18  History 1");
+    expect(viewer.render(146).join("\n")).toContain("[Project 1]  User 0  Package 11  History 1");
     viewer.handleInput("left");
     const history = viewer.render(146).join("\n");
-    expect(history).toContain("Project 1  User 0  Package 18  [History 1]");
+    expect(history).toContain("Project 1  User 0  Package 11  [History 1]");
     expect(history).toContain("alpha · run 20260101-000001-alpha · [P]");
     expect(history).not.toContain("> alpha · [P]");
+  });
+
+  it("pins the source tabs directly below the header across different content heights", () => {
+    const root = projectWithWorkflows(manyWorkflows(18));
+    writeRun(root, "20260101-000001-alpha", "alpha");
+    const model = buildWorkflowCatalogModel(root, root);
+    const { viewer } = createViewer(model, root, 48);
+    const tabRows: number[] = [];
+
+    for (let index = 0; index < 4; index += 1) {
+      const lines = viewer.render(146);
+      tabRows.push(lines.findIndex((line) => line.includes("Project 18") && line.includes("Package 11")));
+      viewer.handleInput("left");
+    }
+
+    expect(tabRows).toEqual([1, 1, 1, 1]);
+  });
+
+  it("uses the fixed workflow-purple active-tab palette only for themed rendering", () => {
+    const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
+    const model = buildWorkflowCatalogModel(root, root);
+    const themed = createViewer(model, root, 18, { fg: (_color: string, text: string) => text }).viewer.render(146);
+    const plain = createViewer(model, root, 18).viewer.render(146);
+
+    expect(themed[1]).toContain("\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m[Package 11]\u001b[0m");
+    expect(visibleWidth(themed[1]!)).toBe(visibleWidth(plain[1]!));
+    expect(plain[1]).toContain("[Package 11]");
+    expect(plain[1]).not.toContain("\u001b[");
   });
 
   it("opens the richest current source and keeps fixed-order ties deterministic", () => {
     const personalRichRoot = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     writeWorkflow(
-      path.join(personalRichRoot, "home", ".pi", "workflows"),
+      path.join(personalRichRoot, "home", ".locus-pi", "workflows"),
       "personal-19",
       source("personal-19", "Personal"),
     );
     for (let index = 0; index < 18; index += 1) {
       const name = `personal-${String(index).padStart(2, "0")}`;
-      writeWorkflow(path.join(personalRichRoot, "home", ".pi", "workflows"), name, source(name, "Personal"));
+      writeWorkflow(path.join(personalRichRoot, "home", ".locus-pi", "workflows"), name, source(name, "Personal"));
     }
     const personal = createViewer(
       buildWorkflowCatalogModel(personalRichRoot, personalRichRoot),
       personalRichRoot,
     ).viewer;
-    expect(personal.render(100).join("\n")).toContain("Project 1  [User 19]  Package 18");
+    expect(personal.render(100).join("\n")).toContain("Project 1  [User 19]  Package 11");
 
-    const tiedRoot = projectWithWorkflows(manyWorkflows(18));
+    const tiedRoot = projectWithWorkflows(manyWorkflows(19));
     const tied = createViewer(buildWorkflowCatalogModel(tiedRoot, tiedRoot), tiedRoot).viewer;
-    expect(tied.render(100).join("\n")).toContain("[Project 18]  User 0  Package 18");
+    expect(tied.render(100).join("\n")).toContain("[Project 19]  User 0  Package 11");
   });
 
   it("cycles catalog tabs with Tab plus named, ANSI, and application arrow keys", () => {
@@ -214,7 +242,7 @@ describe("focused workflow catalog", () => {
     viewer.handleInput("\x1b[C");
     expect(viewer.render(100).join("\n")).toContain("[User 0]");
     viewer.handleInput("\x1bOC");
-    expect(viewer.render(100).join("\n")).toContain("[Package 18]");
+    expect(viewer.render(100).join("\n")).toContain("[Package 11]");
     viewer.handleInput("left");
     expect(viewer.render(100).join("\n")).toContain("[User 0]");
     viewer.handleInput("\x1b[D");
@@ -226,7 +254,7 @@ describe("focused workflow catalog", () => {
   it("reports deletion and returns without losing the selected row", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
-    const file = path.join(root, ".pi", "workflows", "alpha.workflow.mjs");
+    const file = path.join(root, ".locus-pi", "workflows", "alpha.workflow.mjs");
     rmSync(file);
     const { viewer, done } = createViewer(model, root);
     focusProject(viewer);
@@ -243,9 +271,9 @@ describe("focused workflow catalog", () => {
     const root = emptyProject();
     const home = path.join(root, "home");
     process.env.HOME = home;
-    writeWorkflow(path.join(home, ".pi", "workflows"), "same", source("same", "Personal source"));
+    writeWorkflow(path.join(home, ".locus-pi", "workflows"), "same", source("same", "Personal source"));
     const model = buildWorkflowCatalogModel(root, root);
-    writeWorkflow(path.join(root, ".pi", "workflows"), "same", source("same", "New project shadow"));
+    writeWorkflow(path.join(root, ".locus-pi", "workflows"), "same", source("same", "New project shadow"));
     const { viewer } = createViewer(model, root);
     viewer.handleInput("left");
 
@@ -258,7 +286,7 @@ describe("focused workflow catalog", () => {
 
   it("shows an explicit unreadable state", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
-    const file = path.join(root, ".pi", "workflows", "alpha.workflow.mjs");
+    const file = path.join(root, ".locus-pi", "workflows", "alpha.workflow.mjs");
     const model = buildWorkflowCatalogModel(root, root);
     chmodSync(file, 0o000);
     try {
@@ -306,26 +334,26 @@ describe("focused workflow catalog", () => {
     expect(last).toContain("const line40 = 40;");
   });
 
-  it("uses semantic colors and a caret to distinguish focus, actions, and metadata", () => {
+  it("uses the shared purple fill for horizontal actions and semantic colors for settled metadata", () => {
     const root = projectWithWorkflows({ alpha: source("alpha", "Alpha workflow") });
     const model = buildWorkflowCatalogModel(root, root);
     const fg = vi.fn((_color: string, text: string) => text);
     const { viewer } = createViewer(model, root, 18, { fg });
 
     viewer.handleInput("enter");
-    expect(viewer.render(80).join("\n")).toContain("› [Back] Start Edit Review");
+    expect(viewer.render(80).join("\n")).toContain("\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m› [Back]\u001b[0m");
     expect(fg).toHaveBeenCalledWith("success", "[VIEW]");
     expect(fg).toHaveBeenCalledWith("success", "Source:");
     expect(fg).toHaveBeenCalledWith("success", "Catalog:");
     expect(fg).toHaveBeenCalledWith("success", "Path:");
-    expect(fg).toHaveBeenCalledWith("warning", "› [Back]");
-    expect(fg).toHaveBeenCalledWith("success", "Start");
+    expect(fg).toHaveBeenCalledWith("text", "Start");
+    expect(fg).not.toHaveBeenCalledWith("success", "Start");
 
     fg.mockClear();
     viewer.handleInput("tab");
-    expect(viewer.render(80).join("\n")).toContain("Back › [Start] Edit Review");
-    expect(fg).toHaveBeenCalledWith("warning", "› [Start]");
-    expect(fg).toHaveBeenCalledWith("success", "Back");
+    expect(viewer.render(80).join("\n")).toContain("\u001b[48;2;88;61;121m\u001b[38;2;248;241;255m› [Start]\u001b[0m");
+    expect(fg).toHaveBeenCalledWith("text", "Back");
+    expect(fg).not.toHaveBeenCalledWith("success", "Back");
   });
 
   it("keeps catalog and source lines bounded at wide and narrow widths", () => {
@@ -559,8 +587,8 @@ describe("focused workflow catalog", () => {
 
     await harness.commands.get("workflows")!.handler("list", harness.ctx);
 
-    expect(harness.widgets.get("workflows")).toContain('Copied workflow "implement" to Project');
-    expect(existsSync(path.join(root, ".pi", "workflows", "implement", "implement.workflow.mjs"))).toBe(true);
+    expect(harness.widgets.get("workflows")).toContain('Copied workflow "live-smoke" to Project');
+    expect(existsSync(path.join(root, ".locus-pi", "workflows", "live-smoke", "live-smoke.workflow.mjs"))).toBe(true);
     expect(harness.editorText).toBe("");
     expect(harness.sentMessages).toEqual([]);
     expect(harness.sentUserMessages).toEqual([]);
@@ -894,7 +922,7 @@ describe("workflow info viewer", () => {
         expect(semantic).toContain(label);
       }
       if (block.subject.endsWith(": alpha")) {
-        expect(semantic).toContain("source locator: .pi/workflows/alpha.workflow.mjs");
+        expect(semantic).toContain("source locator: .locus-pi/workflows/alpha.workflow.mjs");
         expect(semantic).not.toContain(root);
       }
     }
@@ -987,7 +1015,7 @@ function collectInfoLines(viewer: WorkflowInfoViewer, width: number, pages: numb
 function projectWithWorkflows(files: Record<string, string>): string {
   const root = emptyProject();
   for (const [name, content] of Object.entries(files)) {
-    writeWorkflow(path.join(root, ".pi", "workflows"), name, content);
+    writeWorkflow(path.join(root, ".locus-pi", "workflows"), name, content);
   }
   return root;
 }
@@ -1041,7 +1069,7 @@ function writeRun(
       scriptIdentity: {
         schemaVersion: 2,
         identityPolicy: "static-node-only-v1",
-        sourcePath: path.join(root, ".pi", "workflows", `${name}.workflow.mjs`),
+        sourcePath: path.join(root, ".locus-pi", "workflows", `${name}.workflow.mjs`),
         snapshotPath,
         scriptSha256: sha256,
         identityCoverage: "self-contained-static",

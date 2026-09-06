@@ -31,6 +31,7 @@ import {
 } from "../../../../extensions/_shared/model/workflow-model-resolve.js";
 import type { ModelLike } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, type Harness } from "../../../test-harness.js";
+import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../../model-roles-fixture.js";
 
 /**
  * Model tiers, end to end.
@@ -40,16 +41,15 @@ import { createHarness, type Harness } from "../../../test-harness.js";
  * what it refused. Everything here is deterministic — the SDK factory is injected,
  * so `createSession` is observed by value rather than believed.
  *
- * What these tests deliberately cannot prove: that a real Pi peer honours the model
- * object it was handed. That is the live run in `artifacts/live-two-tier-run.md`.
+ * A real Pi peer honoring the model remains live-run evidence.
  */
 
 const FAST: ModelLike = { provider: "test", id: "fast", name: "Test Fast" };
 const STRONG: ModelLike = { provider: "test", id: "strong", name: "Test Strong" };
-
 afterEach(() => {
   resetWorkflowLiveExecutions();
   agentLiveStore.reset();
+  restoreGlobalModelRolesHome();
 });
 
 /** The shape the post-child validator cases hand the runtime, so `validate` is reached at all. */
@@ -174,9 +174,10 @@ function runResultArtifacts(projectRoot: string): Array<Record<string, unknown>>
 }
 
 async function harnessWithRoles(roles?: Record<string, string>): Promise<Harness> {
-  const h = createHarness(tieredProject(), { sessionId: "tier-parent" });
+  const root = tieredProject();
+  writeGlobalModelRoles(root, roles ?? {});
+  const h = createHarness(root, { sessionId: "tier-parent" });
   h.ctx.model = STRONG;
-  if (roles !== undefined) await h.ctx.settings?.set("modelRoles", roles);
   return h;
 }
 
@@ -289,8 +290,7 @@ describe("the declared tier reaches the child session", () => {
     const result = await runner({ prompt: "cheap work", agent: "bare", modelRole: "smol" });
 
     expect(result.status).toBe("completed");
-    // By VALUE, not by truthiness: the parent session runs `test/strong`, so a
-    // passing assertion here cannot be satisfied by inheritance.
+    // The parent session runs `test/strong`, so inheritance cannot pass this.
     expect(probe.captured).toHaveLength(1);
     expect(probe.captured[0]?.model).toEqual(FAST);
     expect(h.ctx.model).toEqual(STRONG);
@@ -542,7 +542,7 @@ describe("an unresolvable concrete selector fails the call", () => {
     // typo'd assignment used to arrive at the bridge indistinguishable from a role
     // nobody assigned — and OD5 degrades an unassigned role. The operator therefore
     // got the parent's model under the name `smol`, plus a note claiming the role was
-    // "not assigned in any model-roles layer" that their own config file contradicts.
+    // "not assigned in the global model-roles config" that their own file contradicts.
     // A typo is OD5's fail-closed case.
     const h = await harnessWithRoles({ smol: "deepseek-v4-flash" });
     const probe = sdkProbe();
@@ -560,9 +560,9 @@ describe("an unresolvable concrete selector fails the call", () => {
     expect(diagnostic).toContain('"smol"');
     // The value as written and the layer that carried it — the two facts needed to fix it.
     expect(diagnostic).toContain('"deepseek-v4-flash"');
-    expect(diagnostic).toContain("settings");
+    expect(diagnostic).toContain("global model-roles config");
     // And it must NOT be described as unassigned, which is the false statement.
-    expect(diagnostic).not.toContain("is not assigned in any model-roles layer");
+    expect(diagnostic).not.toContain("is not assigned in the global model-roles config");
     expect(probe.captured).toHaveLength(0);
   });
 
@@ -691,7 +691,7 @@ describe("a frontmatter tier in the pre-tier pi/<role> namespace", () => {
     );
     const h = createHarness(root, { sessionId: "tier-parent" });
     h.ctx.model = STRONG;
-    await h.ctx.settings?.set("modelRoles", { smol: "test/fast" });
+    writeGlobalModelRoles(root, { smol: "test/fast" });
     const probe = sdkProbe(FAST);
     const runner = createWorkflowAgentRunner({
       pi: h.pi,
@@ -962,9 +962,9 @@ describe("executed-model evidence", () => {
 
   it("round-trips requested, role, executed, and fallback model evidence through the persisted reader", async () => {
     const root = tieredProject();
+    writeGlobalModelRoles(root, {});
     const h = createHarness(root, { sessionId: "tier-persisted-journal" });
     h.ctx.model = STRONG;
-    await h.ctx.settings?.set("modelRoles", {});
     const probe = sdkProbe(STRONG);
     const runner = createWorkflowAgentRunner({
       pi: h.pi,

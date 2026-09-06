@@ -216,7 +216,7 @@ function scratchProject(): string {
 }
 
 function saveWorkflow(root: string, name: string, body: string): void {
-  const dir = path.join(root, ".pi", "workflows");
+  const dir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${name}.workflow.mjs`), body, "utf8");
 }
@@ -653,9 +653,11 @@ describe("run wall clock (runtimeMs)", () => {
     });
 
     const grouped = runtime.dsl.parallel([() => runtime.dsl.agent("first"), () => runtime.dsl.agent("queued")]);
-    // Both calls have entered the runtime; only the first owns the one execution slot.
+    // Both calls have entered the runtime; only the first owns the one execution
+    // slot, so only it is started — the other is still queued at the gate.
     await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(runtime.getJournal().filter((line) => line.kind === "agent_start")).toHaveLength(2);
+    expect(runtime.getJournal().filter((line) => line.kind === "agent_queued")).toHaveLength(2);
+    expect(runtime.getJournal().filter((line) => line.kind === "agent_start")).toHaveLength(1);
     expect(started).toEqual(["first"]);
 
     clock.advance(11);

@@ -38,7 +38,7 @@ describe("workflow operator catalog", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-group-only-"));
     const previousHome = process.env.HOME;
     try {
-      const namespace = path.join(root, ".pi", "workflows", "airflow-dag-builder");
+      const namespace = path.join(root, ".locus-pi", "workflows", "airflow-dag-builder");
       mkdirSync(namespace, { recursive: true });
       writeFileSync(path.join(namespace, "plan.workflow.mjs"), 'export default () => "plan";\n', "utf8");
       writeFileSync(path.join(namespace, "implement.workflow.mjs"), 'export default () => "implement";\n', "utf8");
@@ -100,8 +100,8 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = home;
-      const projectNamespace = path.join(root, ".pi", "workflows", "atomic-group");
-      const personalNamespace = path.join(home, ".pi", "workflows", "atomic-group");
+      const projectNamespace = path.join(root, ".locus-pi", "workflows", "atomic-group");
+      const personalNamespace = path.join(home, ".locus-pi", "workflows", "atomic-group");
       mkdirSync(projectNamespace, { recursive: true });
       mkdirSync(personalNamespace, { recursive: true });
       writeFileSync(path.join(projectNamespace, "plan.workflow.mjs"), 'export default () => "project";\n', "utf8");
@@ -135,21 +135,21 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = home;
-      const personalDir = path.join(home, ".pi", "workflows");
+      const personalDir = path.join(home, ".locus-pi", "workflows");
       mkdirSync(personalDir, { recursive: true });
       writeFileSync(path.join(personalDir, `${name}.workflow.mjs`), 'export default () => "personal";\n', "utf8");
 
-      const externalWorkflowDir = path.join(outside, ".pi", "workflows");
+      const externalWorkflowDir = path.join(outside, ".locus-pi", "workflows");
       mkdirSync(externalWorkflowDir, { recursive: true });
       const externalFile = path.join(externalWorkflowDir, `${name}.workflow.mjs`);
       writeFileSync(externalFile, 'export const meta = { description: "outside" };\n', "utf8");
-      const projectWorkflowDir = path.join(root, ".pi", "workflows");
+      const projectWorkflowDir = path.join(root, ".locus-pi", "workflows");
       if (shape === "file") {
         mkdirSync(path.dirname(projectWorkflowDir), { recursive: true });
         mkdirSync(projectWorkflowDir, { recursive: true });
         symlinkSync(externalFile, path.join(projectWorkflowDir, `${name}.workflow.mjs`));
       } else {
-        symlinkSync(path.join(outside, ".pi"), path.join(root, ".pi"), "dir");
+        symlinkSync(path.join(outside, ".locus-pi"), path.join(root, ".locus-pi"), "dir");
       }
 
       if (shape === "ancestor") {
@@ -175,7 +175,7 @@ describe("workflow operator catalog", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-package-confinement-"));
     const outside = mkdtempSync(path.join(tmpdir(), "wf-catalog-package-outside-"));
     try {
-      const projectWorkflowDir = path.join(root, ".pi", "workflows");
+      const projectWorkflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(projectWorkflowDir, { recursive: true });
       const externalFile = path.join(outside, "plan.workflow.mjs");
       writeFileSync(externalFile, 'export const meta = { description: "outside" };\n', "utf8");
@@ -198,7 +198,7 @@ describe("workflow operator catalog", () => {
   it("blocks a directory-shaped project entry across resolver, catalog, info, completion, and launch", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-directory-collision-"));
     try {
-      mkdirSync(path.join(root, ".pi", "workflows", "plan.workflow.mjs"), { recursive: true });
+      mkdirSync(path.join(root, ".locus-pi", "workflows", "plan.workflow.mjs"), { recursive: true });
 
       expect(buildWorkflowCatalogModel(root, root).current.some((row) => row.name === "plan")).toBe(false);
       expect(workflowArgumentCompletions("run p", root, root)?.map((completion) => completion.value)).not.toContain(
@@ -226,11 +226,8 @@ describe("workflow operator catalog", () => {
   it("blocks an invalid higher-precedence search directory consistently", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-invalid-search-dir-"));
     try {
-      mkdirSync(path.join(root, ".pi"), { recursive: true });
-      writeFileSync(path.join(root, ".pi", "workflows"), "not a directory\n", "utf8");
-      const fallback = path.join(root, ".claude", "workflows", "collision.workflow.mjs");
-      mkdirSync(path.dirname(fallback), { recursive: true });
-      writeFileSync(fallback, 'export default () => "fallback";\n', "utf8");
+      mkdirSync(path.join(root, ".locus-pi"), { recursive: true });
+      writeFileSync(path.join(root, ".locus-pi", "workflows"), "not a directory\n", "utf8");
 
       expect(() => buildWorkflowCatalogModel(root, root)).toThrow(/not a directory/u);
       expect(workflowArgumentCompletions("run c", root, root)).toEqual([]);
@@ -257,17 +254,17 @@ describe("workflow operator catalog", () => {
       const actual = path.join(root, "workflow-sources");
       mkdirSync(actual, { recursive: true });
       writeFileSync(path.join(actual, "inside.workflow.mjs"), 'export default () => "inside";\n', "utf8");
-      mkdirSync(path.join(root, ".pi"), { recursive: true });
-      symlinkSync(actual, path.join(root, ".pi", "workflows"), "dir");
+      mkdirSync(path.join(root, ".locus-pi"), { recursive: true });
+      symlinkSync(actual, path.join(root, ".locus-pi", "workflows"), "dir");
 
       const model = buildWorkflowCatalogModel(root, root);
       expect(model.current.find((row) => row.name === "inside")).toMatchObject({
         source: "project",
-        target: { path: path.join(root, ".pi", "workflows", "inside.workflow.mjs") },
+        target: { path: path.join(root, ".locus-pi", "workflows", "inside.workflow.mjs") },
       });
       expect(resolveWorkflowTarget({ name: "inside" }, root, root)).toMatchObject({
         source: "project",
-        path: path.join(root, ".pi", "workflows", "inside.workflow.mjs"),
+        path: path.join(root, ".locus-pi", "workflows", "inside.workflow.mjs"),
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -277,14 +274,15 @@ describe("workflow operator catalog", () => {
   it("blocks the same invalid lower-precedence directory for an existing higher source", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-lower-invalid-dir-"));
     try {
-      const higher = path.join(root, ".pi", "workflows", "inside.workflow.mjs");
+      const workingDirectory = path.join(root, "nested");
+      const higher = path.join(workingDirectory, ".locus-pi", "workflows", "inside.workflow.mjs");
       mkdirSync(path.dirname(higher), { recursive: true });
       writeFileSync(higher, 'export default () => "higher";\n', "utf8");
-      mkdirSync(path.join(root, ".claude"), { recursive: true });
-      writeFileSync(path.join(root, ".claude", "workflows"), "not a directory\n", "utf8");
+      mkdirSync(path.join(root, ".locus-pi"), { recursive: true });
+      writeFileSync(path.join(root, ".locus-pi", "workflows"), "not a directory\n", "utf8");
 
-      expect(() => resolveWorkflowTarget({ name: "inside" }, root, root)).toThrow(/not a directory/u);
-      expect(() => listWorkflowCatalogTargets(root, root)).toThrow(/not a directory/u);
+      expect(() => resolveWorkflowTarget({ name: "inside" }, root, workingDirectory)).toThrow(/not a directory/u);
+      expect(() => listWorkflowCatalogTargets(root, workingDirectory)).toThrow(/not a directory/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -296,7 +294,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = home;
-      const personalDir = path.join(home, ".pi", "workflows");
+      const personalDir = path.join(home, ".locus-pi", "workflows");
       mkdirSync(personalDir, { recursive: true });
       writeFileSync(
         path.join(personalDir, "post-code-review.workflow.mjs"),
@@ -323,7 +321,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = home;
-      const personalDir = path.join(home, ".pi", "workflows");
+      const personalDir = path.join(home, ".locus-pi", "workflows");
       mkdirSync(personalDir, { recursive: true });
       const external = path.join(outside, "live-smoke.workflow.mjs");
       writeFileSync(external, "export default () => 'outside';\n", "utf8");
@@ -351,7 +349,6 @@ describe("workflow operator catalog", () => {
 
     // Folder names sort top-level workflows; each root precedes its children.
     expect(descriptions.map(({ name }) => name)).toEqual([
-      "implement",
       "live-smoke",
       "post-code-review",
       "post-code-review/boundaries",
@@ -362,13 +359,7 @@ describe("workflow operator catalog", () => {
       "post-code-review/style",
       "post-code-review/synthesis",
       "task/draft",
-      "task/implement-plan-template",
       "task/plan",
-      "task/substep",
-      "workflow-creator",
-      "workflow-creator/build",
-      "workflow-creator/design",
-      "workflow-creator/svg",
     ]);
     for (const { name, description } of descriptions) {
       expect(description, name).not.toMatch(/description unavailable|no description/u);
@@ -386,7 +377,6 @@ describe("workflow operator catalog", () => {
 
       // Package rows are ordered as top-level folders with root before children.
       expect(packageNames).toEqual([
-        "implement",
         "live-smoke",
         "post-code-review",
         "post-code-review/boundaries",
@@ -397,13 +387,7 @@ describe("workflow operator catalog", () => {
         "post-code-review/style",
         "post-code-review/synthesis",
         "task/draft",
-        "task/implement-plan-template",
         "task/plan",
-        "task/substep",
-        "workflow-creator",
-        "workflow-creator/build",
-        "workflow-creator/design",
-        "workflow-creator/svg",
       ]);
       expect(packageNames).not.toContain("plan-build-review");
     } finally {
@@ -454,43 +438,13 @@ describe("workflow operator catalog", () => {
     }
   });
 
-  it("exposes Workflow Creator as one root with three directly runnable children", () => {
-    const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-creator-"));
-    try {
-      const model = buildWorkflowCatalogModel(root, root);
-      const creatorNames = [
-        "workflow-creator",
-        "workflow-creator/build",
-        "workflow-creator/design",
-        "workflow-creator/svg",
-      ];
-      expect(model.current.find((row) => row.name === "workflow-creator")).toMatchObject({
-        role: "root",
-        children: creatorNames.slice(1),
-      });
-      const parentRpc = renderOperatorBlockPlain(buildWorkflowInfoBlock(root, root, "workflow-creator"), 80, {
-        maxLines: 10,
-      }).join("\n");
-      expect(parentRpc).toContain("Composition: root");
-      expect(parentRpc).toContain("3 child workflow");
-      for (const name of creatorNames.slice(1)) {
-        expect(model.current.find((row) => row.name === name)).toMatchObject({
-          role: "child",
-          rootName: "workflow-creator",
-        });
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
   it("selects one whole namespace without mixing lower-source children", () => {
     const root = mkdtempSync(path.join(tmpdir(), "wf-catalog-incomplete-bundle-"));
     const previousHome = process.env.HOME;
     try {
-      const projectDir = path.join(root, ".pi", "workflows");
+      const projectDir = path.join(root, ".locus-pi", "workflows");
       const home = path.join(root, "home");
-      const personalDir = path.join(home, ".pi", "workflows");
+      const personalDir = path.join(home, ".locus-pi", "workflows");
       process.env.HOME = home;
       const projectNamespace = path.join(projectDir, "post-code-review");
       mkdirSync(projectNamespace, { recursive: true });
@@ -564,10 +518,10 @@ describe("workflow operator catalog", () => {
     const projectRoot = "/workspace/project";
     expect(
       safeRecentWorkflowLabel(
-        { kind: "scriptPath", ref: "/workspace/project/.pi/workflows/safe.workflow.mjs" },
+        { kind: "scriptPath", ref: "/workspace/project/.locus-pi/workflows/safe.workflow.mjs" },
         projectRoot,
       ),
-    ).toBe(".pi/workflows/safe.workflow.mjs");
+    ).toBe(".locus-pi/workflows/safe.workflow.mjs");
     expect(
       safeRecentWorkflowLabel({ kind: "scriptPath", ref: "/var/folders/private/secret.workflow.mjs" }, projectRoot),
     ).toBe("secret.workflow.mjs");
@@ -581,7 +535,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(
         path.join(workflowDir, "alpha.workflow.mjs"),
@@ -622,7 +576,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(
         path.join(workflowDir, "same.workflow.mjs"),
@@ -669,7 +623,7 @@ describe("workflow operator catalog", () => {
       expect(rpcCatalog).toContain(
         `${compactModel.totalRoots} top-level workflow(s) · ${compactModel.totalChildren} child workflow(s)`,
       );
-      expect(rpcCatalog).toMatch(/details may\s+be omitted by host line\s+budget/u);
+      expect(rpcCatalog).toMatch(/details\s+may\s+be\s+omitted\s+by\s+host\s+line\s+budget/u);
       expect(rpcCatalog).not.toContain("other workflow row(s)");
       expect(compactRows).toEqual(
         expect.arrayContaining([
@@ -712,7 +666,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeRun(
         root,
@@ -741,7 +695,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(
         path.join(workflowDir, "alpha workflow.workflow.mjs"),
@@ -769,7 +723,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(path.join(workflowDir, "post-code-review.workflow.mjs"), "export default () => null;\n");
       const row = buildWorkflowCatalogModel(root, root).current.find(
@@ -797,7 +751,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), 'export const meta = { description: "Alpha" };\n');
       writeRun(root, "20260101-000001-alpha", { kind: "name", ref: "alpha", source: "project" });
@@ -856,7 +810,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(path.join(workflowDir, "alpha.workflow.mjs"), 'export const meta = { description: "Alpha" };\n');
       const model = buildWorkflowCatalogModel(root, root);
@@ -880,7 +834,7 @@ describe("workflow operator catalog", () => {
     const previousHome = process.env.HOME;
     try {
       process.env.HOME = path.join(root, "home");
-      const workflowDir = path.join(root, ".pi", "workflows");
+      const workflowDir = path.join(root, ".locus-pi", "workflows");
       mkdirSync(workflowDir, { recursive: true });
       writeFileSync(
         path.join(workflowDir, "alpha.workflow.mjs"),
@@ -903,7 +857,7 @@ describe("workflow operator catalog", () => {
         type: "WARN",
         primary: 'Invalid saved workflow name: " alpha".',
       });
-      expect(namedText).toContain("source locator: .pi/workflows/alpha.workflow.mjs");
+      expect(namedText).toContain("source locator: .locus-pi/workflows/alpha.workflow.mjs");
       expect(namedText).not.toContain(path.resolve(root));
       expect(namedText).toContain(
         "metadata: static meta.description/profile/phases; profile classifies source shape, not runtime behavior; module not evaluated",
@@ -928,7 +882,7 @@ describe("workflow operator catalog", () => {
       expect(namedText).toContain("an unassigned role normally degrades and is recorded");
       expect(namedText).toContain("requireModelRole refuses that fallback");
       expect(namedText).toContain("agent_end reports the read-back executedModel");
-      expect(namedText).toContain("the nearest Project namespace wins");
+      expect(namedText).toContain("the nearest Project .locus-pi/workflows namespace wins");
       expect(namedText).toContain(
         "a canonical folder owns an optional <workflow>.workflow.mjs plus direct child entries",
       );
@@ -979,7 +933,7 @@ function writeRun(
       scriptIdentity: {
         schemaVersion: 2,
         identityPolicy: "static-node-only-v1",
-        sourcePath: path.join(root, ".pi", "workflows", `${target.ref}.workflow.mjs`),
+        sourcePath: path.join(root, ".locus-pi", "workflows", `${target.ref}.workflow.mjs`),
         snapshotPath,
         scriptSha256: sha256,
         identityCoverage: "self-contained-static",

@@ -10,14 +10,14 @@
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
 import { formatWorkflowFailureDiagnosticLines } from "../runtime/workflow-failure.js";
 import {
-  listWorkflowRunIds,
+  listWorkflowRuns,
   readWorkflowRunJournalState,
   readWorkflowRunResult,
   readWorkflowRunScriptSnapshot,
   readWorkflowRunSummary,
   workflowPersistedResultInvalidity,
-  workflowRunDir,
 } from "../runtime/workflow-journal.js";
+import { resolveWorkflowRunDir } from "../runtime/workflow-run-layout.js";
 import type { WorkflowRunResultEnvelope } from "../runtime/workflow-journal.js";
 import {
   formatWorkflowResultDetail,
@@ -46,8 +46,8 @@ export const RUNS_IN_STATUS_LIST = 10;
 const WORKFLOW_DETAIL_EVENT_LIMIT = 20;
 
 export function buildRunsListBlock(projectRoot: string, limit: number, compact = false): OperatorBlock {
-  const ids = listWorkflowRunIds(projectRoot);
-  if (ids.length === 0) {
+  const runs = listWorkflowRuns(projectRoot);
+  if (runs.length === 0) {
     return {
       type: "VIEW",
       subject: "Workflow runs",
@@ -56,26 +56,26 @@ export function buildRunsListBlock(projectRoot: string, limit: number, compact =
       controls: ['Draft one: /workflows run task/draft "<your request>"'],
     };
   }
-  const shownIds = ids.slice(0, Math.max(0, Math.min(limit, ids.length)));
-  const older = ids.length - shownIds.length;
+  const shownRuns = runs.slice(0, Math.max(0, Math.min(limit, runs.length)));
+  const older = runs.length - shownRuns.length;
   return {
     type: "VIEW",
     subject: "Workflow runs",
-    primary: `Showing ${shownIds.length} newest of ${ids.length} workflow run(s).`,
-    body: shownIds.map((runId) => formatRunRow(projectRoot, runId, compact)),
+    primary: `Showing ${shownRuns.length} newest of ${runs.length} workflow run(s).`,
+    body: shownRuns.map((run) => formatRunRow(projectRoot, run.runId, run.runDir, compact)),
     metadata: [
       WORKFLOW_SOURCE_LEGEND,
-      `status: ok; total=${ids.length} shown=${shownIds.length} older=${older}`,
+      `status: ok; total=${runs.length} shown=${shownRuns.length} older=${older}`,
       ...(older > 0 ? [`+${older} older run(s) hidden`] : []),
     ],
     controls: ["Detail: /workflows status <runId>"],
   };
 }
 
-function formatRunRow(projectRoot: string, runId: string, compact = false): string {
-  const s = readWorkflowRunSummary(projectRoot, runId);
-  const journalDiagnostics = readWorkflowRunJournalState(projectRoot, runId).diagnostics.length;
-  const source = readWorkflowRunResult(projectRoot, runId)?.target?.source;
+function formatRunRow(projectRoot: string, runId: string, runDir: string, compact = false): string {
+  const s = readWorkflowRunSummary(projectRoot, runId, runDir);
+  const journalDiagnostics = readWorkflowRunJournalState(projectRoot, runId, runDir).diagnostics.length;
+  const source = readWorkflowRunResult(projectRoot, runId, runDir)?.target?.source;
   if (compact) {
     // The replayed marker survives compaction: a reader must never see a green
     // row and assume every agent in it actually ran.
@@ -100,15 +100,17 @@ function formatRunRow(projectRoot: string, runId: string, compact = false): stri
 }
 
 export function buildRunDetailBlock(projectRoot: string, runId: string, compact = false): OperatorBlock {
+  let runDir: string;
   try {
     assertWorkflowRunId(runId);
+    runDir = resolveWorkflowRunDir(projectRoot, runId);
   } catch {
     return workflowWarningBlock(`Workflow run not found: ${runId}`, "Recovery: /workflows status");
   }
-  const journalState = readWorkflowRunJournalState(projectRoot, runId);
+  const journalState = readWorkflowRunJournalState(projectRoot, runId, runDir);
   const journal = journalState.lines;
-  const summary = readWorkflowRunSummary(projectRoot, runId);
-  const persisted = readWorkflowRunResult(projectRoot, runId);
+  const summary = readWorkflowRunSummary(projectRoot, runId, runDir);
+  const persisted = readWorkflowRunResult(projectRoot, runId, runDir);
   const persistedInvalidity = workflowPersistedResultInvalidity(persisted);
   if (journal.length === 0 && !summary.hasResult) {
     return workflowWarningBlock(`Workflow run not found: ${runId}`, "Recovery: /workflows status");
@@ -123,7 +125,7 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
     summary.agentsReplayed > 0
       ? `replay: ${summary.agentsReplayed}/${summary.agentsEnded} agent call(s) reused a recorded run — not fresh evidence`
       : null;
-  const phaseLine = declaredPhaseProgressLine(projectRoot, runId, journal);
+  const phaseLine = declaredPhaseProgressLine(projectRoot, runId, runDir, journal);
   const allJournalLines = renderJournalLines(journal);
   const journalCorruptionLine = journalDiagnosticSummary(journalState.diagnostics);
   const eventLimit = compact ? WORKFLOW_RPC_DETAIL_EVENT_LIMIT : WORKFLOW_DETAIL_EVENT_LIMIT;
@@ -177,7 +179,7 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
       ? [
           WORKFLOW_SOURCE_LEGEND,
           ...(journalCorruptionLine === null ? [] : [compactWorkflowLine(journalCorruptionLine)]),
-          compactWorkflowLine(`runDir: ${workflowRunDir(projectRoot, runId)}`),
+          compactWorkflowLine(`runDir: ${runDir}`),
           ...(persisted?.workspaceDir === undefined
             ? []
             : [compactWorkflowLine(`workspaceDir: ${persisted.workspaceDir}`)]),
@@ -195,7 +197,7 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
           WORKFLOW_SOURCE_LEGEND,
           `Source: [R]${source === undefined ? "" : ` ${workflowSourceBadge(source)}`}`,
           ...(journalCorruptionLine === null ? [] : [journalCorruptionLine]),
-          `runDir: ${workflowRunDir(projectRoot, runId)}`,
+          `runDir: ${runDir}`,
           ...(persisted?.workspaceDir === undefined ? [] : [`workspaceDir: ${persisted.workspaceDir}`]),
           ...(scriptIdentity === undefined
             ? []
@@ -229,9 +231,10 @@ function journalDiagnosticSummary(
 function declaredPhaseProgressLine(
   projectRoot: string,
   runId: string,
+  runDir: string,
   journal: readonly WorkflowJournalLine[],
 ): string | null {
-  const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId);
+  const snapshot = readWorkflowRunScriptSnapshot(projectRoot, runId, runDir);
   if (snapshot.kind !== "ready") return null;
   const declared = staticWorkflowMetaPhases(snapshot.source);
   if (declared.length === 0) return null;

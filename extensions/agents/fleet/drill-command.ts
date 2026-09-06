@@ -18,11 +18,17 @@ import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 import {
   listWorkflowRoundsForSlot,
   readWorkflowRoundBody,
+  readWorkflowSlotPhase,
   workflowRunIdFromRowId,
 } from "../../workflows/run/run-read.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
 import { AGENTS_WIDGET_KEY, notifyInteractionEnded } from "../operator/operator-surface.js";
-import { AgentSessionViewer, loadAgentViewerCapability } from "./session-viewer.js";
+import {
+  AgentSessionViewer,
+  loadAgentViewerCapability,
+  type AgentViewerCloseReason,
+  type AgentViewerLocation,
+} from "./session-viewer.js";
 import type { ParsedAgentDrillCommand } from "../command/command-parser.js";
 
 export const AGENT_DRILL_USAGE = "Usage: /agent drill <row-id|agent|last>";
@@ -36,11 +42,17 @@ export interface AgentSessionAuthority {
   isCurrent(authority: number): boolean;
 }
 
+/**
+ * Opens the agent screen and reports how it closed, so a caller that has a place
+ * to return to (the fleet loop) can tell "step back" from "done here". Every path
+ * that never put a screen on screen — a refused target, a host without custom UI,
+ * a stale session — reports nothing to go back from.
+ */
 export async function executeAgentDrillCommand(
   ctx: ExtensionCommandContext,
   command: ParsedAgentDrillCommand,
   sessionAuthority: AgentSessionAuthority,
-): Promise<void> {
+): Promise<AgentViewerCloseReason | undefined> {
   const capturedSessionAuthority = sessionAuthority.capture();
   if (command.target === "") {
     setOperatorWidget(ctx, AGENTS_WIDGET_KEY, {
@@ -150,22 +162,28 @@ export async function executeAgentDrillCommand(
     return;
   }
   const rounds = buildDrillRounds(ctx, row);
+  const location = buildDrillLocation(ctx, row);
   if (!isCurrent()) return;
   let viewer: AgentSessionViewer | undefined;
+  let closeReason: AgentViewerCloseReason | undefined;
   try {
     try {
-      await requestInlineOperatorInteraction<void>(ctx, (tui, theme, keybindings, done) => {
-        viewer = new AgentSessionViewer(
-          executionAuthority,
-          tui,
-          done,
-          capability.capability,
-          rounds,
-          keybindings as { matches(data: string, keybinding: string): boolean },
-          theme,
-        );
-        return viewer;
-      });
+      closeReason = await requestInlineOperatorInteraction<AgentViewerCloseReason>(
+        ctx,
+        (tui, theme, keybindings, done) => {
+          viewer = new AgentSessionViewer(
+            executionAuthority,
+            tui,
+            done,
+            capability.capability,
+            rounds,
+            keybindings as { matches(data: string, keybinding: string): boolean },
+            theme,
+            location,
+          );
+          return viewer;
+        },
+      );
     } catch (error) {
       if (isStaleInlineOperatorInteractionError(error)) {
         notifyInteractionEnded(ctx, error, "Agent view");
@@ -176,14 +194,20 @@ export async function executeAgentDrillCommand(
   } finally {
     viewer?.dispose();
   }
-  if (!isCurrent()) return;
-  const current = agentLiveStore.rows.get(row.id);
-  if (current?.status === "working" || current?.status === "queued") {
-    ctx.ui.notify(
-      `Agent view closed; ${current.displayName ?? current.agentName ?? current.id} continues running.`,
-      "info",
-    );
+  // Staleness gates the reassurance, not the answer: how the operator left this
+  // screen is a fact about the keystroke they pressed, and a row that retired
+  // while they were reading it is exactly the case the fleet loop must still
+  // return to. The caller has its own guard for a session that moved on.
+  if (isCurrent()) {
+    const current = agentLiveStore.rows.get(row.id);
+    if (current?.status === "working" || current?.status === "queued") {
+      ctx.ui.notify(
+        `Agent view closed; ${current.displayName ?? current.agentName ?? current.id} continues running.`,
+        "info",
+      );
+    }
   }
+  return closeReason;
 }
 
 /**
@@ -192,13 +216,9 @@ export async function executeAgentDrillCommand(
  * round is the live row's; past rounds are lazily read from the run journal on selection.
  */
 function buildDrillRounds(ctx: ExtensionCommandContext, row: AgentLiveRow): DrillRoundsConfig | undefined {
-  if (row.slotKey === undefined || row.round === undefined) return undefined;
-  const runId =
-    workflowRunIdFromRowId(row.id) ??
-    (row.parentRowId !== undefined ? workflowRunIdFromRowId(row.parentRowId) : undefined);
-  if (runId === undefined) return undefined;
-  const projectRoot = getProjectRoot(ctx);
-  const slotKey = row.slotKey;
+  const ref = resolveWorkflowSlotRef(ctx, row);
+  if (ref === undefined || row.round === undefined) return undefined;
+  const { projectRoot, runId, slotKey } = ref;
   const list = [...new Set([...listWorkflowRoundsForSlot(projectRoot, runId, slotKey), row.round])].sort(
     (a, b) => a - b,
   );
@@ -208,6 +228,40 @@ function buildDrillRounds(ctx: ExtensionCommandContext, row: AgentLiveRow): Dril
     list,
     readBody: (round: number) => readWorkflowRoundBody(projectRoot, runId, slotKey, round),
   };
+}
+
+/**
+ * The stage segment of the drill heading, or undefined when this row cannot claim one.
+ *
+ * The viewer builds the rest of the breadcrumb from the live store, but no live row
+ * carries the phase — the group row is named after its kind and count, and the anchor row
+ * repeats its child's label. The journal recorded the phase next to the slot key when the
+ * agent started, so the same slot the rounds submenu is read by also answers "which stage".
+ * A row with no slot (a call without a label), an unwritten journal, or a phaseless call
+ * yields no segment and the heading simply omits the stage rather than guessing one.
+ */
+function buildDrillLocation(ctx: ExtensionCommandContext, row: AgentLiveRow): AgentViewerLocation | undefined {
+  const ref = resolveWorkflowSlotRef(ctx, row);
+  if (ref === undefined) return undefined;
+  const phase = readWorkflowSlotPhase(ref.projectRoot, ref.runId, ref.slotKey);
+  return phase === undefined ? undefined : { phase };
+}
+
+/**
+ * The run journal coordinates of a slotted workflow row: the run it belongs to and the
+ * slot key its lines are filed under. Undefined for any row the journal cannot be asked
+ * about — an unslotted call, or a row id no run id can be derived from.
+ */
+function resolveWorkflowSlotRef(
+  ctx: ExtensionCommandContext,
+  row: AgentLiveRow,
+): { projectRoot: string; runId: string; slotKey: string } | undefined {
+  if (row.slotKey === undefined) return undefined;
+  const runId =
+    workflowRunIdFromRowId(row.id) ??
+    (row.parentRowId !== undefined ? workflowRunIdFromRowId(row.parentRowId) : undefined);
+  if (runId === undefined) return undefined;
+  return { projectRoot: getProjectRoot(ctx), runId, slotKey: row.slotKey };
 }
 
 type AgentDrillResolution =

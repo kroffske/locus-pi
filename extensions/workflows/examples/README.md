@@ -15,18 +15,16 @@ a runtime mode or model choice.
 
 ## Current portfolio
 
-| Namespace          | Shape                                                             | Why it remains                                                                                                                                   |
-| ------------------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `implement`        | runnable root                                                     | Applies already authorized work, verifies the result independently, and permits one corrective pass.                                             |
-| `live-smoke`       | runnable root                                                     | Provides the smallest real child-session diagnostic for an installed Pi host.                                                                    |
-| `task`             | group-only: `draft`, `plan`, `implement-plan-template`, `substep` | Separates request drafting, decomposed no-ask planning, approved-plan rendering, and one-step recovery under one namespace and shared workspace. |
-| `post-code-review` | runnable root plus 7 children                                     | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                          |
-| `workflow-creator` | runnable root plus 3 children                                     | Turns one semantic request into an accepted Design, SVG, and checked workflow package through `design`, `svg`, and `build`.                      |
+| Namespace          | Shape                         | Why it remains                                                                                                                                 |
+| ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `live-smoke`       | runnable root                 | Provides the smallest real child-session diagnostic for an installed Pi host.                                                                  |
+| `task`             | group-only: `draft`, `plan`   | Separates an editable orchestration brief from direct construction of one reviewed `workflow.mjs`; no generic implementation workflow remains. |
+| `post-code-review` | runnable root plus 7 children | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                        |
 
-The registry therefore exposes eighteen runnable names across five namespaces.
-The retired `requirements-grill`, `review`, and `review-fix` roots overlapped
-the standard task planning, modular review, and authorized implementation
-paths. They are intentionally absent rather than retained as catalog noise.
+The registry therefore exposes eleven runnable names across three namespaces.
+The retired generic implementation, template-rendering, substep, and
+workflow-creator entries duplicated the direct draft-to-source route. They are
+intentionally absent rather than retained as catalog noise.
 
 ## Resolution and copying
 
@@ -74,7 +72,7 @@ Only `/workflow-stop` remains as an emergency flat alias.
 
 Standard authoring is one continuous Design → review → Build sequence. A raw
 request first writes and reviews
-`.pi/workflows/<name>/<name>.design.md`, then creates exactly the root and direct
+`.locus-pi/workflows/<name>/<name>.design.md`, then creates exactly the root and direct
 children declared by that design. Explicit design-only wording may pause after
 design. `Build design: <path>` and `Build approved design: <path>` remain
 Build-only compatibility forms.

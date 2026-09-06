@@ -14,14 +14,11 @@ import { homedir } from "node:os";
 import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { assertWorkflowSavedName, isWorkflowSavedName, workflowSavedNameParts } from "./workflow-saved-name.js";
+import { WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME } from "./workflow-run-layout.js";
 
 export const WORKFLOW_ENTRY_SUFFIX = ".workflow.mjs";
 const PACKAGED_EXAMPLES_DIR = fileURLToPath(new URL("../examples/", import.meta.url));
-const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [
-  [".pi", "workflows"],
-  [".claude", "workflows"],
-  [".agents", "workflows"],
-];
+const PROJECT_WORKFLOW_DIRS: readonly [string, string][] = [[WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME]];
 
 export type WorkflowTargetKind = "name" | "scriptPath";
 export type WorkflowTargetSource = "project" | "personal" | "package";
@@ -491,7 +488,7 @@ function readWorkflowSearchDirectory(
 }
 
 function personalWorkflowRoot(): string {
-  return path.join(homedir(), ".pi", "workflows");
+  return path.join(homedir(), WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME);
 }
 
 function confinedWorkflowSourcePath(

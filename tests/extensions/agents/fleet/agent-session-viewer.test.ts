@@ -8,6 +8,7 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { statusMeta } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import agents from "../../../../extensions/agents/index.js";
 import {
@@ -97,6 +98,59 @@ class FakeEditorComponent {
   dispose(): void {}
 }
 
+/**
+ * Stands in for Pi's editor as a container: nine children, drawn in order. A
+ * viewer that keeps only some of them by index loses their markers.
+ */
+class ChromeFakeEditorComponent {
+  focused = false;
+  children = Array.from({ length: 9 }, (_, index) => ({
+    render: (_width: number) => [`chrome-${index}`],
+    invalidate(): void {},
+  }));
+  constructor(
+    _tui: unknown,
+    _keybindings: unknown,
+    _title: string,
+    _prefill: string | undefined,
+    _onSubmit: (value: string) => void,
+    _onCancel: () => void,
+  ) {}
+  render(width: number): string[] {
+    return this.children.flatMap((child) => child.render(width));
+  }
+  handleInput(): void {}
+  invalidate(): void {}
+  dispose(): void {}
+}
+
+/** An editor the size of the real one: 12 rows empty, one row per typed line. */
+class TallFakeEditorComponent {
+  static readonly floorRows = 12;
+  focused = false;
+  #value = "";
+  constructor(
+    _tui: unknown,
+    _keybindings: unknown,
+    _title: string,
+    _prefill: string | undefined,
+    private readonly onSubmit: (value: string) => void,
+    private readonly onCancel: () => void,
+  ) {}
+  render(): string[] {
+    const rows = TallFakeEditorComponent.floorRows + this.#value.split("\n").length - 1;
+    const typed = this.#value.replace(/\n/gu, "|");
+    return Array.from({ length: rows }, (_, index) => (index === 1 ? `editor:${typed}` : `editor-row-${index}`));
+  }
+  handleInput(data: string): void {
+    if (data === "enter") this.onSubmit(this.#value);
+    else if (data === "escape") this.onCancel();
+    else this.#value += data;
+  }
+  invalidate(): void {}
+  dispose(): void {}
+}
+
 function capability() {
   const result = createAgentViewerCapability({
     AssistantMessageComponent: FakeAssistantComponent,
@@ -120,6 +174,16 @@ function interactiveCapability() {
     AssistantMessageComponent: FakeAssistantComponent,
     ToolExecutionComponent: FakeToolComponent,
     ExtensionEditorComponent: FakeEditorComponent,
+  });
+  if (!result.ok) throw new Error(result.reason);
+  return result.capability;
+}
+
+function editorCapability(Editor: unknown) {
+  const result = createAgentViewerCapability({
+    AssistantMessageComponent: FakeAssistantComponent,
+    ToolExecutionComponent: FakeToolComponent,
+    ExtensionEditorComponent: Editor,
   });
   if (!result.ok) throw new Error(result.reason);
   return result.capability;
@@ -172,6 +236,7 @@ async function flushForcedRender(tui: TUI): Promise<void> {
 afterEach(() => {
   disposeAgentSessionViewers();
   agentLiveStore.reset();
+  vi.unstubAllEnvs();
 });
 
 describe("AgentSessionViewer", () => {
@@ -188,14 +253,17 @@ describe("AgentSessionViewer", () => {
         message: { role: "assistant", content: [{ type: "text", text: `history-${index}` }], stopReason: "stop" },
       });
     }
-    const tui = { terminal: { rows: 8, columns: 32 }, requestRender: vi.fn() };
+    // Nine rows, not eight: the live status line under the header costs one body
+    // row, so the same REQUEST + RUNTIME reach needs one more terminal row.
+    const tui = { terminal: { rows: 9, columns: 32 }, requestRender: vi.fn() };
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const rendered = viewer.render(32);
     expect(rendered).toHaveLength(tui.terminal.rows - 1);
     expect(rendered.every((line) => visibleWidth(line) === 32)).toBe(true);
     expect(rendered[0]).toMatch(/^╭─ \[agent .+\] started work/u);
-    expect(rendered.at(-1)).toMatch(/^╰─ STATUS: queued/u);
+    expect(rendered[1]).toContain("Queued");
+    expect(rendered.at(-1)).toMatch(/^╰─ esc close/u);
     expect(rendered.join("\n")).toContain("history-7");
     expect(rendered.join("\n")).not.toContain("history-0");
 
@@ -229,8 +297,12 @@ describe("AgentSessionViewer", () => {
     expect(rendered).toContain("<muted>╭─ [agent");
     expect(rendered).toContain("<muted>├─ REQUEST");
     expect(rendered).toContain("<muted>├─ RUNTIME");
-    expect(rendered).toContain("<muted>╰─ STATUS:");
-    expect(fg.mock.calls.every(([color]) => color === "muted")).toBe(true);
+    expect(rendered).toContain("<muted>╰─ esc close");
+    // Only the dividers are claimed by this rule; the status line carries the tone
+    // of the state it reports (`statusMeta`), which is a different contract.
+    expect(fg.mock.calls.filter(([, text]) => /^[╭├╰]/u.test(String(text))).every(([color]) => color === "muted")).toBe(
+      true,
+    );
     // Double-weight rules read as a second, unrelated component.
     expect(rendered).not.toMatch(/[╞╘═]/u);
     viewer.dispose();
@@ -242,7 +314,8 @@ describe("AgentSessionViewer", () => {
     setViewerExternalRows("test-active-workflow", 3);
     try {
       const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
-      expect(viewer.render(80)).toHaveLength(6);
+      // header + status + 4 content rows + footer; the widget's 3 rows stay reserved.
+      expect(viewer.render(80)).toHaveLength(7);
       viewer.dispose();
     } finally {
       clearViewerExternalRows("test-active-workflow");
@@ -264,13 +337,14 @@ describe("AgentSessionViewer", () => {
     const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
 
     const rendered = viewer.render(80);
-    expect(rendered).toHaveLength(6);
+    expect(rendered).toHaveLength(7);
     expect(rendered[0]).toMatch(/^╭─ \[agent/u);
-    expect(rendered[1]).toMatch(/^├─ REQUEST/u);
-    expect(rendered[2]).toContain("Check one file.");
-    expect(rendered[3]).toMatch(/^├─ RUNTIME/u);
-    expect(rendered[4]).toContain("One-line result.");
-    expect(rendered[5]).toMatch(/^╰─ STATUS:/u);
+    expect(rendered[1]).toContain("Queued");
+    expect(rendered[2]).toMatch(/^├─ REQUEST/u);
+    expect(rendered[3]).toContain("Check one file.");
+    expect(rendered[4]).toMatch(/^├─ RUNTIME/u);
+    expect(rendered[5]).toContain("One-line result.");
+    expect(rendered[6]).toMatch(/^╰─ esc close/u);
     expect(rendered.every((line) => line.trim() !== "")).toBe(true);
     expect(rendered.length).toBeLessThan(tui.terminal.rows - 1);
     viewer.dispose();
@@ -365,7 +439,8 @@ describe("AgentSessionViewer", () => {
     }
   });
 
-  it("captures wheel history, keeps the selected child output anchored, and returns to the live tail", () => {
+  it("captures wheel history under LOCUS_DRILL_MOUSE, anchors the child output, and returns to the live tail", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
     const row = agentLiveStore.begin({ id: "wheel-viewer", agentName: "reviewer", label: "Review" });
     for (let index = 0; index < 12; index += 1) {
       agentLiveStore.feedSessionEvent(row.id, {
@@ -376,7 +451,7 @@ describe("AgentSessionViewer", () => {
     const execution = executionFor(row.id);
     const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
     const write = vi.fn();
-    const tui = { terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const tui = { mode: "regular" as const, terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
     const viewer = new AgentSessionViewer(execution, tui, vi.fn(), interactiveCapability(), undefined, {
       matches: () => false,
     });
@@ -412,11 +487,12 @@ describe("AgentSessionViewer", () => {
     unregister();
   });
 
-  it("keeps mouse capture until the last overlapping viewer releases the shared terminal", () => {
+  it("keeps mouse capture under the flag until the last overlapping viewer releases the shared terminal", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
     const first = agentLiveStore.begin({ id: "mouse-owner-a", agentName: "reviewer", label: "A" });
     const second = agentLiveStore.begin({ id: "mouse-owner-b", agentName: "reviewer", label: "B" });
     const write = vi.fn();
-    const tui = { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() };
+    const tui = { mode: "regular" as const, terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() };
     const firstViewer = new AgentSessionViewer(executionFor(first.id), tui, vi.fn(), capability());
     const secondViewer = new AgentSessionViewer(executionFor(second.id), tui, vi.fn(), capability());
 
@@ -429,7 +505,8 @@ describe("AgentSessionViewer", () => {
     expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
   });
 
-  it("releases mouse capture when the owning Pi session shuts down", async () => {
+  it("releases mouse capture under the flag when the owning Pi session shuts down", async () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
     const h = createHarness(process.cwd());
     agents(h.pi);
     await emit(h, "session_start");
@@ -437,7 +514,7 @@ describe("AgentSessionViewer", () => {
     const write = vi.fn();
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
+      { mode: "regular" as const, terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );
@@ -447,6 +524,65 @@ describe("AgentSessionViewer", () => {
 
     expect(write).toHaveBeenLastCalledWith("\u001b[?1000l\u001b[?1006l");
     expect(viewer.render(80)).toEqual([]);
+  });
+
+  it("leaves the terminal mouse alone in regular mode without the flag, and drops wheel from the hint", () => {
+    const row = agentLiveStore.begin({ id: "no-flag-viewer", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    const write = vi.fn();
+    const tui = { mode: "regular" as const, terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(execution, tui, vi.fn(), interactiveCapability(), undefined, {
+      matches: () => false,
+    });
+
+    expect(write).not.toHaveBeenCalled();
+    const footer = viewer.render(80).at(-1) ?? "";
+    expect(footer).toContain("pgup/pgdn history · enter send");
+    expect(footer).not.toContain("wheel");
+
+    viewer.dispose();
+    expect(write).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it("writes neither enable nor disable in fullscreen even with the flag set", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
+    const row = agentLiveStore.begin({ id: "fullscreen-viewer", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 12; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `fullscreen-${index}` }], stopReason: "stop" },
+      });
+    }
+    const write = vi.fn();
+    const tui = { mode: "fullscreen" as const, terminal: { rows: 14, columns: 80, write }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+    expect(write).not.toHaveBeenCalled();
+    // Pi owns the wheel in fullscreen; the viewer neither decodes nor scrolls on it.
+    const tail = viewer.render(80).join("\n");
+    viewer.handleInput("\u001b[<64;10;5M");
+    expect(viewer.render(80).join("\n")).toEqual(tail);
+
+    viewer.dispose();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("stays fail-closed when the host TUI reports no mode, even with the flag set", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
+    const row = agentLiveStore.begin({ id: "unknown-mode-viewer", agentName: "reviewer", label: "Review" });
+    const write = vi.fn();
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { terminal: { rows: 8, columns: 80, write }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    expect(write).not.toHaveBeenCalled();
+    viewer.dispose();
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("writes a stable terminal-height viewport through Pi TUI across live and control redraws", async () => {
@@ -589,11 +725,13 @@ describe("AgentSessionViewer", () => {
     });
 
     const initial = viewer.render(80);
-    expect(initial).toHaveLength(9);
+    // 9 + the status line: header, status, 4 content rows, 3 editor rows, footer.
+    expect(initial).toHaveLength(10);
     expect(initial.length).toBeLessThan(tui.terminal.rows - 1);
     expect(initial.join("\n")).not.toContain("Message to Agent");
     expect(initial.join("\n")).not.toContain("MESSAGE TO AGENT");
-    expect(initial.at(-1)).toMatch(/^╰─ STATUS: queued/u);
+    expect(initial[1]).toContain("Queued");
+    expect(initial.at(-1)).toMatch(/^╰─ esc close/u);
     viewer.handleInput("h");
     viewer.handleInput("i");
     viewer.handleInput("enter");
@@ -656,6 +794,94 @@ describe("AgentSessionViewer", () => {
     viewer.dispose();
   });
 
+  it("draws every part of the editor component instead of keeping children by index", () => {
+    const row = agentLiveStore.begin({ id: "whole-editor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    const viewer = new AgentSessionViewer(
+      execution,
+      { terminal: { rows: 30, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      editorCapability(ChromeFakeEditorComponent),
+      undefined,
+      { matches: () => false },
+    );
+
+    const rendered = viewer.render(80).map((line) => line.trimEnd());
+    for (let index = 0; index < 9; index += 1) expect(rendered).toContain(`chrome-${index}`);
+    // The editor's own hints are whatever it drew; the viewer adds none of its own.
+    expect(rendered.join("\n")).not.toContain("↵ send");
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("asks for the rows a whole editor needs before mounting one", () => {
+    const row = agentLiveStore.begin({ id: "editor-floor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+    // 12 editor rows + 3 frame rows + 2 body rows + Pi's own footer row.
+    const tui = { terminal: { rows: 17, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(
+      execution,
+      tui,
+      vi.fn(),
+      editorCapability(TallFakeEditorComponent),
+      undefined,
+      {
+        matches: () => false,
+      },
+    );
+
+    const tooShort = viewer.render(80);
+    expect(tooShort.join("\n")).toContain("resize terminal for input");
+    expect(tooShort.join("\n")).not.toContain("editor:");
+    expect(tooShort.length).toBeLessThan(tui.terminal.rows);
+
+    tui.terminal.rows = 18;
+    const fits = viewer.render(80);
+    expect(fits.join("\n")).toContain("editor:");
+    expect(fits.join("\n")).toContain("enter send");
+    expect(fits).toHaveLength(tui.terminal.rows - 1);
+
+    unregister();
+    viewer.dispose();
+  });
+
+  it("lets a growing editor take the body's rows rather than dropping what was typed", () => {
+    const row = agentLiveStore.begin({ id: "growing-editor-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    const unregister = agentLiveStore.registerInputForExecution(execution, send);
+    const tui = { terminal: { rows: 18, columns: 80 }, requestRender: vi.fn() };
+    const viewer = new AgentSessionViewer(
+      execution,
+      tui,
+      vi.fn(),
+      editorCapability(TallFakeEditorComponent),
+      undefined,
+      {
+        matches: () => false,
+      },
+    );
+
+    viewer.render(80);
+    // Two more editor rows than the mount budget allowed: the two body rows go
+    // first, and the half-written message is still on screen.
+    viewer.handleInput("a");
+    viewer.handleInput("\n");
+    viewer.handleInput("b");
+    viewer.handleInput("\n");
+    viewer.handleInput("c");
+    const grown = viewer.render(80);
+    expect(grown.join("\n")).toContain("editor:a|b|c");
+    expect(grown).toHaveLength(tui.terminal.rows - 1);
+    expect(grown.join("\n")).not.toContain("resize terminal for input");
+
+    unregister();
+    viewer.dispose();
+  });
+
   it("mounts the installed Pi native editor inside the compact content-height viewport", async () => {
     const { initTheme } = await import("@earendil-works/pi-coding-agent");
     initTheme(undefined, false);
@@ -673,9 +899,19 @@ describe("AgentSessionViewer", () => {
     tui.addChild(viewer);
 
     const rendered = viewer.render(80);
-    expect(rendered).toHaveLength(12);
+    // Header, status, four content rows, the whole 12-row Pi editor, footer. The
+    // editor is no longer cut down to four of its children, so it costs the rows
+    // Pi charges for it and the viewer still fits inside the terminal.
+    expect(rendered).toHaveLength(19);
     expect(rendered.length).toBeLessThan(terminal.rows - 1);
-    expect(rendered.join("\n")).toContain("↵ send · ⇧↵ newline");
+    // Pi's own key hints, read from the live keybindings, instead of a
+    // hand-written line that named keys this build may not bind.
+    const text = rendered.join("\n");
+    expect(text).not.toContain("↵ send · ⇧↵ newline");
+    expect(text).toContain(" submit");
+    expect(text).toContain(" newline");
+    expect(text).toContain(" cancel");
+    expect(text).toContain("external");
     viewer.handleInput("o");
     viewer.handleInput("k");
     viewer.handleInput("\r");
@@ -806,7 +1042,8 @@ describe("AgentSessionViewer", () => {
     });
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 9, columns: 100 }, requestRender: vi.fn() },
+      // One row more than before: the status line takes one body row.
+      { terminal: { rows: 10, columns: 100 }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );
@@ -834,7 +1071,8 @@ describe("AgentSessionViewer", () => {
     });
     const viewer = new AgentSessionViewer(
       executionFor(row.id),
-      { terminal: { rows: 7, columns: 100 }, requestRender: vi.fn() },
+      // One row more than before: the status line takes one body row.
+      { terminal: { rows: 8, columns: 100 }, requestRender: vi.fn() },
       vi.fn(),
       capability(),
     );
@@ -860,6 +1098,394 @@ describe("AgentSessionViewer", () => {
     const text = viewer.render(100).join("\n");
     expect(text).toContain("No child transcript or readable answer is available.");
     expect(text).toContain("error: Replayed answer artifact is tampered.");
+    viewer.dispose();
+  });
+
+  it("locates a workflow agent by walking the store's parents up to its group", () => {
+    const group = agentLiveStore.begin({
+      id: "workflow:run-7:group:parallel-1",
+      workflowRunId: "run-7",
+      agentName: "workflow-group",
+      label: "parallel (2)",
+      groupKind: "parallel",
+      groupTotal: 2,
+    });
+    const anchor = agentLiveStore.begin({
+      id: "workflow:run-7:sdk:reviewer:audit:plan",
+      workflowRunId: "run-7",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "reviewer (audit)",
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-7:sdk:reviewer:audit:plan",
+      workflowRunId: "run-7",
+      parentRowId: anchor.id,
+      agentName: "reviewer",
+      label: "audit",
+      title: "Audit the router",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 160 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const header = viewer.render(160)[0] ?? "";
+    // Outermost first: run, then the group, then the anchor slot, then this agent.
+    expect(header).toContain("workflow run-7");
+    expect(header).toContain("parallel (2)");
+    expect(header).toContain("audit");
+    expect(header).toContain("Audit the router");
+    expect(header.indexOf("workflow run-7")).toBeLessThan(header.indexOf("parallel (2)"));
+    expect(header.indexOf("parallel (2)")).toBeLessThan(header.indexOf("Audit the router"));
+    viewer.dispose();
+  });
+
+  it("names the stage between the run and the group for a production-shaped workflow child", () => {
+    // Exactly what the runtime writes: a group row labelled by kind and count, an anchor
+    // row whose label unwraps to the child's own label, and a child with a label and NO
+    // title. Nothing here states the phase — the caller reads it from the run journal and
+    // passes it in, which is what makes the stage segment appear at all.
+    const group = agentLiveStore.begin({
+      id: "workflow:run-11:group:parallel-1",
+      workflowRunId: "run-11",
+      agentName: "workflow-group",
+      label: "parallel (2)",
+      groupKind: "parallel",
+      groupTotal: 2,
+    });
+    const anchor = agentLiveStore.begin({
+      id: "workflow:run-11:sdk:reviewer:audit:review",
+      workflowRunId: "run-11",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "reviewer (audit)",
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-11:sdk:reviewer:audit:review",
+      workflowRunId: "run-11",
+      parentRowId: anchor.id,
+      agentName: "reviewer",
+      label: "audit",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 160 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+      undefined,
+      undefined,
+      undefined,
+      { phase: "review" },
+    );
+
+    const header = viewer.render(160)[0] ?? "";
+    expect(header).toContain("workflow run-11");
+    expect(header).toContain("review");
+    expect(header).toContain("parallel (2)");
+    expect(header).toContain("audit");
+    // run · stage · group · agent, outermost first.
+    expect(header.indexOf("workflow run-11")).toBeLessThan(header.indexOf("review"));
+    expect(header.indexOf("review")).toBeLessThan(header.indexOf("parallel (2)"));
+    expect(header.indexOf("parallel (2)")).toBeLessThan(header.indexOf("audit"));
+    viewer.dispose();
+  });
+
+  it("omits the stage when the caller resolved none", () => {
+    const group = agentLiveStore.begin({
+      id: "workflow:run-12:group:parallel-1",
+      workflowRunId: "run-12",
+      agentName: "workflow-group",
+      label: "parallel (2)",
+      groupKind: "parallel",
+      groupTotal: 2,
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-12:sdk:reviewer:audit:",
+      workflowRunId: "run-12",
+      parentRowId: group.id,
+      agentName: "reviewer",
+      label: "audit",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 160 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const header = viewer.render(160)[0] ?? "";
+    expect(header).toContain("workflow run-12");
+    expect(header).toContain("parallel (2)");
+    expect(header.indexOf("workflow run-12")).toBeLessThan(header.indexOf("parallel (2)"));
+    viewer.dispose();
+  });
+
+  it("keeps the short heading for a non-workflow row and never repeats an anchor's own name", () => {
+    const plain = agentLiveStore.begin({ id: "plain-row", agentName: "reviewer", label: "Review" });
+    const plainViewer = new AgentSessionViewer(
+      executionFor(plain.id),
+      { terminal: { rows: 8, columns: 120 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(plainViewer.render(120)[0]).toMatch(/^╭─ \[agent .+\] started work · Review/u);
+    expect(plainViewer.render(120)[0]).not.toContain("workflow ");
+    plainViewer.dispose();
+
+    // The anchor and its child are one actor: the anchor's name adds no segment,
+    // and a parent that is no longer in the store ends the walk instead of it.
+    const anchor = agentLiveStore.begin({
+      id: "workflow:run-9:sdk:reviewer:audit:",
+      workflowRunId: "run-9",
+      parentRowId: "workflow:run-9:group:gone",
+      agentName: "reviewer",
+      label: "reviewer (audit)",
+    });
+    const child = agentLiveStore.begin({
+      id: "workflow-agent:run-9:sdk:reviewer:audit:",
+      workflowRunId: "run-9",
+      parentRowId: anchor.id,
+      agentName: "reviewer",
+      label: "audit",
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(child.id),
+      { terminal: { rows: 8, columns: 120 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    const header = viewer.render(120)[0] ?? "";
+    expect(header).toContain("workflow run-9");
+    expect(header.match(/audit/gu)).toHaveLength(1);
+    viewer.dispose();
+  });
+
+  it("advances the status frame on the shared tick", () => {
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "tick-viewer", agentName: "reviewer", label: "Review" });
+      agentLiveStore.patch(row.id, { status: "working" });
+      const tui = { terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+      expect(viewer.render(80)[1]).toContain(statusMeta("working", 0).icon);
+      tui.requestRender.mockClear();
+      vi.advanceTimersByTime(1000);
+      expect(tui.requestRender).toHaveBeenCalled();
+      expect(viewer.render(80)[1]).toContain(statusMeta("working", 1).icon);
+      viewer.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds the status line byte-identical across ticks under calm rendering", () => {
+    vi.stubEnv("LOCUS_PS_CALM", "1");
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "calm-viewer", agentName: "reviewer", label: "Review" });
+      agentLiveStore.patch(row.id, { status: "working" });
+      const tui = { terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+
+      const first = viewer.render(80)[1];
+      expect(first).toContain(statusMeta("working", 0).icon);
+      // The clock still runs — the tick asks for repaints — but the frame and the
+      // coarse elapsed bucket do not move, so the line is identical.
+      vi.advanceTimersByTime(3000);
+      expect(tui.requestRender).toHaveBeenCalled();
+      expect(viewer.render(80)[1]).toEqual(first);
+      viewer.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the status tick when the viewer is disposed", () => {
+    vi.useFakeTimers();
+    try {
+      const row = agentLiveStore.begin({ id: "tick-leak-viewer", agentName: "reviewer", label: "Review" });
+      agentLiveStore.patch(row.id, { status: "working" });
+      const tui = { terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() };
+      const viewer = new AgentSessionViewer(executionFor(row.id), tui, vi.fn(), capability());
+      viewer.render(80);
+
+      viewer.dispose();
+      tui.requestRender.mockClear();
+      vi.advanceTimersByTime(10_000);
+      expect(tui.requestRender).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("accepts Home and End in every encoding a terminal sends, not only CSI H and CSI F", () => {
+    const row = agentLiveStore.begin({ id: "home-end-encodings-row", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 40; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `encoded-${index}` }], stopReason: "stop" },
+      });
+    }
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { mode: "regular" as const, terminal: { rows: 10, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(viewer.render(80).join("\n")).toContain("encoded-39");
+
+    // `tmux-256color` khome/kend, `xterm-256color` khome/kend, the CSI pair the
+    // viewer already knew, and the rxvt forms pi-tui also lists.
+    const homeEndPairs = [
+      ["\u001b[1~", "\u001b[4~"],
+      ["\u001bOH", "\u001bOF"],
+      ["\u001b[H", "\u001b[F"],
+      ["\u001b[7~", "\u001b[8~"],
+      ["home", "end"],
+    ] as const;
+    for (const [home, end] of homeEndPairs) {
+      viewer.handleInput(home);
+      expect(viewer.render(80).join("\n"), `home ${JSON.stringify(home)}`).toContain("├─ REQUEST");
+      viewer.handleInput(end);
+      expect(viewer.render(80).join("\n"), `end ${JSON.stringify(end)}`).toContain("encoded-39");
+    }
+    viewer.dispose();
+  });
+  it("keeps the footer on screen in fullscreen by leaving Pi's transcript row alone", () => {
+    // Pi's fullscreen dock sits under a ScrollView it may never shrink below one
+    // row, so a component that claims `rows - 1` loses its last line — the footer
+    // with every control on it — and Pi's own view is already at its bottom, so
+    // there is nowhere to scroll to reach it.
+    const row = agentLiveStore.begin({ id: "fullscreen-geometry-row", agentName: "reviewer", label: "Review" });
+    for (let index = 0; index < 120; index += 1) {
+      agentLiveStore.feedSessionEvent(row.id, {
+        type: "message_end",
+        message: { role: "assistant", content: [{ type: "text", text: `line-${index}` }], stopReason: "stop" },
+      });
+    }
+    const execution = executionFor(row.id);
+
+    const fullscreen = new AgentSessionViewer(
+      execution,
+      { mode: "fullscreen" as const, terminal: { rows: 50, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    const fullscreenLines = fullscreen.render(80);
+    expect(fullscreenLines).toHaveLength(48);
+    expect(fullscreenLines.at(-1)).toMatch(/^╰─ esc close/u);
+    fullscreen.dispose();
+
+    // Regular mode keeps the row it always had: one line more of transcript.
+    const regular = new AgentSessionViewer(
+      execution,
+      { mode: "regular" as const, terminal: { rows: 50, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    const regularLines = regular.render(80);
+    expect(regularLines).toHaveLength(49);
+    expect(regularLines.at(-1)).toMatch(/^╰─ esc close/u);
+    regular.dispose();
+
+    // A host that reports no mode is laid out like regular, unchanged.
+    const unknown = new AgentSessionViewer(
+      execution,
+      { terminal: { rows: 50, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+    expect(unknown.render(80)).toHaveLength(49);
+    unknown.dispose();
+  });
+  it("does not promise key scrolling in fullscreen, where Pi consumes those keys first", () => {
+    // `TuiAltScreen` registers its viewport listener in its own constructor and
+    // consumes PageUp/PageDown/Home/End before any component is reached, so this
+    // screen cannot scroll by key there. The footer says only what is true.
+    const row = agentLiveStore.begin({ id: "fullscreen-footer-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const unregister = agentLiveStore.registerInputForExecution(execution, async () => {});
+
+    const fullscreen = new AgentSessionViewer(
+      execution,
+      { mode: "fullscreen" as const, terminal: { rows: 20, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      undefined,
+      { matches: () => false },
+    );
+    const fullscreenFooter = fullscreen.render(80).at(-1) ?? "";
+    expect(fullscreenFooter).not.toContain("pgup");
+    expect(fullscreenFooter).not.toContain("history");
+    expect(fullscreenFooter).toContain("esc close · enter send");
+    fullscreen.dispose();
+
+    const regular = new AgentSessionViewer(
+      execution,
+      { mode: "regular" as const, terminal: { rows: 20, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      undefined,
+      { matches: () => false },
+    );
+    expect(regular.render(80).at(-1) ?? "").toContain("pgup/pgdn history");
+    regular.dispose();
+    unregister();
+  });
+
+  it("offers the wheel wherever it captures it, not only beside an editor", () => {
+    vi.stubEnv("LOCUS_DRILL_MOUSE", "1");
+    const row = agentLiveStore.begin({ id: "settled-wheel-row", agentName: "reviewer", label: "Review" });
+    agentLiveStore.patch(row.id, { status: "done" });
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { mode: "regular" as const, terminal: { rows: 14, columns: 80, write: vi.fn() }, requestRender: vi.fn() },
+      vi.fn(),
+      capability(),
+    );
+
+    const footer = viewer.render(80).at(-1) ?? "";
+    // No editor is mounted on a settled row, but the wheel is still captured.
+    expect(footer).not.toContain("enter send");
+    expect(footer).toContain("wheel/pgup/pgdn history");
+    viewer.dispose();
+  });
+
+  it("drops the queued-message notice once the child stops taking input", async () => {
+    const row = agentLiveStore.begin({ id: "stale-notice-row", agentName: "reviewer", label: "Review" });
+    const execution = executionFor(row.id);
+    const send = vi.fn(async () => {});
+    let accepting = true;
+    const unregister = agentLiveStore.registerInputForExecution(execution, send, () => accepting);
+    const viewer = new AgentSessionViewer(
+      execution,
+      { mode: "regular" as const, terminal: { rows: 14, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      interactiveCapability(),
+      undefined,
+      { matches: () => false },
+    );
+
+    viewer.render(80);
+    viewer.handleInput("h");
+    viewer.handleInput("enter");
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith("h"));
+    await vi.waitFor(() => expect(viewer.render(80).at(-1) ?? "").toContain("message queued"));
+
+    // The child settles: the editor is withdrawn, and the notice about a message
+    // it was going to read must go with it.
+    accepting = false;
+    agentLiveStore.patch(row.id, { status: "done" });
+    const settled = viewer.render(80).at(-1) ?? "";
+    expect(settled).not.toContain("message queued");
+    expect(settled).not.toContain("enter send");
+    expect(settled).toMatch(/^╰─ esc close · pgup\/pgdn history/u);
+
+    unregister();
     viewer.dispose();
   });
 });

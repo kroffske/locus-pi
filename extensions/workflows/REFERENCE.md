@@ -2,6 +2,24 @@
 
 This is the advanced implementation reference for the `workflows` extension. New operators should start with [`README.md`](README.md) and [`../../docs/workflows.md`](../../docs/workflows.md); workflow authors should start with [`AUTHORING.md`](AUTHORING.md).
 
+## Read only the required contract
+
+This file remains the compatibility index and owner of unchanged DSL semantics
+and numeric defaults. New, separately owned extensions are:
+
+- [Output acceptance](references/output-acceptance.md): opt-in `workflow_return`,
+  same-session clarification and persisted decision origin; no new global judge.
+- [Execution controls](references/execution-controls.md): local concurrency,
+  business keys/titles, branch phases, queued/started evidence and tool budget.
+- [Recovery and continuation](references/recovery-and-continuation.md): explicit
+  conservative interrupted recovery and the separate split-run human lifecycle.
+
+Authors select one of four [pattern cards](../../skills/locus-pi-workflow-create/references/INDEX.md).
+The canonical source grammar remains [AUTHORING.md](AUTHORING.md#machine-enforced-standard-source-shape).
+The complete manual is not a prerequisite for authoring a fixed chain. Existing
+section anchors remain stable; a new field's detailed contract is not duplicated
+in the short skill router.
+
 ## What it is
 
 A Pi-native dynamic-workflow runtime that provides a DSL (`agent / fusion / items / outputDir /
@@ -18,7 +36,8 @@ One way a workflow reaches a model:
   its exact non-empty final text, routed through the same code path as the `task`
   tool. With `opts.choice` it returns one declared exact string; with
   `opts.handoffs` it returns a bounded list of complete text work units. Both use
-  the runtime-owned repair path. Trusted compatibility scripts may still use
+  the runtime-owned repair path. A choice may opt into `returnVia: "tool"`
+  instead; see [output acceptance](references/output-acceptance.md). Trusted compatibility scripts may still use
   `opts.schema` for a larger validated value.
 - **`fusion()`** — validates a panel of 2–10 explicit model selectors and one
   homogeneous capability mode, runs isolated members, and asks a separate judge
@@ -53,28 +72,21 @@ authoring handle; it is not enforced.
 
 ## Curated Package workflows
 
-| Workflow                       | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `implement`                    | **Prepared work to verified changes**: one agent normalizes a named plan or review into `implementation-plan.md`; a runtime choice routes to execution, an intentional no-op, or one operator decision. Execution applies REQUIRED work by default, independently verifies the live diff, permits one verifier-backed correction, and publishes `implementation-report.md`. RECOMMENDED work requires explicit opt-in; NO_ACTION work and illustrative snippets never become automatic patches.                                                                                                                                                                                                       |
-| `live-smoke`                   | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `task/draft`                   | **Raw request to saved intent draft**: one reconnaissance agent writes `draft-context.md` and returns `ready \| ask`; the drafting agent receives `workflow_ask` only on the `ask` branch, is instructed to group no more than three pivotal questions, then writes and publishes `draft.md` in Locus Prompt Draft form. Ready requests remain headless-compatible; required unavailable operator input fails closed. The run stops before planning.                                                                                                                                                                                                                                                  |
-| `task/plan`                    | **Task to plan files, decomposed for a weak model**: one scope agent freezes `request.md`/`scope.md`, one context agent writes `context.md`, three parallel analysts write `analysis/*.md`, one compose agent writes `plan.md` plus a dynamic `step-<n>.md` catalog whose complete `## S<n>` blocks are each one fresh agent's work unit, three parallel reviewers write `reviews/*.md`, one bounded correction replaces the plan once, and a final verifier plus runtime choice publish `plan.md` or fail closed with `planning-blocker.md`. The run never waits for an operator: unknowns become explicit assumptions and prerequisites. Nothing is implemented, and execution waits for the owner. |
-| `task/implement-plan-template` | **Approved plan to reviewable sequential workflow**: one scripting agent reads `plan.md` and every `step-<n>.md` in the shared planning workspace, then renders `implement-plan.workflow.mjs` from a fixed `promptFile()` template with one literal node per step — each with a single bounded blocked-repair branch (one repair agent, one retry of the same step prompt) — plus one summary node. It never plans, replans, implements, or runs the generated file. The generated draft resolves only by explicit path.                                                                                                                                                                              |
-| `task/substep`                 | **One approved step to implementation history**: the input is one selector such as `S1` or `step-1.md`. One implementation agent resolves the matching `step-<n>.md`, treats that file on disk as the contract, changes only that scope, runs its checks, and writes `history/S<n>.md` with `Status: completed` or `Status: blocked`. JavaScript does not parse, select, loop, review, grade, or render.                                                                                                                                                                                                                                                                                              |
-| `post-code-review`             | **External modular code review**: the root makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven `child` edges bind short sibling names to the root's exact selected folder namespace and source.                                                                                                                                                                                                                                                                                                 |
-| `post-code-review/scope`       | **Target and Git boundary**: one required `smol:high` role agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, verified source locators, and evidence limits in `review-scope.md`.                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `post-code-review/boundaries`  | **Architecture lane**: one required `smol:high` role agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `post-code-review/simplicity`  | **Delete-first lane**: one required `smol:high` role agent reopens `review-scope.md`, separates runtime callers from repair surfaces, measures contraction, and writes stable question dispositions to `review-simplicity.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `post-code-review/contracts`   | **Contract lane**: one required `smol:xhigh` role agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, duplicate invariant owners, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `post-code-review/style`       | **Comments and style lane**: one required `smol:high` role agent reopens `review-scope.md` and the request-local `style.md`, then audits misleading, stale, redundant, or missing comments and project-evidenced naming, idioms, formatting, and readability in `review-style.md`. An empty `style.md` adds no operator criteria.                                                                                                                                                                                                                                                                                                                                                                     |
-| `post-code-review/necessity`   | **Fix-necessity challenge**: one required `smol:xhigh` role agent reads the scope and all four lane reports, preserves every stable question id, then proves behavioral or code-shape defect, guarantee owner, non-duplication, and simplest closure. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven.                                                                                                                                                                                                                                                |
-| `post-code-review/synthesis`   | **Independent final verifier**: one required `smol:xhigh` role agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, requires one closed action per material question id, and writes the code-shape decision in `post-code-review.md`. This is not the final QA or merge verdict.                                                                                                                                                                                                                                                                                                                                                                    |
-| `workflow-creator`             | **Workflow package authoring**: the root invokes `design`, `svg`, and `build` as source-bound saved children in one shared workspace, then publishes `workflow-package.md` only after all three accept their result.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `workflow-creator/design`      | **Architecture and Design**: one author writes `workflow.design.md`; an independent reviewer may require one complete revision, and a second rejection fails closed before source exists.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `workflow-creator/svg`         | **Graph diagram**: one author writes a self-contained `workflow.svg` from the accepted Design; an independent reviewer checks semantics and readability and permits at most one complete replacement.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `workflow-creator/build`       | **Checked source package**: one builder writes only the Design-declared sources under the shared workspace, runs source-shape, identity, import, and graph checks, and receives at most one independently reviewed correction. It never executes the generated workflow.                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Workflow                      | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `live-smoke`                  | Minimal **live proof**: 2 full-tool agents each do one small tool action and report. Cheap (~2 agents). Run it to confirm the host can actually spawn child agents; verify via `result.json`.                                                                                                                                                                                                                                                          |
+| `task/draft`                  | **Raw request to editable orchestration brief**: one reconnaissance agent collects only project facts that change the graph, then one drafting agent publishes `draft.md` with the input, primary output, selected pattern, agents, exact handoffs, bounded reflection or review, concurrency, and fail-closed exits. The operator may copy and edit the complete text before the next stage.                                                          |
+| `task/plan`                   | **Accepted brief to checked workflow source**: four sequential agents design the graph, return one corrected replacement design, build orchestration-only JavaScript, and verify the exact bytes with Node syntax checking plus `workflow_check_source`. It publishes one concrete `workflow.mjs` and never executes it.                                                                                                                               |
+| `post-code-review`            | **External modular code review**: the root makes no model call. It resolves scope first, runs boundaries, simplicity, contracts, and style lanes behind one parallel barrier, then runs one sequential necessity challenge before synthesis and publishes the resulting `post-code-review.md`. Seven `child` edges bind short sibling names to the root's exact selected folder namespace and source.                                                  |
+| `post-code-review/scope`      | **Target and Git boundary**: one required `smol:high` role agent resolves a function, file, commit, range, diff, or locally available PR range into exact paths, immutable object IDs, comparison semantics, verified source locators, and evidence limits in `review-scope.md`.                                                                                                                                                                       |
+| `post-code-review/boundaries` | **Architecture lane**: one required `smol:high` role agent reopens `review-scope.md`, independently inspects live evidence, and writes ownership, placement, dependency-direction, coupling, facade, and seam findings to `review-boundaries.md`.                                                                                                                                                                                                      |
+| `post-code-review/simplicity` | **Delete-first lane**: one required `smol:high` role agent reopens `review-scope.md`, separates runtime callers from repair surfaces, measures contraction, and writes stable question dispositions to `review-simplicity.md`.                                                                                                                                                                                                                         |
+| `post-code-review/contracts`  | **Contract lane**: one required `smol:xhigh` role agent reopens `review-scope.md` and audits APIs, consumers, path/inventory/leaf validation, duplicate invariant owners, defaults, errors, documentation, tests, and intent alignment in `review-contracts.md`.                                                                                                                                                                                       |
+| `post-code-review/style`      | **Comments and style lane**: one required `smol:high` role agent reopens `review-scope.md` and the request-local `style.md`, then audits misleading, stale, redundant, or missing comments and project-evidenced naming, idioms, formatting, and readability in `review-style.md`. An empty `style.md` adds no operator criteria.                                                                                                                      |
+| `post-code-review/necessity`  | **Fix-necessity challenge**: one required `smol:xhigh` role agent reads the scope and all four lane reports, preserves every stable question id, then proves behavioral or code-shape defect, guarantee owner, non-duplication, and simplest closure. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven. |
+| `post-code-review/synthesis`  | **Independent final verifier**: one required `smol:xhigh` role agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, requires one closed action per material question id, and writes the code-shape decision in `post-code-review.md`. This is not the final QA or merge verdict.                                                                                                                     |
 
-All eighteen shipped names use the `standard` source profile. `/workflows info`
+All eleven shipped names use the `standard` source profile. `/workflows info`
 explains that this profile classifies source shape, not runtime behavior or model
 choice; catalog rows omit the internal label.
 
@@ -91,7 +103,7 @@ compatibility reference for trusted scripts that already use raw schemas and
 validators. It is not the standard generation target.
 
 This repository dogfoods that boundary with ignored project files under
-`.pi/workflows/`: `locus-plan.workflow.mjs` exercises clarification, planning,
+`.locus-pi/workflows/`: `locus-plan.workflow.mjs` exercises clarification, planning,
 digest-bound split-run execution, and per-unit implementation; `test-code.workflow.mjs`
 separates testcase design, test implementation/execution, and failure
 attribution among independent agents. Their independent final verifier and
@@ -113,8 +125,9 @@ recovery remain outside the standard profile. Only files in the curated
 Saved workflow refs such as `live-smoke` or `post-code-review/necessity` use one
 first-wins resolver for execution, `/workflows list`, and `/workflows info`.
 Starting at the command's working directory and walking upward to the project
-root, each level checks `.pi/workflows/`, `.claude/workflows/`, then
-`.agents/workflows/`; User `~/.pi/workflows/` and Package follow.
+root, each level checks `.locus-pi/workflows/`. User
+`~/.locus-pi/workflows/` and Package follow. `.pi/workflows/`,
+`.claude/workflows/`, and `.agents/workflows/` are not saved-name sources.
 
 A canonical namespace is a `<root>/` folder with an optional
 `<root>.workflow.mjs` entry plus direct sibling `<child>.workflow.mjs` entries.
@@ -160,9 +173,9 @@ physical proof.
 
 The owner-specific `post-code-review` launch policy follows the resolved project
 or curated Package target. Named and explicit-path launches under
-`.pi/workflows/`, `.claude/workflows/`, or `.agents/workflows/`, plus the installed
-Package parent, therefore require the same fresh `outputDir`; a personal workflow
-with the same saved name is not the owner.
+`.locus-pi/workflows/`, plus the installed Package parent, therefore require the
+same fresh `outputDir`; a personal workflow with the same saved name is not the
+owner.
 
 To run your own script, pass an explicit project-relative `scriptPath` ending in `.mjs`.
 At resolution time, existing explicit targets and project saved-name candidates are checked
@@ -205,13 +218,15 @@ emergency compatibility alias; every other operation uses `/workflows`.
 ```
 
 Every fresh workflow launch receives a unique
-`.locus-pi/plans/<generated-run-name>` workspace. This includes
+`.locus-pi/workspaces/<generated-run-name>` workspace. This includes
 `post-code-review`, so its normal start command needs no manual `outputDir`.
 Callers may still select another confined project-relative workspace with
 `--output-dir`. A fresh `post-code-review` launch cannot reuse a workspace that
 already has durable review state. Resume binds to the original run's exact
-workspace. Any workflow may select a stable `.locus-pi/plans/<name>` workspace
-with `--run-name <name>`.
+workspace. Any workflow may select a stable `.locus-pi/workspaces/<name>` workspace
+with `--run-name <name>`. An existing legacy-only `.locus-pi/plans/<name>` is
+reused at its original physical identity; if both roots exist, launch fails
+before child execution.
 
 Each accepted `post-code-review` workspace also owns one optional operator file,
 `style.md`. Before launch, the operator may place comment and project-style
@@ -470,21 +485,43 @@ mounting. Pi exposes no global custom-UI lock for unrelated third-party
 extensions, so `/workflows` opens the recovery menu if another extension
 displaces the question.
 
-Every run is persisted to `.locus-pi/runs/<runId>/`. The runner creates
-only the non-symlink `outputs/` and `runtime/` evidence directories and writes
+Группа запуска хранится в `.locus-pi/runs/<storageRootRunId>/`. Первый root сохраняет
+`outputs/` и `runtime/` в корне группы; saved children — в `children/<runId>/`,
+root resume — в `attempts/<runId>/`. `lineage.rootRunId` по-прежнему означает root
+текущей попытки, а `storageRootRunId` — физическую группу первого запуска.
+Два независимых запуска одной Pi session получают разные группы.
+
+The runner creates the non-symlink `outputs/` and `runtime/` evidence directories and writes
 the first `runtime/journal.ndjson` line before it
 announces the RunID; initialization failure announces no start and launches no
 child. Agent-authored files use a separate project-local workspace. Fresh
-workflows default to `.locus-pi/plans/<generated-run-name>/`.
-`--run-name <name>` selects `.locus-pi/plans/<name>/` for any workflow. The
+workflows default to `.locus-pi/workspaces/<generated-run-name>/`.
+`--run-name <name>` selects `.locus-pi/workspaces/<name>/` for any workflow. The
 start surface reports the resolved run directory, which matters when
 the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
 
+В корне группы `README.md` связывает workspace, дочерние executions и попытки.
+Workspace содержит runtime-owned `.workflow-runs.md` с обратными ссылками.
+Их пишет только root с действующим workspace lease; после release и при раннем
+отказе без lease общие страницы не обновляются. Они не показывают «последний статус»:
+смотрите `runtime/result.json` нужного выполнения. Конфликт reserved `.workflow-runs.md`
+с пользовательским файлом завершает запуск отказом и сохраняет исходный файл.
+Обе навигационные проекции пишутся как полное durable content через temp+rename и parent-directory sync. Marker, version и весь body проверяются до reuse: неполный README восстанавливается под lease, а неполный backlink отказывает с recovery-required error, чтобы не потерять ранее записанные ссылки.
+
+История прежних flat `.locus-pi/runs/<legacyRunId>/` остаётся readable/resumable без переноса.
+Lookup ограничен корнями групп и двумя вложенными каталогами; неоднозначный ID
+или выбранный symlink отклоняется. Ранний unsafe/unresolvable resume сохраняет
+отдельный rejected receipt; после безопасного определения группы даже semantic
+rejection лежит в её `attempts/`. Старое `.pi/locus-pi` не возвращается в lookup.
+Глобальный claim ID сериализуется коротким `.locus-pi/runs/.run-claim.lock`.
+Если claim прерван, новый запуск явно откажет; прежде чем вручную удалить lock,
+проверьте, что его процесс-владелец действительно остановлен. История не удаляется.
+
 ### Persisted run artifacts and viewer
 
 The canonical artifact inventory is
-`.locus-pi/runs/<runId>/runtime/artifacts/index.json`. Every record includes a
+`<resolved-runDir>/runtime/artifacts/index.json`. Every record includes a
 logical id/name, media type, byte size, relative path, stage, provenance, and
 SHA-256. Its portable identity is always the complete object
 `{ runId, artifactId, name, sha256 }`; a run id or path alone is not an artifact
@@ -544,8 +581,10 @@ The artifact index is single-owner and append-only during a run. External index
 changes, duplicate identities, symlink escapes, unsafe names, oversized text,
 tampered bytes, or malformed transcript headers fail closed.
 The same owner resolves the project root and rejects symlinks in every ancestor
-through `.locus-pi/runs/<runId>` before any artifact read, write, or
-consume, preventing a redirected canonical root.
+through the selected execution directory before any artifact read, write, or
+consume. A root execution lives at `.locus-pi/runs/<storageRootRunId>`; saved
+children and resume attempts live below that group at
+`{children,attempts}/<runId>`. This prevents a redirected canonical root.
 
 At run completion, `runtime/result.json` and the model-callable `workflow` tool project
 up to the newest 20 explicitly published/primary refs as `artifactRefs`; an
@@ -614,15 +653,33 @@ Pi can invoke an extension command immediately while the parent agent is still s
 
 After the idle check, `/workflows run` claims one process-local background lease for the current session/project, launches `runWorkflowScript` without awaiting it, and returns control to the editor. A second interactive run in that stable session/project identity is rejected with the existing run id even across an extension reload, until the predecessor settles. The programmatic `workflow` tool remains awaited and headless, but registers a non-exclusive run controller with the same owner; it does not occupy the slash-command slot. `/workflows stop [runId|last]` is the sole operator cancellation command for either launch origin. Stop is idempotent and the UI says `stopping` until settlement. Once the controlling signal is observed as aborted, the runner persists `disposition.status:"cancelled"` even if trusted script code catches a child abort. `operator_stop`, `session_shutdown`, and unknown host aborts remain distinguishable reasons.
 
-The background run installs a compact `belowEditor` widget. Its header identifies the workflow and run, the stage frontier preserves declaration order, and each stage is labelled only as `declared`, `reached`, or `current`; only an explicit `kind: "phase"` journal event makes a stage reached or current. Phase metadata on agent, group or log events remains grouping context. One active child row is rendered through the shared `AgentLivePanel`; parallel/group rows remain visible context headings but are not selectable. Round retries retain the same stage slot and add an `rN` marker. `/ps` snapshots the agents extension's shared fleet directly from the current `agentLiveStore`, then focuses the primary roster already visible below the editor; its custom editor component captures keys but renders no duplicate agent rows. Snapshot membership and order stay fixed until close while live fields keep updating. Up/Down move through every leaf row, and an eight-row viewport follows the cursor with explicit earlier/later counts. Reopening `/ps` refreshes membership. Because rows of the last few completed runs stay drillable, the snapshot ranks the newest workflow run and every standalone agent first and puts earlier runs behind one `earlier workflow runs` label. A bare agent name resolves to that agent's row in the newest run; an earlier run stays reachable through its own row id. A question that stops a run for a human names the blocked run inside the question block itself (`workflow <name> · run #<id> · awaitOperator`), as a body line rather than a badge, so a narrow terminal drops neither it nor the question counter. `Shift+Down` is an optional terminal shortcut, not the primary contract. `Enter` opens transcript output or a recorded replay answer whose digest was checked by the workflow event adapter. `Esc`/`q` close or go back without aborting and restore the normal editor surface. Workflow-owned rows carry explicit run provenance and expose no `x` action; use `/workflows stop [runId|last]`. Standalone agent rows retain their confirmed `x` behavior.
+The background run installs a compact `belowEditor` widget. Its header identifies the workflow and run, the stage frontier preserves declaration order, and each stage is labelled only as `declared`, `reached`, or `current`; only an explicit `kind: "phase"` journal event makes a stage reached or current. Phase metadata on agent, group or log events remains grouping context. One active child row is rendered through the shared `AgentLivePanel`; a `parallel()`/`pipeline()` group contributes a summary heading once it aggregates two or more agents, and that heading is never selectable. A group of one is a heading over a single row, so the heading is dropped and its member is lifted to the group's own parent; the leaf itself is never hidden. Round retries retain the same stage slot and add an `rN` marker. `/ps` snapshots the agents extension's shared fleet directly from the current `agentLiveStore`, then focuses the primary roster already visible below the editor; its custom editor component captures keys but renders no duplicate agent rows. Snapshot membership and order stay fixed until close while live fields keep updating. Up/Down move through every leaf row, and an eight-row viewport follows the cursor with explicit earlier/later counts. Reopening `/ps` refreshes membership. Because rows of the last few completed runs stay drillable, the snapshot ranks the newest workflow run and every standalone agent first and puts earlier runs behind one `earlier workflow runs` label. A bare agent name resolves to that agent's row in the newest run; an earlier run stays reachable through its own row id. A question that stops a run for a human names the blocked run inside the question block itself (`workflow <name> · run #<id> · awaitOperator`), as a body line rather than a badge, so a narrow terminal drops neither it nor the question counter. `Shift+Down` is an optional terminal shortcut, not the primary contract. `Enter` opens transcript output or a recorded replay answer whose digest was checked by the workflow event adapter. `Esc`/`q` close or go back without aborting and restore the normal editor surface. Workflow-owned rows carry explicit run provenance and expose no `x` action; use `/workflows stop [runId|last]`. Standalone agent rows retain their confirmed `x` behavior.
+
+The agent screen a roster row drills into does not take the terminal's mouse. In
+Pi's regular mode it writes no mouse-tracking sequences on open or on close, so the
+wheel and the host terminal's own scrollback stay with the terminal, and the screen's
+history moves on `PageUp`/`PageDown`/`Home`/`End`. `LOCUS_DRILL_MOUSE=1`, read per
+viewer when the screen opens rather than once per module, restores the previous SGR
+wheel capture together with its lease refcount, and the footer offers `wheel` only
+where the screen actually captures it. In Pi fullscreen the screen writes nothing
+either and does not decode wheel reports, because Pi owns the mouse there and its own
+`ScrollView` consumes the wheel before the component sees it.
+
+The switch is fail-closed on the host mode, not on the flag. When the host hands the
+component a terminal wrapper that carries no mode, the mode is unknown and the
+extension writes no mouse sequence at all — so `LOCUS_DRILL_MOUSE=1` silently has no
+effect on such a host. That is the intended outcome rather than a gap: an enable this
+code cannot match to a mode is an enable it cannot promise to undo. What text
+selection then looks like in any particular terminal, multiplexer, or remote session
+is not claimed here; only what the extension writes is.
 
 The detached run adapter and transcript callbacks carry the originating Pi session generation; late completion therefore cannot write through them into a new session. The progress component's live-store listener and spinner timer are instead session-owned resources: the extension disposes them synchronously on session start/shutdown and idempotently on terminal, error, and `finally` paths, even when a runner ignores abort and settles later. `session_shutdown` (including reload) also aborts active work. This lifecycle uses Pi's documented [`session_shutdown`](https://pi.dev/docs/latest/extensions#events), [`input`/`turn_end`](https://pi.dev/docs/latest/extensions#events), and [`setWidget(key, undefined)` cleanup](https://pi.dev/docs/latest/extensions#widgets-status-and-footer) seams, plus the one shared agent-row formatter.
 
 Transcript persistence follows the Pi surface that started the run. The slash-command path publishes a run-boundary banner at launch and a bounded digest at settlement, both with `customType: "locus-workflow-run"`. When the workflow returns prose, it publishes that exact text separately with `customType: "locus-workflow-result"`; this result message is intentionally untruncated so the operator can read and copy it directly from scrollback. Structured, non-text results do not fabricate a prose message and remain available through persisted evidence. The banner is what separates one run from the next in scrollback — it names the workflow, the run, and the wall-clock time, so two runs of the same workflow are never read as one stream. It is sent from `onRunStart` and only after a synchronous `ctx.isIdle()` recheck, because the operator can submit a prompt between the launch gate and the first journal event and `sendMessage` routes to `agent.steer()` while Pi streams, despite `triggerTurn:false`; a busy session simply gets no banner and the live widget still shows the run. No further `sendMessage` call happens while the run is active, because a long workflow can outlive the launch-time idle check. The lifecycle stays in memory while widget/status surfaces show live progress. After the workflow finishes and the completion UI is updated, the command awaits the real `ctx.waitForIdle()`, rechecks `ctx.isIdle()`, and invokes every final `sendMessage` synchronously before awaiting either promise. Interactive TUI appends the bounded terminal digest and then the optional exact result, leaving the useful result last; non-interactive modes keep the exact result before the authoritative `workflow_end`, so an attached CLI can close on terminal truth without racing prose. There is no await between the final idle check and either send call, so Pi's synchronous routing appends instead of steering. The calls omit `deliverAs` and do not start or queue a model turn. Every published record is stored and participates in later LLM context.
 
-The programmatic `workflow` tool never calls `sendMessage` while its tool output may be streaming. It buffers the same lifecycle and appends one digest to the single ordinary final `toolResult` text; Pi therefore persists it through the native tool-call transcript without an extra turn. Streamed progress updates remain presentation-only. Digests on both paths cap bounded lifecycle lines at 160 characters, keep at most 20 agent rows, and separate `Files` from `Commands`; semantic primary files lead the file group, while full-result and status commands stay copyable and untruncated. Persisted run headers are plain semantic text. The command renderer adds `──` fill at the live card width, so session JSONL is terminal-independent and wide cards do not stop at a fixed 64 columns. The separate command result message deliberately does not use digest bounds. Interactive command transcripts order the cards as started, finished, then exact result, so the useful output remains last; non-interactive JSON preserves exact-result-before-`workflow_end` because that terminal receipt closes the external protocol. A completed run with an exact result does not repeat a clipped copy in the finished receipt. A Package `task/plan` result labels its primary `plan.md` path and renders one human-only next action beneath the exact result; the bounded digest does not repeat it. That continuation requires review and explicit approval before main Pi starts `task/implement-plan-template` on the approved planning workspace. A Package `task/implement-plan-template` result labels the generated `implement-plan.workflow.mjs` and renders the explicit-path run command as the next action after review; a fail-closed `planning-blocker.md` primary instead renders a rerun instruction. One agent occupies one row for the whole run: the row is written on `agent_start` and rewritten in place on `agent_end`, keyed by the runtime-owned `callId` (falling back to agent/label/slot/round), so a reader never meets the same agent twice. An agent whose `agent_end` never arrives is not collapsed and not dropped — its row reads `■ agent <name> started — no end recorded (evidence missing)`, because a missing end must never be folded into a green run. Replayed work carries its own marker, `↻ agent <name> replayed from run #<source>`, rather than a success glyph plus a suffix; the source run id is taken from the runtime's own resume metadata and is never parsed out of log text. When it is unavailable the row still declares the replay and says the source run is unknown. A continuation run opens with `↳ continues run #<source>` plus the operator's answer, so it is legible without its source run on screen. A run that stops at an operator gate renders that gate as its own block: a blank line, `◐ WAITING FOR OPERATOR — <title>`, the stage that was current and the tool that opened the gate, the questions, and the pending-answer line. The handoff envelope records no asking agent, so the block names the stage and never infers an agent from adjacency. Raw result/journal detail never enters the digest. Fresh workflow agent lines keep the stable catalog `agent` as primary identity and append the live execution petname in parentheses, followed by `label` and status. Historical or replayed journals that carry no petname remain readable with the catalog identity alone; no name is reconstructed after the fact. Terminal markers are status-aware: `✓ … finished` only for `completed`, `◐ … awaiting operator` for a successful handoff, `⊘ … cancelled` for `cancelled`, and `✗ … failed` for `failed`. Agent-row markers are `✓ finished`, `⊘ cancelled`, `✗ failed`/`blocked`, `↻ replayed`, `■ ended (<status>)`, and `■ … no end recorded`. Journal `error` lines are not persisted separately: a failed run always emits exactly one final failure with `eventKind: "workflow_end"`, using the journal text only as a fallback when the final result has none. On the command path, evidence warnings and failures to persist the completion messages remain correctly levelled `warning` notifications. A `result.json` write failure already belongs to the final live/typed result and is not repeated as a toast. If `waitForIdle`, the final idle check, or `sendMessage` is unavailable or fails, completion persistence stops and a clear warning is shown; the persisted journal/result artifacts remain source truth. The fallback never calls `sendMessage` and therefore cannot steer the parent agent.
+The programmatic `workflow` tool never calls `sendMessage` while its tool output may be streaming. It buffers the same lifecycle and appends one digest to the single ordinary final `toolResult` text; Pi therefore persists it through the native tool-call transcript without an extra turn. Streamed progress updates remain presentation-only. Digests on both paths cap bounded lifecycle lines at 160 characters, keep at most 20 agent rows, and separate `Files` from `Commands`; semantic primary files lead the file group, while full-result and status commands stay copyable and untruncated. Persisted run headers are plain semantic text. The command renderer adds `──` fill at the live card width, so session JSONL is terminal-independent and wide cards do not stop at a fixed 64 columns. The separate command result message deliberately does not use digest bounds. Interactive command transcripts order the cards as started, finished, then exact result, so the useful output remains last; non-interactive JSON preserves exact-result-before-`workflow_end` because that terminal receipt closes the external protocol. A completed run with an exact result does not repeat a clipped copy in the finished receipt. A Package `task/draft` result points to the editable `draft.md` and tells the operator to copy or edit the complete text before passing it to `task/plan` as semantic input. A Package `task/plan` result labels its primary `workflow.mjs` path and tells the operator to review it, copy it into the target project's `.locus-pi/workflows/<name>.workflow.mjs`, verify `meta.name`, and use the normal reviewed-workflow launch path; the bounded digest repeats neither action. One agent occupies one row for the whole run: the row is written on `agent_start` and rewritten in place on `agent_end`, keyed by the runtime-owned `callId` (falling back to agent/label/slot/round), so a reader never meets the same agent twice. An agent whose `agent_end` never arrives is not collapsed and not dropped — its row reads `■ agent <name> started — no end recorded (evidence missing)`, because a missing end must never be folded into a green run. Replayed work carries its own marker, `↻ agent <name> replayed from run #<source>`, rather than a success glyph plus a suffix; the source run id is taken from the runtime's own resume metadata and is never parsed out of log text. When it is unavailable the row still declares the replay and says the source run is unknown. A continuation run opens with `↳ continues run #<source>` plus the operator's answer, so it is legible without its source run on screen. A run that stops at an operator gate renders that gate as its own block: a blank line, `◐ WAITING FOR OPERATOR — <title>`, the stage that was current and the tool that opened the gate, the questions, and the pending-answer line. The handoff envelope records no asking agent, so the block names the stage and never infers an agent from adjacency. Raw result/journal detail never enters the digest. Fresh workflow agent lines keep the stable catalog `agent` as primary identity and append the live execution petname in parentheses, followed by `label` and status. Historical or replayed journals that carry no petname remain readable with the catalog identity alone; no name is reconstructed after the fact. Terminal markers are status-aware: `✓ … finished` only for `completed`, `◐ … awaiting operator` for a successful handoff, `⊘ … cancelled` for `cancelled`, and `✗ … failed` for `failed`. Agent-row markers are `✓ finished`, `⊘ cancelled`, `✗ failed`/`blocked`, `↻ replayed`, `■ ended (<status>)`, and `■ … no end recorded`. Journal `error` lines are not persisted separately: a failed run always emits exactly one final failure with `eventKind: "workflow_end"`, using the journal text only as a fallback when the final result has none. On the command path, evidence warnings and failures to persist the completion messages remain correctly levelled `warning` notifications. A `result.json` write failure already belongs to the final live/typed result and is not repeated as a toast. If `waitForIdle`, the final idle check, or `sendMessage` is unavailable or fails, completion persistence stops and a clear warning is shown; the persisted journal/result artifacts remain source truth. The fallback never calls `sendMessage` and therefore cannot steer the parent agent.
 
-The compact workflow panel fits to the terminal height, keeps its journal internally, and shows the workflow/run header, the declared/reached/current stage frontier, the run's agent roster, bounded diagnostics, and the `/ps` inspection hint. The roster is the whole run in the order it happened: settled agents keep their status marker, duration, and token counter; the agent working right now keeps its spinner, the shared `accent` color every working agent carries, and its activity sub-line; and every declared stage the run has not reached yet follows as a dim `○ <title> · planned · <detail>` row, with the detail read statically from `meta.phases`. An undeclared dynamic stage appears only once it actually runs, so the roster never advertises work no declaration promised. A loop that re-enters a slot updates that one row and shows its `r<N>` round badge instead of appending a duplicate. When the passive roster does not fit the terminal, the oldest settled rows collapse behind an announced `(+N earlier agents)` line — the current row, the pending stages, and the final verdict are never the part that is dropped. While `/ps` is focused, the primary below-editor panel temporarily projects the global frozen fleet snapshot and its cursor; other progress panels retain only their header/result so the fleet is not duplicated. Every `agent_end` status is terminal in the projection: `completed`, `failed`, and `cancelled` all leave `active`, atomically clear `currentTools`, `currentToolArgs`, and `currentToolStartMs`, freeze `elapsedMs`, stop the spinner, and render their own marker. Drill therefore cannot retain a stale command such as `sleep 60`, and duration cannot keep growing after cancel. Live-row settlement alone does not decide the workflow outcome: the shared returned-outcome classifier evaluates the root and direct `parallel()`/`pipeline()` values, while typed group failure is emitted only after the barrier has preserved sibling evidence. Those rows participate in the shared fleet, but bare `Up`/`Down` always remain Pi editor/history input; `/ps` opens fleet management and `Shift+Down` is the registered fallback. Aggregate group rows remain visible status headings and are never selectable or actionable; in focused mode, `Enter`, `/ps last`, and direct targets operate only on exact leaf rows. Workflow leaf rows are inspectable but never keyboard-stoppable. `x` asks for confirmation only for a selected standalone working SDK child through its live `AbortController` seam. Terminal rows keep drill/back but expose no `x stop` affordance.
+The compact workflow panel fits to the terminal height, keeps its journal internally, and shows the workflow/run header, the declared/reached/current stage frontier, the run's agent roster, bounded diagnostics, and the `/ps` inspection hint. The roster is the run tree: a group heading with its `k/n done · f failed` counters, then its members ranked working, then failed, then queued, then done, while the rows of a linear run keep the order the run produced them. Settled agents keep their status marker, duration, and token counter; the agent working right now keeps its spinner, the shared `accent` color every working agent carries, and its activity sub-line. `/ps` runs the same set-level projection (`orderAgentLiveRows` in `agent-live-panel.ts`), so both surfaces show one structure. The declared stages the run has not reached yet close the roster as a single dim tail line: one pending stage keeps its full `○ <title> · planned · <detail>` reading with the detail read statically from `meta.phases`, while two or more collapse into `○ next: <title> (+k planned)`, because the next stage is the only one an operator can act on and a long declared plan would otherwise spend the roster budget one line per stage. An undeclared dynamic stage appears only once it actually runs, so the roster never advertises work no declaration promised. A loop that re-enters a slot updates that one row and shows its `r<N>` round badge instead of appending a duplicate. When the passive roster does not fit the terminal, it gives up the most expendable settled entry first and the oldest among equally expendable ones: finished agents, then queued and failed group members, then the headings of groups that have already finished, and only then anything still live. The collapse is announced as `(+N earlier agents)`, `(+N earlier groups)`, or both — never silent — and the working agents, the heading of a group that is still running, the pending line, and the final verdict are not the part that is dropped. Collapsing belongs to this passive panel alone: `/ps` clamps nothing, because every leaf there has to stay reachable by the cursor. While `/ps` is focused, the primary below-editor panel temporarily projects the global frozen fleet snapshot and its cursor; other progress panels retain only their header/result so the fleet is not duplicated. Every `agent_end` status is terminal in the projection: `completed`, `failed`, and `cancelled` all leave `active`, atomically clear `currentTools`, `currentToolArgs`, and `currentToolStartMs`, freeze `elapsedMs`, stop the spinner, and render their own marker. Drill therefore cannot retain a stale command such as `sleep 60`, and duration cannot keep growing after cancel. Live-row settlement alone does not decide the workflow outcome: the shared returned-outcome classifier evaluates the root and direct `parallel()`/`pipeline()` values, while typed group failure is emitted only after the barrier has preserved sibling evidence. Those rows participate in the shared fleet, but bare `Up`/`Down` always remain Pi editor/history input; `/ps` opens fleet management and `Shift+Down` is the registered fallback. Aggregate group rows are status headings and are never selectable or actionable; in focused mode, `Enter`, `/ps last`, and direct targets operate only on exact leaf rows. Their visibility, unlike their selectability, is bounded rather than absolute: a heading is rendered only from two members up, and in the passive panel the heading of a finished group is collapsible under the line budget as described above. Workflow leaf rows are inspectable but never keyboard-stoppable. `x` asks for confirmation only for a selected standalone working SDK child through its live `AbortController` seam. Terminal rows keep drill/back but expose no `x stop` affordance.
 
 `dsl.log()` records one readable script event with `source: "script"` and appears in the live panel as
 `│ script · <message>`. Internal workflow enter/exit and resume metadata record
@@ -711,16 +768,31 @@ waiting child resolves the source item. `result.json` is never rewritten.
 The progress panel is allocated at run start, so a workflow that emits no journal
 events still uses the same semantic completion grammar in TUI, RPC, and no-UI modes.
 
-Workflow `agent()` steps still create source-backed workflow parent rows and pass `live.parentRowId` to SDK child sessions, but the live renderer collapses a workflow parent row once its real SDK child row exists. The visible running view therefore avoids duplicate `Working` lines such as `quick_task (label)` plus child `label`; it shows the group row, then the actual child agent row (`agent[model /effort=level] on task "label"`) and a compact current-task line with the task label plus active tool/args when available. The final summary appears in place, so the live view is never replaced by a truncated text widget.
+Workflow `agent()` steps still create source-backed workflow parent rows and pass `live.parentRowId` to SDK child sessions, but the live renderer collapses a workflow parent row once its real SDK child row exists. The visible running view therefore avoids duplicate `Working` lines such as `quick_task (label)` plus child `label`; it shows the group heading, then the actual child agent row in the shared grammar below, and beneath that row the sub-lines the panel adds while they have content: what the agent last said, and a `└ <verb> · <gist>` line for the tool that is running. The final summary appears in place, so the live view is never replaced by a truncated text widget.
 
 The row renderer is the shared local `AgentLivePanel` (`extensions/_shared/agent-runtime/agent-live-panel.ts`),
-not copied `pi-subagents` UI code. It renders source-backed optional fields only:
-concrete runtime model plus `/effort` thinking level, activity state, current tools,
-bounded current-task args, `steps=<n>(events)`, `turns=<n>(model turns)`, token counts,
-child session id after SDK creation, result artifact, final answer, flags with inline meaning
-such as `no-mcp(no MCP tools)`, errors, and elapsed time. `parallel()` and `pipeline()` also emit local
-`group_start` / `group_end` journal lines so the panel can show bounded group
-summaries such as completed/failed counts while preserving individual agent rows.
+not copied `pi-subagents` UI code. One agent is one line, and the line has one grammar:
+
+```text
+<icon> <name>  <title>  ·  <model> <effort>  ·  r<N>  ·  <elapsed>  ·  ↑<in> ↓<out>
+```
+
+The status icon and its color carry the state, so the row deliberately has no
+`[Working]` word and no `on task`, `activity=`, `args=`, `steps=`, `turns=`,
+`tokens=`, `childSession=` field and no raw JSON: those key/value forms are not part
+of the grammar and are not rendered anywhere. `<name>` is the session petname,
+clipped to twelve columns; `<title>` is the explicit title or the call label and is
+the only part that truncates when the line overflows, so the right-hand meta always
+survives. The model badge is the short model name plus the bare effort word; the
+`r<N>` round badge appears from r2 up; and each right-hand segment is omitted when
+its source field is absent. A multi-row roster uses recursive `├─`, `└─`, and `│`
+rails for root rows, descendants, latest messages, and tool activity. A single row
+keeps the established unprefixed grammar, with `   └` for its detail line.
+
+`parallel()` and `pipeline()` also emit local `group_start` / `group_end` journal
+lines, and their summary row is a grammar of its own — the group label, elapsed,
+`<k>/<n> done`, `<f> failed` when any failed, and the summed token counter — while
+the individual agent rows are preserved beneath it.
 
 The live store is process-shared through a versioned `globalThis` symbol. This is
 required by Pi's real extension loader: each package entrypoint is evaluated by a
@@ -972,7 +1044,7 @@ prompt for writes according to `tools.approvalMode` and `tools.approval.*`.
 ## Authoring a new workflow
 
 Authoring is design-first and continuous by default. A raw request first creates
-`.pi/workflows/<name>/<name>.design.md`: selected pattern, exact `Entries` table,
+`.locus-pi/workflows/<name>/<name>.design.md`: selected pattern, exact `Entries` table,
 numbered algorithm, graph
 table, node responsibilities, inputs, complete outputs, roles, consumers,
 edges, concurrency, loop bounds, handoffs, mechanisms, and failure exits. The
@@ -992,23 +1064,12 @@ changes materially, revise and re-review the design before source is created or
 replaced. The packaged `skills/locus-pi-workflow-create/SKILL.md` skill owns the
 exact protocol.
 
-An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be the
-Design input for an optional project-local sequential workflow. The authoring
-skill preserves every complete `## S<n>` block as one task: Build preferably renders
-those blocks as literal author-known prompts in generated source, while a
-programmatic embedder may pass the same frozen blocks through caller `items`.
-One implementer receives one complete block per iteration; an optional reviewer
-is a visibly separate child after that implementer. The reviewed Design states
-whether review is advisory or blocking and whether any finite retry exists.
-Plan approval alone does not start workflow authoring, no runtime parser reads
-the `step-<n>.md` catalog, and this path adds no Package workflow. See the
-[Plan-to-sequential pattern card](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
-
-Design and Build are for a graph the fixed template cannot express — a reviewer
-between steps, a bounded revision loop, concurrency, a different publication. The
-plain sequential shape needs neither turn: `task/implement-plan-template` renders the approved files into the same
-workflow workspace as an unregistered `implement-plan.workflow.mjs` that resolves only
-by explicit path.
+The group-only Package `task` namespace offers an editable two-stage handoff.
+`task/draft` publishes a complete `draft.md` with the graph pattern, agents,
+handoffs, review bounds, concurrency, failure exits, and primary output. Copy or
+edit that full text, then pass it as semantic input to `task/plan`. That workflow
+designs, reviews, builds, checks, and publishes one concrete `workflow.mjs`.
+Neither stage runs the generated source.
 
 New standard source omits `maxToolCalls` and `timeoutMs`: package defaults are
 the emergency policy. A Design emits a narrower or raised per-attempt override
@@ -1145,12 +1206,17 @@ Inside Pi, Build checks an authored file by calling `workflow_check_source`
 with:
 
 ```json
-{ "path": ".pi/workflows/<name>/<name>.workflow.mjs" }
+{
+  "path": ".locus-pi/workflows/<name>/<name>.workflow.mjs",
+  "mode": "orchestration-only"
+}
 ```
 
 Run the same check for every declared direct child. The tool comes from the
 installed workflows extension and resolves the workflow path inside the
-current project. Build is not successful until the checker passes, the module imports, and
+current project. The omitted or explicit `compatibility` mode keeps the broader
+standard grammar for existing reviewed scripts; workflow-create Build uses the
+strict mode above. Build is not successful until the checker passes, the module imports, and
 the source still matches its reviewed design. Diagnostic text uses
 `path:line:column [CODE] message`; structured tool details include the same
 stable code, `error`/`warning` severity, one-based source span, and optional
@@ -1244,8 +1310,8 @@ export const meta = {
 Rules:
 
 - **Optional.** A workflow without `phases` is valid and every surface renders
-  exactly as before. `task/draft`, `task/plan`, `task/implement-plan-template`, and `task/substep` declare
-  theirs; single-stage `live-smoke` does not.
+  exactly as before. `task/draft` and `task/plan` declare theirs; single-stage
+  `live-smoke` does not.
 - **Literal only, all or nothing.** Each entry is an object literal with a
   non-empty static string `title` and an optional static string `detail`. One
   computed value, template interpolation, spread, or non-object element discards
@@ -1299,7 +1365,8 @@ duplicates, are unchanged; there is no Locus items count or character policy.
 Physical constraints still include caller/tool JSON, context, memory, total
 attempts, and time. A source array, caller items, or bounded model-discovered
 `agent({ handoffs })` result may feed the same visible `pipeline()` plus inline
-`dsl.workflow()` mini-flow. This fresh model-discovery path is non-resumable.
+`dsl.workflow()` mini-flow. Recorded discovery can replay in an exactly matching
+prefix. Fresh rediscovery must not be attached to old positional saved-child keys.
 Durable execution instead begins in a separate invocation with a caller-frozen,
 approved list and stable caller-owned keys. Positional keys are safe only when
 that exact list and ordering are intentionally unchanged for the reused output
@@ -1362,8 +1429,8 @@ Ask a clean child to read and follow `locus-pi-workflow-create`, or invoke that
 skill directly in the active session. The child writes the design first, reviews
 it, then writes source in the same
 turn unless the user explicitly asks to pause after design. `Build design:
-.pi/workflows/<name>/<name>.design.md` and `Build approved design:
-.pi/workflows/<name>/<name>.design.md` remain build-only compatibility requests. The
+.locus-pi/workflows/<name>/<name>.design.md` and `Build approved design:
+.locus-pi/workflows/<name>/<name>.design.md` remain build-only compatibility requests. The
 agent confirms identity and module load and never runs the workflow. The helper
 is a packaged skill; the package surface remains
 `./extensions/workflows/index.ts`.
@@ -1454,9 +1521,10 @@ Those questions stay in their run's evidence and reopen on request: the
 and `/workflows continue <runId>` takes a named run.
 
 `outputDir()` returns the project-relative workflow workspace. Fresh runs
-default to `.locus-pi/plans/<generated-run-name>` under the project root. The
+default to `.locus-pi/workspaces/<generated-run-name>` under the project root. The
 `--run-name <name>` form selects
-`.locus-pi/plans/<name>`. The same workspace can be selected through the
+`.locus-pi/workspaces/<name>`. A legacy-only `.locus-pi/plans/<name>` remains
+bound to its original physical identity. The same workspace can be selected through the
 programmatic tool's `outputDir` or `/workflows run <name|path> --output-dir
 <path>`. The runtime
 preserves a qualified child's complete saved name in the generated workspace
@@ -1511,7 +1579,7 @@ cycles fail before model work.
 
 Before durable execution, the caller supplies the complete frozen work list and
 the runtime validates all keys before the first child. Fresh model discovery
-must remain non-resumable in the same run, or finish in a separate run before a
+must remain an inline same-run graph without rediscovered saved-child keys, or finish in a separate run before a
 human/caller approves and transports the frozen list. Never derive resumable
 positional keys from fresh model output. Terminal-success checkpoints are committed atomically
 and keyed by parent source hash, child source hash, workflow workspace, and
@@ -1760,9 +1828,12 @@ its own `agent_start` and its own terminal record — an `agent_end`, or an `err
 the attempt **threw** instead of answering — both carrying `attempt`, `attempts` and the
 `logicalCallId` of the one call they belong to, its own transcript
 and result directories, and its own charge against `maxTotalAgentInvocations`. A
-`[workflow:retry]` line names the boundary between attempts, and the run's journal folder
-`.locus-pi/runs/<runId>/outputs/README.md` grows a `## Retried agent calls` section listing every attempt by
-`callId` with the discarded one's cause; an attempt that threw is listed as `threw`. That
+`[workflow:retry]` line names the boundary between attempts. The selected
+execution's `outputs/README.md` grows a `## Retried agent calls` section listing
+every attempt by `callId` with the discarded one's cause; an attempt that threw
+is listed as `threw`. Root outputs live directly under
+`.locus-pi/runs/<storageRootRunId>/`; child and resume-attempt outputs live in
+their fixed nested execution directories. That
 section reads both terminal kinds on purpose: a call that timed out, was re-run and then
 threw leaves exactly one `agent_end` behind, and a report built from `agent_end` alone
 would show a stage that ran twice and was billed twice as if it had never retried. A budget
@@ -1829,10 +1900,11 @@ rules:
   SDK backstop cannot pause, so an `ask: true` call widens it by a fixed
   24-hour allowance; a single wait longer than that still dies by the backstop
   (named residual).
-- **Evidence is durable.** Each answered call writes an
-  `operator-ask-<n>.json` artifact (questions, answers, declined flag) into the
-  call's artifact directory and one `workflow_ask: operator answered N/M`
-  diagnostics line into the result envelope.
+- **Evidence is durable.** Each answered call records one indexed `operator-ask`
+  artifact (questions, answers, declined flag) through the run artifact store;
+  viewer readback verifies its digest. If persistence fails after the question
+  was shown, the current child call aborts with `ask-evidence-persistence`,
+  returns no successful answer/ref, and does not remount the same invocation.
 - **Replay forks on `ask`.** The call key records the declaration, so a record
   made without `ask` is never served to an asking call, and vice versa. A
   completed call replays its recorded final text as usual; an interrupted call
@@ -2160,21 +2232,24 @@ for everyone — but never silently: the runtime writes a `[workflow:budget] cal
 raised …` journal line naming the axis, the default and the requested value.
 
 **Which axes a script can override.** The four per-call axes — `maxToolCalls`,
-`timeoutMs`, `maxTurns`, `maxAnswerChars` — are ordinary `agent()` options. The
-three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — are **host-side
-only**: they are overridable through `RunWorkflowScriptOptions.budget`, which
-embedders and tests pass, and through nothing a `*.workflow.mjs` can reach.
-Neither production entrypoint passes it, so in practice every real run uses the
-package values. Giving scripts a run-level surface means deciding where
-operator-changeable knobs live, which is an open owner decision.
+`timeoutMs`, `maxTurns`, `maxAnswerChars` — remain ordinary `agent()` options.
+The three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — remain
+host-owned rather than writable from workflow JavaScript. The structured
+`workflow` tool and command launcher now accept an optional `budget` object
+forwarded to the existing `RunWorkflowScriptOptions.budget`; approval displays
+the resolved values. Unspecified axes keep the defaults above. There are no
+new slash-command flags. See [execution controls](references/execution-controls.md)
+for the exact boundary and local group concurrency.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget, and `.locus-pi/runs/<runId>/outputs/README.md` carries a `## Budget` section
-with each axis, its applied value, and the spend the run evidence can measure:
+applied budget. The selected execution's `outputs/README.md` carries a `## Budget`
+section with each axis, its applied value, and the spend the run evidence can measure.
+For the root it is under `.locus-pi/runs/<storageRootRunId>/`; children and resume
+attempts use their fixed nested execution directories. The measured values are:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
-intervals, because `agent_start` is written before the gate is acquired — counting
-overlapping intervals would report queued children as concurrent. Replayed calls
+intervals. `agent_queued` records demand; `agent_start` is now emitted only
+after gate admission. Neither event claims a provider token has arrived. Replayed calls
 are counted only where they really spend: one invocation against `totalAgents`,
 but no child, so the row reads `N invocations (M replayed, no child ran)` and
 their durations and tokens are excluded — a run served entirely from records
@@ -2252,7 +2327,7 @@ hard cap.
   `git_read` accepts argv for
   allowlisted Git queries and rejects mutation, output-file, external-diff,
   textconv, pager, signature, and config options before launch.
-- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under `.locus-pi/runs/<runId>/runtime/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`.
+- **Workspace:** `workspaceMode: "project"` keeps the child in the current project working directory. `workspaceMode: "worktree"` and `"temporary-worktree"` make the bridge create a retained git worktree under the selected execution's `runtime/worktrees/<call-id>/`, then pass that path as `AgentRunRequest.workingDirectory`. That execution is the group root at `.locus-pi/runs/<storageRootRunId>/` or a saved child/resume attempt in its fixed nested directory.
 - **Deprecated alias:** `sandbox: "read-only"` maps to `workspaceMode: "project"`; `sandbox: "workspace-write"` maps to `workspaceMode: "worktree"`. It never changes the tool set. New workflows should use `workspaceMode`.
 - Pi native approval policy owns whether the underlying write-tier calls are allowed, prompted, or denied.
   The worktree isolates file changes for diff UX purposes, but it is not a security boundary.
@@ -2296,10 +2371,50 @@ A declared `schema` needs no separate field — the shape contract is already pa
 of the prompt the child receives, and each schema retry is recorded as its own
 call, so a shaped stage replays its retries exactly as it ran them.
 
-Replay is a **strict prefix**. The first call whose key does not match the record
-invalidates that call _and every later call_, including calls whose own prompt
-did not change: a later recorded answer was produced after an earlier answer that
-no longer exists, so reusing it would misreport what the run observed.
+Each recorded agent line also carries a `node` name, `[phase, label, occurrence]`,
+absent when the call had no `label`. It is the readable identity of the completed
+prefix: `runtime/replay.ndjson` answers "which nodes finished" without the
+workflow source, and the `replay` envelope reports `divergedAtNode`. It is not
+the safety boundary — the key already carries `phase` and `label` — so a name
+never contradicts a matching key on an unbroken prefix.
+
+Replay is a **strict prefix**. The first call that does not resolve from the
+record invalidates that call _and every later call_, including calls whose own
+prompt did not change: a later recorded answer was produced after an earlier
+answer that no longer exists, so reusing it would misreport what the run
+observed. Every miss reason latches, not only a key mismatch — running a call for
+real changes the world the later recorded answers came from.
+
+### Continuing a repaired workflow
+
+Changed source bytes do not end a resume. Repairing the stopped workflow in the
+same file and continuing under the original run id is the supported path: the
+completed nodes return their recorded answers, and the repaired node and its tail
+run fresh. Once the bytes differ, the node name becomes mandatory — a call the
+author never labeled cannot be located in a program that changed under it.
+
+| Miss                  | Meaning                                                               |
+| --------------------- | --------------------------------------------------------------------- |
+| `no-record`           | the record has no entry at this position                              |
+| `unnamed-node`        | source changed and either the entry or the current call has no name   |
+| `node-mismatch`       | source changed and the names differ                                   |
+| `key-mismatch`        | the resolved request differs from the recorded one                    |
+| `recorded-failure`    | the recorded call failed; a failure is never served back as an answer |
+| `side-effecting-call` | the call writes to a worktree, so its record cannot stand in for it   |
+| `diverged`            | the latch is already set by one of the above                          |
+
+A `fusion()` group standing after the divergence point does not run fresh: every
+member and the judge are replay-required for the whole of any resume, so the
+group ends the run with `fusion resume cannot mix recorded and fresh agent calls`.
+The panel's rule against mixing recorded and live answers is kept at the cost of
+a terminal error. The same rule costs one case that used to work — a
+byte-identical resume no longer replays a fusion tail standing after a recorded
+failure.
+
+The strict `orchestration-only` source mode requires every `agent()` call to
+declare a unique literal `label`. That rule, not the recorded name, is what
+prevents a deleted call site from handing its recorded answer to a twin sharing
+its label.
 
 ### When replay is refused
 
@@ -2310,12 +2425,16 @@ Refusal is never silent — the reason is written to the journal and to
 | ---------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `source-run-unusable`        | the named run has no readable persisted script identity                                              |
 | `target-changed`             | the persisted source target does not match the target selected for this resume                       |
-| `script-changed`             | `scriptSha256` differs from the recorded run's                                                       |
 | `identity-coverage-unproven` | the script declares `entry-only`, so imported bytes could move calls without changing the entry hash |
 | `replay-unsafe-script`       | the AST found direct clock/randomness syntax (below)                                                 |
 | `no-recorded-calls`          | the recorded run wrote no replay record                                                              |
 
 ### Replay-safety is scanned, not asserted
+
+Ordinary resume still requires a trustworthy terminal result. Explicit
+`recoverInterrupted: true` is a separate conservative structured-tool route for
+a fully confirmed serial prefix and absent `result.json`. See [recovery admission](references/recovery-and-continuation.md);
+corrupt results and uncertain effects are not automatically recovered.
 
 There is no `meta.replaySafe` field, deliberately. An author assertion fails
 open: a script that claims to be replay-safe and calls `Date.now()` would replay
@@ -2371,8 +2490,8 @@ so:
 
 - `journal.ndjson` — `agent_start` / `agent_end` carry `replayed: true`.
 - `result.json` — a `replay` envelope with `replayed`, `recorded`, `sourceRunId`,
-  `refusedReason`, `notRecordedReason`, `replayedCalls`, `freshCalls`, and
-  `divergedAtCall`.
+  `refusedReason`, `notRecordedReason`, `replayedCalls`, `freshCalls`,
+  `divergedAtCall`, and `divergedAtNode`.
 - `/workflows status` — `replayed=<n>` on the run row, and a detail line reading
   `N/M agent call(s) reused a recorded run — not fresh evidence`.
 - the live progress panel — `replayed=<n>` in the header.
@@ -2431,16 +2550,17 @@ A replayed call reports **no** token usage, so the run budget shown by
 ## Journal layout
 
 ```
-.locus-pi/runs/<runId>/
-  outputs/           — README, semantic documents, exact workflow-result.md prose
+.locus-pi/runs/<storageRootRunId>/
+  README.md          — stable group navigation
+  outputs/           — first root README, documents, exact workflow-result.md prose
   runtime/
     script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
     journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
-                      kinds: phase | log | agent_start | agent_end |
+                      kinds: phase | log | agent_queued | agent_start | agent_end |
                              group_start | group_end | error
     replay.ndjson     — Recorded agent answers + dsl.now()/dsl.random() values for --resume;
                       absent for scripts that are not replay-safe (see "Resume and replay")
-    result.json       — Final result + disposition + full journal snapshot + identity/replay envelopes
+    result.json       — Final result + disposition + bounded finalization errors + identity/replay envelopes
     artifacts/
       index.json       — Canonical digest-bound inventory for this run
       answers/         — Exact automatic agent answers
@@ -2448,11 +2568,16 @@ A replayed call reports **no** token usage, so the run budget shown by
       results/         — Fresh child result envelopes, grouped by call id
       published/       — Text written through publishArtifact()/publishPrimaryArtifact()
       inputs/          — Verified copies consumed from prior runs, with source refs
+  children/<runId>/  — saved-child execution; owns the same outputs/ and runtime/ shape
+  attempts/<runId>/  — resume execution; owns the same outputs/ and runtime/ shape
 ```
+
+Legacy top-level `.locus-pi/runs/<runId>/` evidence remains readable without
+migration. New child and resume evidence is always nested under its physical group.
 
 Files deliberately written by workflow agents are outside this tree, under the
 selected project-local workflow workspace. Fresh workflows default to
-`.locus-pi/plans/<generated-run-name>/`.
+`.locus-pi/workspaces/<generated-run-name>/`.
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
 `schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared
@@ -2503,10 +2628,10 @@ the point:
 - A **concrete** `provider/id` selector that does not resolve — a typo, a provider
   that is not configured, a model this host does not have — ends the call with a
   named failed result and zero child sessions. It never silently inherits.
-- A **role** that no model-roles layer assigns degrades to `ctx.model` and records
+- A **role** that the global model-roles config does not assign degrades to `ctx.model` and records
   `modelRoleFallback` on `agent_end`, in the `locus.agent.run-result.v2` body and
   in the run report. The package deliberately ships no role assignments, so this
-  is what a user sees until they assign that named project/user profile's role;
+  is what a user sees until they assign that named profile's role;
   an unassigned role must not fail closed merely because no tier is configured.
 - A call with `requireModelRole: true` is the opt-in exception. It must also
   declare `modelRole`, may not declare `model`, and that role must have an
@@ -2515,15 +2640,16 @@ the point:
   described below and does not create a child to resolve.
 - A role whose assignment EXISTS but does not parse as `provider/id[:level]` is a
   configuration error and fails the call by name, quoting the value as written and
-  the layer holding it. It is deliberately not treated as unassigned: degrading a
+  the global config holding it. It is deliberately not treated as unassigned: degrading a
   typo would run the session model under the requested tier's name and report the
   role as unassigned, which the operator's own config contradicts.
 
-The frontmatter tier still resolves through the effective role order `session` →
-Pi settings → project config → user config, falling back across `agent`, `task`,
-then `default`; a per-call `modelRole` does **not** use that purpose fallback,
-because an author who named a tier asked about that tier. `modelRoleResolution`
-continues to be recorded in the request capsule, artifacts, and live display.
+A frontmatter tier resolves its named role directly from the global user config
+at `~/.pi/agent/model-roles/config.json`. A model-less child checks only the
+`agent` role, then inherits the current session model when that role is unset.
+A per-call `modelRole` also resolves only the role it names.
+`modelRoleResolution` continues to be recorded in the request capsule,
+artifacts, and live display.
 
 **The pre-tier `pi/<role>` namespace.** Before tiers were executed the shipped
 agents wrote their tier as `pi/<role>`; `pi` was never a provider and nothing
@@ -2584,7 +2710,7 @@ line — its absence always means "no child ran", never "the record was lost".
 or with different fallback policy occupy different records. The key is built in
 the runtime before the bridge consults the roles table, so it identifies the tier
 a stage **declared**, not the model that produced the answer: remapping a role in
-`.pi/model-roles/config.json`, or editing an agent's frontmatter, reuses the
+`~/.pi/agent/model-roles/config.json`, or editing an agent's frontmatter, reuses the
 existing record. **A roles-table change invalidates recorded runs by hand.**
 
 `meta.description` has no effect on any of these choices. `/workflows info`

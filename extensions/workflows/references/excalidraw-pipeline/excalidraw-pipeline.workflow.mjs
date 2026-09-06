@@ -62,7 +62,7 @@ const AUTHOR_MODEL_ROLE = "agent";
  * authoring one. Turning free-form intent into a structured request file is
  * bounded, mechanical work against a stated template, which is what makes it the
  * stage to buy cheaply.
- * `smol` resolves to whatever the operator's `.pi/model-roles/config.json` assigns;
+ * `smol` resolves to whatever the operator's global `~/.pi/agent/model-roles/config.json` assigns;
  * unassigned, it runs on the session model and the run evidence records the
  * degradation.
  *

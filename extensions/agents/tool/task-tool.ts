@@ -93,7 +93,7 @@ async function runTaskTool(
   const modelRoleResolution =
     resolution === undefined
       ? undefined
-      : resolveAgentModelPreference(await loadModelRolesState(ctx), resolution.agent.model ?? []);
+      : resolveAgentModelPreference(await loadModelRolesState(), resolution.agent.model ?? []);
   const liveModel = resolveLiveModelDisplay({ pi, ctx, assignment: modelRoleResolution?.assignment });
   const executionLabel = resolution?.resolvedAgent ?? "sub-agent";
   const hasUI = ctx.hasUI === true;

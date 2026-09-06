@@ -95,6 +95,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     /** The closed failure-cause list is value-imported by workflow runtime; keep this module import-free. */
     "agent-failure-cause",
     "agent-live-panel",
+    "agent-live-tick",
     "agent-live-transcript",
     "agent-names",
     "agent-read-only-policy",

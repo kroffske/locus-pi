@@ -17,7 +17,7 @@ import { runWorkflowScript } from "../../../../extensions/workflows/runtime/work
  */
 
 function writeWorkflow(root: string, name: string, body: string): void {
-  const dir = path.join(root, ".claude", "workflows");
+  const dir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(dir, { recursive: true });
   writeFileSync(path.join(dir, `${name}.workflow.mjs`), body, "utf8");
 }

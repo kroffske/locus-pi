@@ -11,17 +11,15 @@ import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
 import { runPlanDraftSession } from "../goal/goal-ai-draft.js";
 import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
 import { SETTINGS_HELP_PLACEMENT } from "../../_shared/operator/widget-render.js";
+import { clearModeState, isInPlanMode, loadActiveModeState, loadModeState, writeModeState } from "./mode-state.js";
 import {
-  clearModeState,
-  isInPlanMode,
   listPlanSlugs,
-  loadActiveModeState,
-  loadModeState,
   planArtifactPath,
   planSlug,
+  preparePlanLibrary,
+  rebindPreparedPlanArtifactPath,
   slugify,
-  writeModeState,
-} from "./mode-state.js";
+} from "./plan-storage.js";
 import { splitFirstWord } from "../command/command-parser.js";
 import { ensureModeAwareEditor, setModeStatus, setPlanOperatorBlock } from "../operator/operator-surface.js";
 import {
@@ -31,6 +29,7 @@ import {
   planHelpBlock,
   planListBlock,
   planOpenBlock,
+  savedPlansPreparationErrorBlock,
 } from "../operator/operator-ui.js";
 import { runPlanExitDecision } from "./plan-exit-handoff.js";
 
@@ -53,11 +52,13 @@ export async function handlePlanCommand(
   }
 
   if (verb === "list") {
+    if (!prepareLibraryForCommand(projectRoot, ctx)) return;
     setPlanOperatorBlock(ctx, planListBlock(projectRoot), SETTINGS_HELP_PLACEMENT);
     return;
   }
 
   if (verb === "help" || verb === "?") {
+    if (!prepareLibraryForCommand(projectRoot, ctx)) return;
     setPlanOperatorBlock(ctx, planHelpBlock(projectRoot), SETTINGS_HELP_PLACEMENT);
     return;
   }
@@ -92,6 +93,7 @@ export async function handlePlanCommand(
       });
       return;
     }
+    if (!prepareLibraryForCommand(projectRoot, ctx)) return;
     const artifactPath = planArtifactPath(projectRoot, slug);
     if (!existsSync(artifactPath)) {
       const available = listPlanSlugs(projectRoot);
@@ -190,6 +192,8 @@ async function enterPlanModeWithRequest(
     }
   }
 
+  if (!prepareLibraryForCommand(projectRoot, ctx)) return;
+
   const slug = planSlug(request);
   const artifactPath = planArtifactPath(projectRoot, slug);
   setPlanOperatorBlock(ctx, {
@@ -219,6 +223,7 @@ async function enterPlanModeWithRequest(
   const completed = result.status === "completed" && draft !== undefined;
   const artifactContent =
     draft ?? ["# Draft plan unavailable", "", `Plan draft session ${result.status}.`, result.reason].join("\n");
+  if (!prepareLibraryForCommand(projectRoot, renderCtx)) return;
   mkdirSync(dirname(artifactPath), { recursive: true });
   writeFileSync(artifactPath, `${artifactContent.trimEnd()}\n`, "utf8");
 
@@ -259,4 +264,20 @@ async function enterPlanModeWithRequest(
           controls: ["Retry: /plan <request>"],
         },
   );
+}
+
+function prepareLibraryForCommand(projectRoot: string, ctx: ExtensionCommandContext): boolean {
+  try {
+    preparePlanLibrary(projectRoot);
+    const state = loadModeState(projectRoot);
+    if (state !== null && state.activeArtifactPath !== "") {
+      const activeArtifactPath = rebindPreparedPlanArtifactPath(projectRoot, state.activeArtifactPath);
+      if (activeArtifactPath !== state.activeArtifactPath)
+        writeModeState(projectRoot, { ...state, activeArtifactPath });
+    }
+    return true;
+  } catch (error) {
+    setPlanOperatorBlock(ctx, savedPlansPreparationErrorBlock(error));
+    return false;
+  }
 }

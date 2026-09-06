@@ -9,7 +9,7 @@
     "/loop status reports idle/manual/blocked based on goal and workflow state",
     "/loop once goal coordinates with the existing /goal continue bounded-artifact contract",
     "/loop once workflow <runId> uses persisted workflow run metadata when present; otherwise fails closed with a clear reason",
-    "Command-visible continuation output shows metadata/path and omits full prompt bodies from the widget",
+    "Command-visible manual workflow continuation output shows bounded source metadata and the exact prompt inline; it writes no separate workflow-continuation artifact",
     "start and until schedule hidden follow-up turns through Pi sendMessage and agent_settled",
     "each session has one persisted loop state with default hard stops of 20 iterations and 30 minutes",
     "until uses a model-evaluated condition and instructs the model to call loop stop when satisfied",
@@ -20,7 +20,6 @@
     ".locus/runtime/goal/continue.md",
     ".locus-pi/runs/<runId>/runtime/journal.ndjson",
     ".locus-pi/runs/<runId>/runtime/result.json",
-    ".locus/runtime/loop/workflow/*.json",
     ".locus/runtime/loop/sessions/*.json"
   ],
   "provides": {
@@ -34,7 +33,7 @@
         "name": "loop",
         "taxonomy": ["transient-widget", "status", "blocking-prompt", "artifact-write"],
         "transient": ["widget:loop", "status:locus (loop.manual contribution)"],
-        "persistent": [".locus/runtime/goal/continue.md", ".locus/runtime/loop/**"]
+        "persistent": [".locus/runtime/goal/continue.md", ".locus/runtime/loop/sessions/**"]
       }
     ]
   },

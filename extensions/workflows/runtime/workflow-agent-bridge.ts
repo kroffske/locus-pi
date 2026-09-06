@@ -7,8 +7,7 @@
  * so tests can mock createSession and prove the wiring.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createWorkflowReturnController } from "./workflow-return.js";
 import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../../_shared/host/pi-api.js";
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import {
@@ -52,7 +51,12 @@ import type {
   WorkspaceMode,
 } from "./workflow-runtime.js";
 import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
-import { createWorkflowAskTool, WORKFLOW_ASK_NO_UI_MESSAGE, type WorkflowAskToolDeps } from "./workflow-ask-tool.js";
+import {
+  createWorkflowAskTool,
+  WORKFLOW_ASK_NO_UI_MESSAGE,
+  type WorkflowAskFailureCause,
+  type WorkflowAskToolDeps,
+} from "./workflow-ask-tool.js";
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/model/workflow-model-resolve.js";
 import type { AgentDefinition, PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
@@ -100,6 +104,8 @@ export interface WorkflowAgentBridgeOptions {
   ctx: ExtensionContext; // captured at tool/command execute time
   signal: AbortSignal;
   workflowRunId?: string;
+  /** Claimed execution directory paired with workflowRunId for write agents. */
+  workflowRunDir?: string;
   /** Optional human semantic input; host continuation metadata is never mixed into it. */
   args?: string;
   /**
@@ -207,7 +213,7 @@ export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions
     const projectRoot = getProjectRoot(options.ctx);
     const discovered = discoverAgentDefinitions(projectRoot);
     const agentMap = new Map(discovered.definitions.map((agent) => [agent.name, agent]));
-    const modelRoles = await loadModelRolesState(options.ctx);
+    const modelRoles = await loadModelRolesState();
 
     for (const request of requests) {
       const agentName = request.agent?.trim();
@@ -326,7 +332,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     //    runs on, and it decides it BEFORE any child is spawned so a refusal costs
     //    nothing. `modelRoleResolution` continues to travel into the request capsule
     //    and the run-result artifact exactly as it did before.
-    const modelRoles = await loadModelRolesState(ctx);
+    const modelRoles = await loadModelRolesState();
     const tier = await resolveWorkflowTier({ req, agent, modelRoles, resolveModelFn });
     if (tier.kind === "refused") {
       return {
@@ -388,7 +394,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         };
       }
     } else if (workspaceMode === "worktree" || workspaceMode === "temporary-worktree") {
-      if (options.workflowRunId === undefined || options.workflowRunId.trim() === "") {
+      if (
+        options.workflowRunId === undefined ||
+        options.workflowRunId.trim() === "" ||
+        options.workflowRunDir === undefined
+      ) {
         const message = "Workflow write agent requires workflowRunId for isolated git worktree allocation.";
         return {
           ok: false,
@@ -406,6 +416,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         const worktree = createWorkflowWorktree({
           projectRoot,
           runId: options.workflowRunId,
+          runDir: options.workflowRunDir,
           safeCallId: callId,
         });
         worktreePath = worktree.path;
@@ -448,7 +459,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // abort controller it shares.
     let pauseAskFuse: () => void = () => {};
     let resumeAskFuse: () => void = () => {};
-    let failAskCall: (message: string) => void = () => {};
+    let failAskCall: (message: string, cause: WorkflowAskFailureCause) => void = () => {};
     const askNotes: string[] = [];
     let askEvidenceCounter = 0;
     const askTool =
@@ -462,32 +473,33 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
             }),
             onWaitStart: () => pauseAskFuse(),
             onWaitEnd: () => resumeAskFuse(),
-            failCall: (message) => failAskCall(message),
+            failCall: (message, cause) => failAskCall(message, cause),
             ...(options.askRequestQuestion !== undefined ? { requestQuestion: options.askRequestQuestion } : {}),
             recordEvidence: (record) => {
-              askEvidenceCounter += 1;
-              let artifactNote = "";
-              if (evidenceDestinations !== undefined) {
-                try {
-                  mkdirSync(evidenceDestinations.resultArtifactsDir, { recursive: true });
-                  const artifactPath = join(
-                    evidenceDestinations.resultArtifactsDir,
-                    `operator-ask-${askEvidenceCounter}.json`,
-                  );
-                  writeFileSync(artifactPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
-                  artifactNote = `; artifact ${artifactPath}`;
-                } catch (error) {
-                  artifactNote = `; artifact write failed: ${error instanceof Error ? error.message : String(error)}`;
-                }
+              const sequence = ++askEvidenceCounter;
+              if (evidenceDestinations === undefined || req.callId === undefined) {
+                throw new Error("workflow artifact store is not configured for operator-answer evidence");
               }
+              const ref = evidenceDestinations.recordOperatorAskEvidence(
+                req.callId,
+                record.toolCallId,
+                sequence,
+                record,
+              );
               const answered = record.entries.filter((entry) => entry.status === "answered").length;
               askNotes.push(
                 `workflow_ask: operator answered ${answered}/${record.entries.length}` +
-                  `${record.declined ? ", declined the rest" : ""}${artifactNote}`,
+                  `${record.declined ? ", declined the rest" : ""}; artifact ${ref.artifactId}`,
               );
             },
           })
         : undefined;
+    const returnController =
+      req.returnContract === undefined ? undefined : createWorkflowReturnController(req.returnContract);
+    const customTools = [
+      ...(askTool === undefined ? [] : [askTool]),
+      ...(returnController === undefined ? [] : [returnController.tool]),
+    ];
     const requestInput = {
       maxTurns,
       approvalTier,
@@ -504,7 +516,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // travel only through the injected `workflow_ask` when the stage declared
       // `ask: true`.
       additionalExcludeTools: ["ask"],
-      ...(askTool !== undefined ? { customTools: [askTool] } : {}),
+      ...(customTools.length === 0 ? {} : { customTools }),
+      ...(returnController === undefined ? {} : { responseAcceptance: returnController.acceptance }),
       ...(worktreePath !== undefined ? { workingDirectory: worktreePath } : {}),
       ...(options.args !== undefined || worktreePath !== undefined
         ? {
@@ -563,22 +576,26 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           })
         : undefined;
     // Slot anchoring (REQ-009, D-006): a workflow agent with a `label` is a repeatable slot.
-    // Give its live row a STABLE id derived from (runId, agent, label, phase) so a loop re-invoke
-    // REUSES the one row (round++) instead of spawning a fresh `agent-live-*` row each iteration.
+    // Give its live row a STABLE id derived from (runId, agent, label, phase), plus the
+    // runtime-owned mapped occurrence when present. A loop re-invoke in one member therefore
+    // REUSES its row (round++), while sibling members cannot collapse into that row.
     // No label ⇒ not a slot: leave rowId unset (fresh-row-per-call legacy behaviour, no rounds).
+    const baseSlotKey = req.label === undefined ? undefined : workflowSlotKey({ phase: req.phase, label: req.label });
+    const slotKey = req.workflowSlot?.key ?? baseSlotKey;
+    const rowOccurrence = req.workflowSlot?.rowOccurrence;
     const slotRowId =
       options.workflowRunId !== undefined && req.label !== undefined
-        ? workflowAgentLiveChildRowId({
+        ? `${workflowAgentLiveChildRowId({
             runId: options.workflowRunId,
             ...resultIdentity,
             label: req.label,
             ...(req.phase !== undefined ? { phase: req.phase } : {}),
-          })
+          })}${rowOccurrence === undefined ? "" : `:${rowOccurrence.groupId}:${rowOccurrence.memberIndex}`}`
         : undefined;
-    const slotKey = slotRowId !== undefined ? workflowSlotKey({ phase: req.phase, label: req.label }) : undefined;
     const round = slotRowId !== undefined ? nextRound(roundByRowId, slotRowId) : undefined;
     const live: AgentSdkSessionExecutorOptions["live"] = {
       ...(req.label !== undefined ? { label: req.label } : {}),
+      ...(req.title !== undefined ? { title: req.title } : {}),
       ...(slotRowId !== undefined ? { rowId: slotRowId } : {}),
       ...(workflowParentRowId !== undefined ? { parentRowId: workflowParentRowId } : {}),
       ...(options.workflowRunId !== undefined ? { workflowRunId: options.workflowRunId } : {}),
@@ -627,7 +644,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // Run cancellation, the per-call fuse and the live-ask fail-closed path share
     // one child signal. Whichever source aborts it first owns the durable outcome;
     // the other sources must not relabel it while the executor unwinds.
-    let abortOwner: "run" | "timeout" | "ask-unavailable" | undefined;
+    let abortOwner: "run" | "timeout" | WorkflowAskFailureCause | undefined;
     let askFailureMessage: string | undefined;
     const abortFromRun = (): void => {
       if (abortOwner !== undefined) return;
@@ -668,9 +685,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       if (askWaitDepth !== 0 || abortOwner !== undefined || timer !== undefined) return;
       armFuse();
     };
-    failAskCall = (message: string): void => {
+    failAskCall = (message: string, cause: WorkflowAskFailureCause): void => {
       if (abortOwner !== undefined) return;
-      abortOwner = "ask-unavailable";
+      abortOwner = cause;
       askFailureMessage = message;
       callAbort.abort(new Error(message));
     };
@@ -686,7 +703,13 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         // it observed — or return a late success after the fuse already fired. Finalize
         // both status and cause before the envelope is written.
         finalizeResult: (result) => {
-          if (abortOwner !== "timeout" && abortOwner !== "ask-unavailable") return result;
+          if (
+            abortOwner !== "timeout" &&
+            abortOwner !== "ask-unavailable" &&
+            abortOwner !== "ask-evidence-persistence"
+          ) {
+            return result;
+          }
           const { text: _lateText, ...resultWithoutText } = result;
           return {
             ...resultWithoutText,
@@ -695,7 +718,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
               abortOwner === "timeout"
                 ? `Agent call exceeded its ${String(req.timeoutMs)} ms timeout and was aborted.`
                 : (askFailureMessage ?? WORKFLOW_ASK_NO_UI_MESSAGE),
-            failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
+            failureCause: abortOwner === "timeout" ? "call-timeout" : abortOwner,
           };
         },
         ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
@@ -706,7 +729,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
     const displayName =
       liveExecution === undefined ? undefined : agentLiveStore.rowForExecution(liveExecution)?.displayName;
-    if (abortOwner === "timeout" || abortOwner === "ask-unavailable") {
+    if (abortOwner === "timeout" || abortOwner === "ask-unavailable" || abortOwner === "ask-evidence-persistence") {
       // Name the fuse (or the fail-closed ask refusal). Without this the operator
       // reads only the host's generic abort reason and cannot tell them apart.
       const message =
@@ -716,8 +739,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       return {
         ok: false,
         status: "failed",
-        // Both are TRANSPORT failures: the child was aborted, not answered badly.
-        failureCause: abortOwner === "timeout" ? "call-timeout" : "ask-unavailable",
+        // These are typed bridge failures: the child was aborted, not answered badly.
+        // Runtime retry policy still decides each cause separately.
+        failureCause: abortOwner === "timeout" ? "call-timeout" : abortOwner,
         summary: message,
         diagnostics: [...boundary.diagnostics, ...askNotes, message],
         ...resultIdentity,
@@ -792,6 +816,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // Carried, never re-derived: the host declared the cause where it was known.
       ...(boundary.failureCause !== undefined ? { failureCause: boundary.failureCause } : {}),
       ...(boundary.text !== undefined ? { text: boundary.text } : {}),
+      ...(boundary.outputAcceptance === undefined ? {} : { outputAcceptance: boundary.outputAcceptance }),
       diagnostics: [...(degradationConfirmed ? [tier.fallback!] : []), ...boundary.diagnostics, ...askNotes],
       ...(boundary.evidence !== undefined ? { evidence: boundary.evidence } : {}),
       ...resultIdentity,
@@ -842,8 +867,8 @@ function workflowAskContextText(input: {
  * feature:
  *
  *  - `resolved` — a concrete model came out of the registry and reaches the child.
- *  - `inherit`  — nothing was declared, or a declared ROLE has no assignment in any
- *    layer. The child runs on the parent session model and, when a role was named,
+ *  - `inherit`  — nothing was declared, or a declared ROLE has no assignment in the
+ *    global config. The child runs on the parent session model and, when a role was named,
  *    `fallback` records that in one sentence. Quiet fallback, loud record.
  *  - `refused`  — a CONCRETE `provider/id` selector did not resolve. A typo, a
  *    provider that is not configured, a model the host does not have. The call ends
@@ -925,15 +950,15 @@ async function resolveWorkflowTier(input: {
     if (declared.malformed !== undefined) {
       // Assigned but unparseable — a config typo, not an unassigned role. Degrading
       // it would run the parent's model under the requested tier's name and tell the
-      // operator their role was "not assigned in any layer", which their own file
+      // operator their role was "not assigned in the global config", which their own file
       // contradicts.
       return refusal(malformedRoleAssignmentNote(req.modelRole, "modelRole", declared.malformed), req.modelRole);
     }
     if (declared.assignment === undefined) {
       if (req.requireModelRole === true) {
         return refusal(
-          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but no model-roles layer ` +
-            "assigns it. Assign the role with /model-roles before running this workflow.",
+          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but the global ` +
+            "model-roles config does not assign it. Assign the role with /model-roles before running this workflow.",
           req.modelRole,
         );
       }

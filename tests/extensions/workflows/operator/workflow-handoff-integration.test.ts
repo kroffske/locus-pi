@@ -26,7 +26,7 @@ afterEach(() => {
 function projectWithHandoff(runId: string, existingRoot?: string): string {
   const root = existingRoot ?? mkdtempSync(path.join(tmpdir(), "workflow-handoff-integration-"));
   if (existingRoot === undefined) roots.push(root);
-  const workflowsDir = path.join(root, ".pi", "workflows");
+  const workflowsDir = path.join(root, ".locus-pi", "workflows");
   mkdirSync(workflowsDir, { recursive: true });
   const sourcePath = path.join(workflowsDir, "alpha.workflow.mjs");
   writeFileSync(

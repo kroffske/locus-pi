@@ -8,7 +8,7 @@
  */
 
 import type { CommandArgumentCompletion } from "../../_shared/host/pi-api.js";
-import { listWorkflowRunIds } from "../runtime/workflow-journal.js";
+import { listWorkflowRootRunIds, listWorkflowRunIds } from "../runtime/workflow-journal.js";
 import {
   formatWorkflowCommandToken,
   parseWorkflowCommandToken,
@@ -16,7 +16,7 @@ import {
   workflowRunOptionDescriptor,
   WORKFLOW_RUN_OPTION_DESCRIPTORS,
 } from "../command/command-parser.js";
-import { WORKFLOW_PLANS_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";
+import { WORKFLOW_WORKSPACES_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";
 import { listExampleNames } from "../operator/operator-ui.js";
 import { listWorkflowCatalogTargets } from "../runtime/workflow-runner.js";
 
@@ -43,6 +43,7 @@ export function workflowArgumentCompletions(
   if (prefix.startsWith("skills ")) return workflowSkillCompletions(prefix);
 
   const runIds = (): string[] => listWorkflowRunIds(projectRoot).slice(0, 20);
+  const rootRunIds = (): string[] => listWorkflowRootRunIds(projectRoot).slice(0, 20);
   const continuationRunIds = (): readonly string[] => actionableRunIds?.slice(0, 20) ?? runIds();
   const workflowNames = (): string[] => {
     try {
@@ -82,7 +83,7 @@ export function workflowArgumentCompletions(
     return matchingCompletions(
       [
         { value: "stop last", label: "last", description: "Most recently started run" },
-        ...runIds().map((runId) => ({ value: `stop ${runId}`, label: runId })),
+        ...rootRunIds().map((runId) => ({ value: `stop ${runId}`, label: runId })),
       ],
       prefix,
     );
@@ -167,7 +168,7 @@ function workflowRunOptionCompletions(
           descriptor.field === "outputDir"
             ? "Select a workflow workspace path"
             : descriptor.field === "runName"
-              ? `Use ${WORKFLOW_PLANS_STORAGE_PREFIX}<name> for this workflow`
+              ? `Use ${WORKFLOW_WORKSPACES_STORAGE_PREFIX}<name> for this workflow`
               : "Resume from a prior run",
       })),
       {

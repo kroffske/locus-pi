@@ -8,7 +8,7 @@ The complete runtime, trust, replay, and artifact reference is
 ## Contract: Design, review, Build
 
 A plain request to create, design, write, or author a workflow runs one ordered
-authoring sequence: create `.pi/workflows/<name>/`, write
+authoring sequence: create `.locus-pi/workflows/<name>/`, write
 `<name>/<name>.design.md`, review and revise that design against the request and
 standard source profile, then write exactly the direct `.workflow.mjs` entries
 declared by the design. A `runnable root` design includes
@@ -34,8 +34,8 @@ user explicitly asks for `design only`, `pause after design`, `do not build`, or
 equivalent wording. Build-only compatibility requests remain available:
 
 ```text
-Build design: .pi/workflows/<name>/<name>.design.md
-Build approved design: .pi/workflows/<name>/<name>.design.md
+Build design: .locus-pi/workflows/<name>/<name>.design.md
+Build approved design: .locus-pi/workflows/<name>/<name>.design.md
 ```
 
 Both Build-only forms use the current design bytes at the exact path; there is no
@@ -48,16 +48,12 @@ Use the packaged `locus-pi-workflow-create` skill. A raw request is Author:
 Design first, review, then Build. The exact design template and standard source
 profile live in that skill and this extension documentation.
 
-An owner-approved `plan.md` plus its canonical `step-<n>.md` catalog may be
-supplied as Design input for an optional sequential project-local workflow. Each
-complete `## S<n>` block remains one exact task prompt. The preferred
-operator-facing Build renders those blocks as literal author-known prompts in
-generated source; a programmatic embedder may instead transport the same frozen
-list through caller `items`.
-Neither path parses Plan prose at runtime, adds a Package example, or skips the
-ordinary Design -> review -> Build sequence. Plan approval alone does not start
-workflow authoring. The selected card
-is [`plan-to-sequential-workflow.md`](../../skills/locus-pi-workflow-create/references/plan-to-sequential-workflow.md).
+The Package `task/draft` workflow can turn a raw request into an editable
+`draft.md` that already names the graph pattern, agents, handoffs, review bounds,
+concurrency, failure exits, and primary output. Copy or edit that complete text,
+then pass it as semantic input to `task/plan`. That second workflow designs,
+reviews, builds, checks, and publishes one concrete `workflow.mjs`; it does not
+run the generated source.
 
 ## What the design must expose
 
@@ -88,6 +84,16 @@ Pattern cards are progressive-disclosure references under
 They describe algorithms and truthful small snippets, not full scripts to copy.
 
 ## Standard primitive profile
+
+The packaged `locus-pi-workflow-create` skill emits an orchestration-only subset
+of this profile. New generated source contains author-known prompts, direct
+`agent()` edges, visible DSL control flow, and in-memory text publication. It
+does not call `consumeTextArtifact`, `continuationArtifacts`, `outputDir`,
+`projectRoot`, `promptFile`, `publishPrimaryFile`, `workspace`, `now`, or
+`random`. Those methods remain documented below only because the standard
+checker must validate existing reviewed workflows. The skill calls
+`workflow_check_source` with `mode: "orchestration-only"`, which machine-checks
+the narrower Build contract.
 
 `agent()` is the only model-calling primitive. Narrative output is exact text.
 When JavaScript must route, use the runtime-owned exact choice:
@@ -128,20 +134,20 @@ repair, then fails closed.
 
 The remaining standard orchestration primitives are:
 
-| Primitive                            | Responsibility                                                             |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| `parallel(thunks)`                   | One fail-closed barrier over independent author-known calls.               |
-| `pipeline(items, ...stages)`         | Fixed ordered stages for each author-known item.                           |
-| `phase(name)` / `log(text)`          | Reader-visible run progress.                                               |
-| `publishArtifact(name, text)`        | Supporting exact text artifact.                                            |
-| `publishPrimaryArtifact(name, text)` | One terminal semantic document.                                            |
-| `awaitOperator(declaration)`         | Explicit human pause with runtime-owned continuation.                      |
-| `items()`                            | Immutable exact caller-supplied text units.                                |
-| `outputDir()`                        | Project-relative workflow workspace selected by the host.                  |
-| `invokeWorkflow(declaration)`        | One real saved or exact-Package child run with durable item checkpointing. |
-| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.                  |
-| `promptFile(path, variables)`        | Long/shared role charter; never routing.                                   |
-| `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.                  |
+| Primitive                            | Responsibility                                                              |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| `parallel(thunks)`                   | One fail-closed barrier over independent author-known calls.                |
+| `pipeline(items, ...stages)`         | Fixed ordered stages for each author-known item.                            |
+| `phase(name)` / `log(text)`          | Reader-visible run progress.                                                |
+| `publishArtifact(name, text)`        | Supporting exact text artifact.                                             |
+| `publishPrimaryArtifact(name, text)` | One terminal semantic document.                                             |
+| `awaitOperator(declaration)`         | Declare a split-run human gate, then return; no suspended JavaScript stack. |
+| `items()`                            | Immutable exact caller-supplied text units.                                 |
+| `outputDir()`                        | Project-relative workflow workspace selected by the host.                   |
+| `invokeWorkflow(declaration)`        | One real saved or exact-Package child run with durable item checkpointing.  |
+| `publishPrimaryFile(path)`           | Validate/reference one non-empty workflow workspace file.                   |
+| `promptFile(path, variables)`        | Long/shared role charter; never routing.                                    |
+| `workspace(label, ref)`              | Runtime-owned retained worktree for approved write flows.                   |
 
 `runWorkspaceDir()` is removed. Existing source that calls it fails with
 `WorkflowRunWorkspaceRemovedError`; migrate to `outputDir()` and the single
@@ -229,11 +235,13 @@ The workflow orchestrates but does not interpret or format agent results:
 Every child receives the full tool surface through `tools: ["*"]`. Standard
 source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
-work by default.
+work by default. If repository evidence is needed, the child reads it because
+its prompt asks for that work. Workflow JavaScript does not obtain paths or load
+file contents on the child's behalf.
 
-The runtime prepends one exact absolute workflow workspace to every child
+The runtime still prepends one exact absolute workflow workspace to every child
 prompt. Fresh runs default to a unique
-`.locus-pi/plans/<generated-run-name>/` workspace under the project root. A
+`.locus-pi/workspaces/<generated-run-name>/` workspace under the project root. A
 qualified child keeps both name components in its generated leaf. Source may call
 `outputDir()` when it needs the project-relative identity, but authors should
 only need to name the assigned relative file and the idempotent replacement
@@ -241,6 +249,11 @@ rule. Package task drafting and planning use the same workspace contract;
 saved children and later manual stages share the selected named path. Use
 `projectRoot()` for source context. Do not add permission/tool fields,
 another default writable root, a path parser, or an information-gathering script.
+
+That path-oriented shape is compatibility guidance for existing hand-authored
+workflows. The packaged authoring skill does not generate it. New source puts
+source-inspection instructions in an `agent()` prompt and leaves filesystem work
+inside that child session.
 
 Semantic workflow input is not a hidden machine protocol. Standard source does
 not split, regex-match, or parse input into branch units. Lists come from one of
@@ -252,7 +265,7 @@ policy; a workflow
 checks only domain rules it truly needs. Model handoffs retain their separate
 declared bounds, corrective re-ask, blank rejection, and duplicate rejection.
 
-For durable item work, start from a caller-frozen approved list. The root then
+Compatibility-only durable item workflows may start from a caller-frozen approved list. The root then
 invokes one reviewed sibling child per key and passes that same full list on
 every call, allowing the host to reject duplicate or unsafe keys before the
 first child starts:
@@ -302,23 +315,28 @@ the exact approved caller list and ordering are intentionally unchanged for the
 reused output namespace. Pass original text unchanged in `input`/`items`; the
 runtime never parses it.
 
-A fresh `agent({ handoffs })` list stays in the same-run, non-resumable inline
-worker pattern. Durable discovery is two runs: discovery first exposes a
-human-readable list for approval, then a separate caller supplies that frozen
-list and its stable identities to the durable parent. Never derive resumable
-positional keys from fresh model output, and never parse a discovery document as
-transport.
+A fresh `agent({ handoffs })` list feeds the visible same-run inline graph. A recorded discovery call can replay as part of an exactly matching prefix; it is not categorically non-resumable. Never derive resumable positional saved-child keys from newly rediscovered text. Freeze the exact list and ordering in a separate caller-owned handoff before associating it with durable `invokeWorkflow` keys.
 
 The workflow workspace is distinct from run evidence. Fresh runs default to a
-unique `.locus-pi/plans/<generated-run-name>/` directory; callers may select
+unique `.locus-pi/workspaces/<generated-run-name>/` directory; callers may select
 another safe project-relative `outputDir`. `--run-name <name>` selects
-`.locus-pi/plans/<name>` for any workflow. Every child receives the
+`.locus-pi/workspaces/<name>` for any workflow. An existing legacy-only
+`.locus-pi/plans/<name>` stays bound in place. Every child receives the
 resolved absolute path once. Writers
 replace their assigned file atomically or otherwise idempotently—never append blindly.
 `publishPrimaryFile(relativePath)` validates one regular, non-symlink, non-empty
 file under that root and returns its path, byte count, and SHA-256 digest without
 copying or interpreting the content. Failed runs leave workspace files intact for
 inspection and retry.
+
+Runtime связывает workspace с группой в `.locus-pi/runs/<storageRootRunId>/README.md`.
+Saved children сохраняют отдельные IDs в `children/<runId>/`, root resume — в
+`attempts/<runId>/`. Не вычисляйте путь evidence из одного runId: используйте
+возвращённый `runDir` или команды status/result. Автоматические файлы группы и
+workspace `.workflow-runs.md` принадлежат runtime; не поручайте agents их переписывать.
+Resume сохраняет workspace и физическую группу, но создаёт новый execution root;
+`lineage.rootRunId` не означает первый запуск группы. Checkpoint/replay правила от
+группировки не меняются, старые flat runs и workspace не мигрируют.
 
 Completed-item checkpoints are keyed by parent source hash, child source hash,
 workflow workspace, and exact item key. A matching checkpoint skips that
@@ -364,7 +382,10 @@ engine. Inside Pi, call the read-only `workflow_check_source` tool with the
 project-relative path of the exact file Build produced:
 
 ```json
-{ "path": ".pi/workflows/<name>/<name>.workflow.mjs" }
+{
+  "path": ".locus-pi/workflows/<name>/<name>.workflow.mjs",
+  "mode": "orchestration-only"
+}
 ```
 
 Run the same check for every declared direct child file. Build succeeds only
@@ -373,7 +394,9 @@ source checks all agree.
 
 The tool is owned by the installed `workflows` extension and resolves the path
 inside the current project. It behaves the same for a source checkout and an
-installed package. Repository maintainers use `npm run check:workflow-source`
+installed package. Omitting `mode` keeps compatibility validation for existing
+reviewed workflows; the workflow-create skill never omits it. Repository
+maintainers use `npm run check:workflow-source`
 with no path to check every `standard` entry
 already present in the Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that
@@ -492,10 +515,11 @@ These are all rules enforced for `meta.profile: "standard"`:
   key, `schema`/`validate` object key, regex, or `try/catch` is allowed. Inline
   callbacks containing agent edges remain visible only under `parallel`,
   `pipeline`, or `workflow` calls.
-- Assignments, augmented assignments, and updates are rejected except when the
-  `for` increment mutates one numeric identifier initialized by that same loop.
-  That counter may never be a protected DSL, collection, or `Error` binding;
-  only `++`/`--` or a numeric `+=`/`-=` step is accepted.
+- Assignments, augmented assignments, and updates are rejected except for the
+  existing numeric `for` increment and the narrow whole-value carry below.
+  A counter may never be a protected DSL, collection, or `Error` binding;
+  only `++`/`--` or a numeric `+=`/`-=` step is accepted in an ordinary loop.
+  Whole-value carry requires a stricter ascending, provably finite literal loop.
   `new` constructs only the unshadowed global `Error` constructor, and every
   `Error` argument must remain author-known or literal. Opaque/runtime values
   are rejected anywhere inside its message, options, cause, arrays, objects,
@@ -511,6 +535,44 @@ These are all rules enforced for `meta.profile: "standard"`:
   provenance independent of JavaScript scope. A nested scalar literal may reuse
   such a spelling; its real lexical block, including a `switch` body, does not
   change the outer value's provenance.
+
+### Bounded carry and author-owned records
+
+A reviewer-gated refinement is opt-in control flow, not a global retry policy.
+The [runnable refinement example](references/examples/refinement.workflow.mjs)
+uses a literal `for`, a fresh worker and exact reviewer feedback. There is no
+new `untilComplete` primitive. The checker permits scalar `let` bindings seeded
+with literal strings before that loop to receive a whole opaque answer or a
+whole runtime-owned `choice` identity. The loop must use a numeric literal start,
+ascending literal `<`/`<=` bound and positive literal step. The counter cannot be
+reset elsewhere. Carry cannot escape into a callback or mutate shared branch
+state, mix control and opaque values, replace a result with a fabricated literal,
+inspect properties or transform the answer. Carried values and aliases retain
+provenance; initializing a variable with `""` does not launder later model text.
+
+Author-known literal records may use named properties, including in visible
+`.map()` callbacks, and flat object destructuring of those records. Model output,
+caller semantic items and any composite containing them remain opaque. A map
+that captures opaque values does not produce trusted author records. No helper
+function, arbitrary object mutation, raw `schema` or `validate` becomes standard
+through this allowance.
+
+Every `agent()` call declares a literal `label`, and no two callsites in one file
+share one. Replay addresses a completed call by its `phase`, `label`, and
+occurrence, plus runtime-owned keyed group identity when supplied. A missing or
+duplicate label fails the strict source check. An optional `title` is only a
+human-readable description and never replaces stable identity.
+
+### Output acceptance is not semantic continuation
+
+Standard authoring may opt into `agent({ choice, returnVia: "tool" })` or the
+closed string `output` contract described in [output acceptance](references/output-acceptance.md).
+The workflow-only `workflow_return` tool validates a proposed value within the
+same child session; it does not certify the truth of a decision. Ordinary text,
+legacy text-choice repair and adaptive fresh-worker rounds retain separate
+contracts. The standard source grammar still does not parse model prose or
+permit raw `schema`/`validate`. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
+before selecting fixed, refinement, decomposition or human-gated execution.
 
 The owner contract separately forbids mandatory acknowledgement protocols whose
 answer has no consumer. That is an explicit design/source review rule, not a
@@ -538,7 +600,7 @@ export default async function runWorkflow(dsl, input) {
 }
 ```
 
-The filename is exactly `<name>.workflow.mjs`. `.pi/workflows/` is the canonical
+The filename is exactly `<name>.workflow.mjs`. `.locus-pi/workflows/` is the canonical
 project target. Source identity and authoring profile are separate gates. The
 general `self-contained-static` identity accepts static `node:` imports, and
 `legacy`, `integration`, or explicitly reviewed non-standard source may use
@@ -582,6 +644,9 @@ characters per child attempt. One run admits at most 10,000 physical attempts,
 starts no new child after its 24-hour gate, and executes at most four attempts
 concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
 all consume the shared `totalAgents` counter across the root and saved children.
+Same-session tool-output corrections consume the existing child budgets instead
+of creating a new physical invocation. Structured launchers may explicitly set
+the shared budget; see [execution controls](references/execution-controls.md).
 The SDK timeout is a later transport backstop, not authored workflow policy.
 
 `meta.profile` makes authoring intent explicit. New generated source uses

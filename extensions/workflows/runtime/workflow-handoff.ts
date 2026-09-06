@@ -14,8 +14,8 @@ import {
   readWorkflowRunResult,
   readWorkflowRunSummary,
   workflowPersistedResultInvalidity,
-  workflowRunDir,
 } from "./workflow-journal.js";
+import { resolveWorkflowRunDir } from "./workflow-run-layout.js";
 import { projectWorkflowDisposition, workflowResultFile } from "./workflow-result.js";
 import {
   readWorkflowRunTextFile,
@@ -303,10 +303,14 @@ export function readWorkflowOperatorHandoff(value: unknown, projectRoot?: string
   }
 }
 
-export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId: string): WorkflowOperatorHandoffRead {
+export function readPersistedWorkflowOperatorHandoff(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowOperatorHandoffRead {
   try {
     assertSafeComponent(runId, "workflow runId");
-    const runDir = workflowRunDir(projectRoot, runId);
+    const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId);
     const resultPath = workflowResultFile(runDir);
     // A run directory with no result.json has not published a terminal result
     // yet — it is still executing, or it was interrupted. Such a run cannot
@@ -314,7 +318,7 @@ export function readPersistedWorkflowOperatorHandoff(projectRoot: string, runId:
     // invalid would surface every live or abandoned run as a corrupt-evidence
     // warning on the operator surfaces that scan run history.
     if (!workflowRunFileExists(runDir, resultPath)) return { status: "absent" };
-    const persisted = readWorkflowRunResult(projectRoot, runId);
+    const persisted = readWorkflowRunResult(projectRoot, runId, runDir);
     const invalidity = workflowPersistedResultInvalidity(persisted);
     if (invalidity !== undefined) {
       return { status: "invalid", message: `Workflow result has malformed persisted metadata (${invalidity}).` };
@@ -833,7 +837,7 @@ interface WorkflowHandoffClaimPaths {
 }
 
 function claimPaths(projectRoot: string, runId: string): WorkflowHandoffClaimPaths {
-  const runDir = workflowRunDir(projectRoot, runId);
+  const runDir = resolveWorkflowRunDir(projectRoot, runId);
   return {
     runDir,
     claimPath: workflowRunRuntimeFile(runDir, HANDOFF_CLAIM_FILE),

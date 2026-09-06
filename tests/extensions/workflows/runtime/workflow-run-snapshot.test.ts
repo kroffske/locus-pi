@@ -202,7 +202,7 @@ describe("persisted workflow run source snapshot", () => {
     "rejects target-only scriptPath %s leaf that is not a confined regular file",
     (kind) => {
       const fixture = writeSnapshotRun("20260713-010102-target-only-leaf", "target-only leaf\n");
-      const targetPath = path.join(fixture.root, ".pi", "workflows", "target.workflow.mjs");
+      const targetPath = path.join(fixture.root, ".locus-pi", "workflows", "target.workflow.mjs");
       mkdirSync(path.dirname(targetPath), { recursive: true });
       if (kind === "external") {
         const external = path.join(path.dirname(fixture.root), "external-target-only.workflow.mjs");
@@ -218,7 +218,7 @@ describe("persisted workflow run source snapshot", () => {
         JSON.stringify({
           runId: fixture.runId,
           ok: true,
-          target: { kind: "scriptPath", ref: ".pi/workflows/target.workflow.mjs", source: "project" },
+          target: { kind: "scriptPath", ref: ".locus-pi/workflows/target.workflow.mjs", source: "project" },
         }),
       );
 
@@ -586,7 +586,7 @@ describe("persisted workflow run source snapshot", () => {
     (result.scriptIdentity as Record<string, unknown>).sourcePath =
       kind === "scriptPath"
         ? path.join(fixture.root, sourcePath)
-        : path.join(fixture.root, ".pi", "workflows", sourcePath);
+        : path.join(fixture.root, ".locus-pi", "workflows", sourcePath);
     writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
 
     expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
@@ -738,7 +738,7 @@ describe("persisted workflow run source snapshot", () => {
 function writeSnapshotRun(runId: string, source: string) {
   const root = temporaryRoot();
   const runDir = workflowRunDirectory(root, runId);
-  const sourcePath = path.join(root, ".pi", "workflows", "alpha.workflow.mjs");
+  const sourcePath = path.join(root, ".locus-pi", "workflows", "alpha.workflow.mjs");
   mkdirSync(path.dirname(sourcePath), { recursive: true });
   writeFileSync(sourcePath, source);
   const sha256 = digest(source);
@@ -770,7 +770,7 @@ function writeResult(
     target.path ??
     (target.kind === "scriptPath"
       ? path.resolve(projectRoot, target.ref)
-      : path.join(projectRoot, ".pi", "workflows", `${target.ref}.workflow.mjs`));
+      : path.join(projectRoot, ".locus-pi", "workflows", `${target.ref}.workflow.mjs`));
   writeFileSync(
     workflowResultFile(runDir),
     JSON.stringify({

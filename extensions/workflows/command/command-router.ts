@@ -17,7 +17,7 @@ import {
 } from "../../_shared/operator/operator-interaction.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 import { listWorkflowRunIds, readWorkflowRunResultText, resolveWorkflowRunId } from "../runtime/workflow-journal.js";
-import { WORKFLOW_RUN_STORAGE_PATTERN } from "../runtime/workflow-run-layout.js";
+import { WORKFLOW_RUN_GROUP_STORAGE_PATTERN } from "../runtime/workflow-run-layout.js";
 import { WorkflowCatalogViewer, WorkflowInfoViewer } from "../catalog/catalog-viewer.js";
 import { workflowArgumentCompletions, workflowFlatCommandCompletions } from "../launch/command-completions.js";
 import {
@@ -275,7 +275,10 @@ export function registerWorkflowCommands(pi: ExtensionAPI, deps: WorkflowCommand
         setOperatorWidget(
           ctx,
           "workflows",
-          workflowWarningBlock(resolved.message, `New runs are stored under ${WORKFLOW_RUN_STORAGE_PATTERN}`),
+          workflowWarningBlock(
+            resolved.message,
+            `New run groups are stored under ${WORKFLOW_RUN_GROUP_STORAGE_PATTERN}`,
+          ),
         );
         return;
       }
@@ -727,7 +730,7 @@ async function presentWorkflowRunResultText(
     setOperatorWidget(
       ctx,
       "workflows",
-      workflowWarningBlock(resolved.message, `New runs are stored under ${WORKFLOW_RUN_STORAGE_PATTERN}`),
+      workflowWarningBlock(resolved.message, `New run groups are stored under ${WORKFLOW_RUN_GROUP_STORAGE_PATTERN}`),
     );
     return;
   }

@@ -9,6 +9,7 @@ import {
   selectFleetMenuRows,
 } from "../../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import { agentLiveStore, type AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { orderAgentLiveRows } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
@@ -36,6 +37,62 @@ afterEach(() => {
 function row(id: string, title: string, status: AgentLiveStatus = "working") {
   const value = agentLiveStore.begin({ id, agentName: "reviewer", label: title, title });
   return agentLiveStore.patch(value.id, { status })!;
+}
+
+/**
+ * A fan-out with the row layer a real run actually produces: the group row, one
+ * workflow journal ANCHOR per branch under it, and the SDK child row under each
+ * anchor. Two rows per agent, collapsed into one only by the shared projection.
+ *
+ * Every `/ps` assertion about a group — its heading, that heading's counters, the
+ * order of its members — has to be made against this shape. A test that hangs the
+ * members straight off the group row skips the collapse entirely and would pass
+ * on code where the live surface shows no heading at all, which is exactly how
+ * the pin below shipped broken.
+ */
+function liveFanOut(options: {
+  runId: string;
+  label: string;
+  size: number;
+  status?: (index: number) => AgentLiveStatus;
+  groupCounters?: { groupCompleted: number; groupFailed: number };
+}) {
+  const { runId, label, size } = options;
+  const group = agentLiveStore.begin({
+    id: workflowGroupLiveRowId({ runId, groupId: `parallel-${size}` }),
+    agentName: "workflow-group",
+    label: `parallel (${size})`,
+    groupKind: "parallel",
+    groupTotal: size,
+    workflowRunId: runId,
+  });
+  agentLiveStore.patch(group.id, { status: "working", ...(options.groupCounters ?? {}) });
+  const statusOf = options.status ?? ((index: number) => (index === 0 ? "error" : index < 4 ? "done" : "working"));
+  const branches = Array.from({ length: size }, (_unused, index) => {
+    const memberLabel = `${label} ${index} of ${size}`;
+    const line = { runId, executionMode: "bare", label: memberLabel, phase: "fanout" } as const;
+    const anchor = agentLiveStore.begin({
+      id: workflowAgentLiveRowId(line),
+      parentRowId: group.id,
+      agentName: "worker",
+      label: memberLabel,
+      workflowRunId: runId,
+    });
+    const child = agentLiveStore.begin({
+      id: workflowAgentLiveChildRowId(line),
+      parentRowId: anchor.id,
+      agentName: "worker",
+      label: memberLabel,
+      title: memberLabel,
+      workflowRunId: runId,
+    });
+    return { anchor, member: agentLiveStore.patch(child.id, { status: statusOf(index) })! };
+  });
+  return {
+    group,
+    anchors: branches.map((branch) => branch.anchor),
+    members: branches.map((branch) => branch.member),
+  };
 }
 
 describe("agent fleet menu", () => {
@@ -554,6 +611,293 @@ describe("agent fleet menu", () => {
     component.dispose();
   });
 
+  it("shows the group heading in /ps and still reaches every leaf with the cursor", () => {
+    // A running fan-out: eight items, one of them failed. `/ps` gets the group
+    // heading and the working-first order from the shared projection, and — unlike
+    // the passive progress panel — collapses nothing, so all eight stay reachable.
+    const group = agentLiveStore.begin({
+      id: "workflow:ps-fan:group:parallel-8",
+      agentName: "workflow-group",
+      label: "parallel (8)",
+      groupKind: "parallel",
+      groupTotal: 8,
+      workflowRunId: "ps-fan",
+    });
+    // The counters are deliberately AHEAD of the leaves: two done and two failed
+    // on the group row against one done and one failed leaf. `1/8 done` would
+    // mean the heading was recomputed from the visible members, so `2/8 done`
+    // is the only reading that proves it comes from the group row itself.
+    agentLiveStore.patch(group.id, { status: "working", groupCompleted: 2, groupFailed: 2 });
+    const members = Array.from({ length: 8 }, (_unused, index) => {
+      const member = agentLiveStore.begin({
+        id: `ps-fan-item-${index}`,
+        parentRowId: group.id,
+        agentName: "worker",
+        label: `ps item ${index} of 8`,
+        title: `ps item ${index} of 8`,
+        workflowRunId: "ps-fan",
+      });
+      const status: AgentLiveStatus = index === 3 ? "error" : index === 5 ? "done" : "working";
+      return agentLiveStore.patch(member.id, { status })!;
+    });
+
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    // The heading is part of the `/ps` row set, with the counters the group row
+    // carries — not recomputed from the leaves (one done leaf, one failed leaf).
+    const passive = renderFleetMenuRows([...agentLiveStore.rows.values()], 120, {}).join("\n");
+    expect(passive).toContain("parallel (8)");
+    expect(passive).toContain("2/8 done");
+    expect(passive).toContain("2 failed");
+
+    const visited = new Set<string>([fleetMenuState.selectedRowId!]);
+    for (let step = 0; step < members.length; step += 1) {
+      component.handleInput("down");
+      visited.add(fleetMenuState.selectedRowId!);
+      component.render(120);
+    }
+    expect([...visited].sort()).toEqual(members.map((member) => member.id).sort());
+    // Up walks back over the same leaves; the heading is never selected.
+    for (let step = 0; step < members.length; step += 1) {
+      component.handleInput("up");
+      expect(fleetMenuState.selectedRowId).not.toBe(group.id);
+      visited.add(fleetMenuState.selectedRowId!);
+    }
+    expect(visited.size).toBe(members.length);
+
+    // Working members first, the failed one next, the finished one last — and
+    // nothing is collapsed away the way the passive progress panel collapses it.
+    const focusedFrame = component.render(120);
+    const at = (needle: string) => focusedFrame.findIndex((frameLine) => frameLine.includes(needle));
+    expect(at("ps item 0 of 8")).toBeLessThan(at("ps item 3 of 8"));
+    expect(at("ps item 3 of 8")).toBeLessThan(at("ps item 5 of 8"));
+    expect(focusedFrame.join("\n")).not.toMatch(/earlier agents/u);
+    component.dispose();
+  });
+
+  it("re-parents a leaf onto the nearest surviving ancestor when two nested groups are both too small", () => {
+    // A group of one gets no heading and is dropped from the projection. When the
+    // dropped group sits inside ANOTHER dropped group, handing its child the
+    // grandparent's id names a row nobody holds any more: the leaf silently
+    // detaches and renders as a root, after the next real root instead of under
+    // the phase it belongs to.
+    const phase = agentLiveStore.begin({ id: "nested-phase", agentName: "workflow", label: "phase anchor" });
+    const outer = agentLiveStore.begin({
+      id: "nested-outer",
+      parentRowId: phase.id,
+      agentName: "workflow-group",
+      label: "pipeline (1)",
+      groupKind: "pipeline",
+      groupTotal: 1,
+    });
+    const inner = agentLiveStore.begin({
+      id: "nested-inner",
+      parentRowId: outer.id,
+      agentName: "workflow-group",
+      label: "parallel (1)",
+      groupKind: "parallel",
+      groupTotal: 1,
+    });
+    const leaf = agentLiveStore.begin({
+      id: "nested-leaf",
+      parentRowId: inner.id,
+      agentName: "worker",
+      label: "the only item",
+    });
+    // A second child of the phase, started after the group: it is where the
+    // detached leaf ends up in front of, or behind, depending on whether the leaf
+    // is still attached to the phase.
+    const sibling = agentLiveStore.begin({
+      id: "nested-sibling",
+      parentRowId: phase.id,
+      agentName: "worker",
+      label: "sibling item",
+    });
+
+    expect(orderAgentLiveRows([phase, outer, inner, leaf, sibling]).map((row) => row.id)).toEqual([
+      phase.id,
+      leaf.id,
+      sibling.id,
+    ]);
+  });
+
+  it("keeps the group heading on screen in /ps while the fan-out fits the viewport", () => {
+    // The heading is rendered by the focused selector too, straight from the
+    // shared projection while the whole group fits the viewport. A fan-out that
+    // does NOT fit is the next test: there the heading is pinned back on.
+    const group = agentLiveStore.begin({
+      id: "workflow:ps-small:group:parallel-3",
+      agentName: "workflow-group",
+      label: "parallel (3)",
+      groupKind: "parallel",
+      groupTotal: 3,
+      workflowRunId: "ps-small",
+    });
+    agentLiveStore.patch(group.id, { status: "working", groupCompleted: 1, groupFailed: 1 });
+    for (let index = 0; index < 3; index += 1) {
+      const member = agentLiveStore.begin({
+        id: `ps-small-item-${index}`,
+        parentRowId: group.id,
+        agentName: "worker",
+        label: `small item ${index}`,
+        title: `small item ${index}`,
+        workflowRunId: "ps-small",
+      });
+      agentLiveStore.patch(member.id, { status: index === 1 ? "error" : "working" });
+    }
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    const rendered = component.render(120);
+    expect(rendered.join("\n")).toContain("parallel (3)");
+    expect(rendered.join("\n")).toContain("1/3 done");
+    expect(rendered.some((frameLine) => frameLine.startsWith("> "))).toBe(true);
+    // The heading itself is never the selected row.
+    expect(rendered.find((frameLine) => frameLine.startsWith("> "))).not.toContain("parallel (3)");
+    component.dispose();
+  });
+
+  it("pins the group heading in /ps when the fan-out is longer than the viewport", () => {
+    // Nine leaves against an eight-row viewport. The window is anchored on the
+    // cursor and only leaves take the cursor, so the heading — the row that says
+    // WHICH fan-out these `↳` rows belong to and how it is going — scrolled off
+    // the top and no key could bring it back: `/ps` showed a wall of members
+    // under nothing. It is pinned above the window instead, and pinning it costs
+    // no member row.
+    //
+    // The rows are built the way a live fan-out builds them — group, a workflow
+    // journal ANCHOR per branch, and the SDK child under each anchor — because
+    // that anchor layer is the whole difficulty: `/ps` freezes its membership and
+    // re-projects it every frame, and a frozen set that lost its anchors cannot
+    // re-parent the children onto the group. A flat group→member set passes
+    // whether the pin works on the live surface or not.
+    const { group, members } = liveFanOut({ runId: "ps-long", label: "long item", size: 9 });
+
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+
+    // The heading is on screen wherever the cursor stands, including the top of
+    // the list and the bottom of it, and it counts the members the operator can
+    // see: three done, one failed, while the group itself is still running.
+    const visited = new Set<string>([fleetMenuState.selectedRowId!]);
+    for (let step = 0; step < members.length + 2; step += 1) {
+      const frame = component.render(120).join("\n");
+      expect(frame).toContain("parallel (9)");
+      expect(frame).toContain("3/9 done");
+      expect(frame).toContain("1 failed");
+      component.handleInput("down");
+      visited.add(fleetMenuState.selectedRowId!);
+    }
+    for (let step = 0; step < members.length + 2; step += 1) {
+      component.handleInput("up");
+      expect(component.render(120).join("\n")).toContain("parallel (9)");
+      visited.add(fleetMenuState.selectedRowId!);
+      expect(fleetMenuState.selectedRowId).not.toBe(group.id);
+    }
+    // Every leaf is still reachable, and the heading is never selected.
+    expect([...visited].sort()).toEqual(members.map((member) => member.id).sort());
+
+    // The selected row is inside the window the heading was pinned onto: the
+    // heading is extra chrome, not a member row given up to make room.
+    const frame = component.render(120);
+    expect(frame.find((frameLine) => frameLine.startsWith("> "))).toBeDefined();
+    expect(frame.find((frameLine) => frameLine.startsWith("> "))).not.toContain("parallel (9)");
+    expect(frame.filter((frameLine) => frameLine.includes("long item"))).toHaveLength(8);
+    component.dispose();
+  });
+
+  it("counts the /ps group heading off the live anchor-backed members while the fan-out runs", () => {
+    // A fan-out that is still running has stated no counters of its own — the
+    // journal writes them at `group_end` — so the heading is summed from its
+    // member rows. Those members are the group's members only after the anchor
+    // collapse, and `/ps` keeps its own frozen row set: the heading would sit
+    // over rows it cannot count and read `0/6 done` next to ✓ and ✗ members.
+    const { group, members } = liveFanOut({
+      runId: "ps-counters",
+      label: "counted item",
+      size: 6,
+      status: () => "working",
+    });
+    expect(group.groupCompleted).toBeUndefined();
+
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+    expect(component.render(120).join("\n")).toContain("0/6 done");
+
+    // Members settle under the open menu; the heading follows them.
+    agentLiveStore.patch(members[0]!.id, { status: "error" });
+    agentLiveStore.patch(members[1]!.id, { status: "done" });
+    agentLiveStore.patch(members[2]!.id, { status: "done" });
+
+    const frame = component.render(120).join("\n");
+    expect(frame).toContain("2/6 done");
+    expect(frame).toContain("1 failed");
+    component.dispose();
+  });
+
+  it("re-ranks the live anchor-backed group members in /ps as they settle under the open menu", () => {
+    // Working → failed → queued → done is a fact about the group's children, so
+    // it needs the same anchor collapse the heading does. The menu freezes WHICH
+    // rows it owns, never the order they project into: a member that fails while
+    // `/ps` is open has to rise, and one that finishes has to fall.
+    const { members } = liveFanOut({
+      runId: "ps-order",
+      label: "ranked item",
+      size: 4,
+      status: () => "working",
+    });
+    fleetMenuState.beginFocus([...agentLiveStore.rows.values()]);
+    fleetMenuState.setFocused(true);
+    const component = new FleetFocusComponent(
+      () => [...agentLiveStore.rows.values()],
+      {},
+      { requestRender: vi.fn() },
+      vi.fn(),
+    );
+    const positionsOf = (frame: string[]) => (needle: string) =>
+      frame.findIndex((frameLine) => frameLine.includes(needle));
+
+    const opened = positionsOf(component.render(120));
+    expect(opened("ranked item 0 of 4")).toBeLessThan(opened("ranked item 1 of 4"));
+
+    agentLiveStore.patch(members[0]!.id, { status: "done" });
+    agentLiveStore.patch(members[1]!.id, { status: "error" });
+
+    const at = positionsOf(component.render(120));
+    expect(at("ranked item 2 of 4")).toBeLessThan(at("ranked item 1 of 4"));
+    expect(at("ranked item 1 of 4")).toBeLessThan(at("ranked item 0 of 4"));
+    // Reordering moves rows, not the cursor: it stays on the row the operator
+    // put it on, which has just travelled to the bottom of the group.
+    expect(fleetMenuState.selectedRowId).toBe(members[0]!.id);
+    expect(members.every((member) => at(member.title!) >= 0)).toBe(true);
+    component.dispose();
+  });
+
   it("repaints from live mutations, normalizes a removed cursor, and unsubscribes idempotently", () => {
     const first = row("live-focus-a", "first live row");
     const second = row("live-focus-b", "second live row");
@@ -963,5 +1307,145 @@ describe("agent fleet menu", () => {
     expect(h.widgets.get("agents")).toContain("Interactive drill is unavailable in rpc mode.");
     expect(h.customOptions).toEqual([]);
     panel.dispose();
+  });
+
+  it("reopens /ps on the drilled row after Escape closes the agent screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const first = row("drill-return-a", "first fleet row");
+    const second = row("drill-return-b", "second fleet row");
+    const customCallFrameStart: number[] = [];
+    const baseCustom = h.ctx.ui.custom!;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCallFrameStart.push(h.customRenderFrames.length);
+      return baseCustom.call(h.ctx.ui, factory, options) as Promise<T>;
+    };
+    // fleet: down, enter → agent screen: escape → fleet again: escape.
+    h.customInputQueue.push("down", "enter", "escape", "escape");
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(customCallFrameStart).toHaveLength(3);
+    const reopened = h.customRenderFrames[customCallFrameStart[2]!];
+    // The cursor is on the row the operator drilled, not on the first working row.
+    expect(reopened?.find((line) => line.startsWith("> "))).toContain(second.displayName!);
+    // Membership is a fresh snapshot, so the rest of the fleet comes back too.
+    expect(reopened?.join("\n")).toContain(first.displayName!);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+  });
+
+  it("reopens on the usual preferred row when the drilled row retires during the drill", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const first = row("retire-return-a", "surviving fleet row");
+    const second = row("retire-return-b", "retiring fleet row");
+    const customCallFrameStart: number[] = [];
+    const baseCustom = h.ctx.ui.custom!;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCallFrameStart.push(h.customRenderFrames.length);
+      const result = (await baseCustom.call(h.ctx.ui, factory, options)) as T;
+      // The agent screen has just closed; its row is gone before the fleet reopens.
+      if (customCallFrameStart.length === 2) agentLiveStore.removeRows([second.id]);
+      return result;
+    };
+    h.customInputQueue.push("down", "enter", "escape", "escape");
+
+    await expect(h.commands.get("ps")!.handler("", h.ctx)).resolves.toBeUndefined();
+
+    expect(customCallFrameStart).toHaveLength(3);
+    const reopened = h.customRenderFrames[customCallFrameStart[2]!];
+    expect(reopened?.find((line) => line.startsWith("> "))).toContain(first.displayName!);
+    expect(reopened?.join("\n")).not.toContain(second.displayName!);
+  });
+
+  it("returns to the editor without reopening /ps when q closes the agent screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    row("quit-return-a", "first quit row");
+    row("quit-return-b", "second quit row");
+    // fleet: down, enter → agent screen: q. `q` leaves the agent surface for the
+    // editor, so no third surface opens and the queue is not exhausted.
+    h.customInputQueue.push("down", "enter", "q");
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(h.customOptions).toEqual([{ overlay: false }, { overlay: false }]);
+    expect(h.customInputQueue).toHaveLength(0);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
+  });
+
+  it("hands the editor back instead of reopening /ps when the drilled row retires under the screen", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const only = row("vanish-return-a", "only fleet row");
+    // The agent screen closes itself when its row goes away mid-drill. That close
+    // is not a request for the fleet, and here reopening would also warn that /ps
+    // found no live agent rows.
+    h.customInputQueue.push("enter");
+    const baseCustom = h.ctx.ui.custom!;
+    let customCalls = 0;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCalls += 1;
+      if (customCalls === 2) queueMicrotask(() => agentLiveStore.removeRows([only.id]));
+      return baseCustom.call(h.ctx.ui, factory, options) as Promise<T>;
+    };
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(customCalls).toBe(2);
+    expect(h.notifications.some((message) => message.includes("found no live agent rows"))).toBe(false);
+    expect(fleetMenuState.focused).toBe(false);
+  });
+
+  it("returns /ps <target> to the editor without opening the fleet", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    const target = row("direct-target-row", "direct drill target");
+    h.customInputQueue.push("escape");
+
+    await h.commands.get("ps")!.handler(target.id, h.ctx);
+
+    // One surface only: the agent screen. A named target never came from the fleet.
+    expect(h.customOptions).toHaveLength(1);
+    expect(h.customRenderFrames.at(-1)?.[0]).toContain(target.displayName!);
+    expect(fleetMenuState.focused).toBe(false);
+  });
+
+  it("does not reopen /ps when the session resets during the drill", async () => {
+    const h = createHarness();
+    h.ctx.hasUI = true;
+    agents(h.pi);
+    await emit(h, "session_start");
+    row("epoch-return-a", "first epoch row");
+    row("epoch-return-b", "second epoch row");
+    let customCalls = 0;
+    const baseCustom = h.ctx.ui.custom!;
+    h.ctx.ui.custom = async function <T>(factory: CustomUiFactory<T>, options?: { overlay?: boolean }): Promise<T> {
+      customCalls += 1;
+      const result = (await baseCustom.call(h.ctx.ui, factory, options)) as T;
+      if (customCalls === 2) {
+        // A reload while the agent screen was open: the menu it came from is gone,
+        // and rows of the replacement session are not a reason to bring it back.
+        await emit(h, "session_start");
+        row("epoch-return-c", "row after reload");
+      }
+      return result;
+    };
+    // No third Escape: a reopened menu would exhaust the queue and throw.
+    h.customInputQueue.push("down", "enter", "escape");
+
+    await h.commands.get("ps")!.handler("", h.ctx);
+
+    expect(customCalls).toBe(2);
+    expect(h.customInputQueue).toHaveLength(0);
+    expect(fleetMenuState.focused).toBe(false);
+    expect(fleetMenuState.selectedRowId).toBeUndefined();
   });
 });

@@ -16,7 +16,7 @@ The `loop` tool and `/loop` command support:
 
 Only one loop may be active per Pi session. Automatic continuation stops on completion, explicit stop, missing metadata, lost transport, deadline, or iteration limit. Defaults are 20 iterations and 30 minutes; configured values remain bounded by the manifest/runtime contract.
 
-State is stored under `.locus/runtime/loop/sessions/` and existing goal/workflow continuation artifacts. Local state is ignored by Git.
+Automatic loop state is stored under `.locus/runtime/loop/sessions/`. A manual workflow continuation is returned directly with its exact prompt and bounded source summary; it writes no separate workflow-continuation file. Goal continuation keeps its existing `.locus/runtime/goal/continue.md` contract. Local state is ignored by Git.
 
 ## Implementation
 

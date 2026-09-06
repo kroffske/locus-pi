@@ -6,6 +6,7 @@ import {
   WORKFLOW_GROUP_FAILURE,
   WorkflowGroupFailureError,
   createWorkflowRuntime,
+  type WorkflowAgentRequest,
   type WorkflowAgentRunner,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
@@ -21,6 +22,64 @@ const okRunner: WorkflowAgentRunner = async (request) => ({
 });
 
 describe("workflow group failure contract", () => {
+  it("keeps mapped pipeline and nested member contexts distinct across awaits", async () => {
+    const requests: WorkflowAgentRequest[] = [];
+    const { dsl } = createWorkflowRuntime({
+      runId: "group-member-context",
+      agentRunner: async (request) => {
+        requests.push(request);
+        await Promise.resolve();
+        return {
+          ok: true,
+          status: "completed",
+          summary: request.prompt,
+          text: request.prompt,
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+
+    await expect(
+      dsl.pipeline(["a", "b", "c"], async (value) => {
+        await Promise.resolve();
+        return dsl.agent(`pipeline ${String(value)}`, { label: "mapped", phase: "pipeline" });
+      }),
+    ).resolves.toEqual(["pipeline a", "pipeline b", "pipeline c"]);
+
+    await expect(
+      dsl.parallel(
+        ["left", "right"].map((side) => async () => {
+          await Promise.resolve();
+          return dsl.parallel(
+            [0, 1].map((index) => async () => {
+              await Promise.resolve();
+              return dsl.agent(`${side}-${index}`, { label: "nested", phase: "nested" });
+            }),
+          );
+        }),
+      ),
+    ).resolves.toEqual([
+      ["left-0", "left-1"],
+      ["right-0", "right-1"],
+    ]);
+
+    const pipelineSlots = requests.slice(0, 3).map((request) => request.workflowSlot);
+    expect(pipelineSlots.map((slot) => slot?.rowOccurrence)).toEqual([
+      { groupId: "pipeline-1", memberIndex: 0 },
+      { groupId: "pipeline-1", memberIndex: 1 },
+      { groupId: "pipeline-1", memberIndex: 2 },
+    ]);
+    const nestedSlots = requests.slice(3).map((request) => request.workflowSlot);
+    expect(new Set(nestedSlots.map((slot) => slot?.key)).size).toBe(4);
+    expect(nestedSlots.map((slot) => slot?.rowOccurrence)).toEqual([
+      { groupId: "parallel-3", memberIndex: 0 },
+      { groupId: "parallel-3", memberIndex: 1 },
+      { groupId: "parallel-4", memberIndex: 0 },
+      { groupId: "parallel-4", memberIndex: 1 },
+    ]);
+  });
+
   it("keeps all-success ordering and treats an explicitly returned null as a real value", async () => {
     const { dsl, getJournal } = createWorkflowRuntime({ runId: "group-success-null", agentRunner: okRunner });
 

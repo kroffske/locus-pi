@@ -34,6 +34,10 @@ export const AGENT_FAILURE_CAUSES = [
    *  question (no UI / non-interactive mode). Fail-closed refusal declared by the
    *  workflow bridge, never an error string left in the child's context. TRANSPORT. */
   "ask-unavailable",
+  /** The operator answered, but the workflow could not durably index that answer.
+   *  The child is aborted before the answer can re-enter model context. Re-asking
+   *  could duplicate one human decision, so this cause is never retried. */
+  "ask-evidence-persistence",
   /** The agent SDK substrate is unavailable — there is no channel to re-ask on. */
   "sdk-unavailable",
   /** Operator or run-level cancellation. Re-asking would override the operator. */
@@ -44,6 +48,14 @@ export const AGENT_FAILURE_CAUSES = [
   "provider-error",
   /** The child answered and the boundary could not parse its final text. */
   "unparseable-answer",
+  /** Opt-in output submission exhausted; never a transport retry. */
+  "output-contract-exhausted",
+  // A second, different proposal is a protocol conflict, not a format fallback.
+  "output-contract-conflict",
+  /** Host cannot enforce the requested same-session output boundary. */
+  "output-contract-unavailable",
+  /** Cumulative assistant turns across output clarifications exceeded the declared cap. */
+  "assistant-turn-budget",
   /** The run request was refused before any child existed (policy, no executor). */
   "run-policy-blocked",
   /** The requested catalog agent does not exist. An author error, not a transport one. */

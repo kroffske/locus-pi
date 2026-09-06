@@ -8,7 +8,8 @@ import type {
   ReplacementSessionContext,
   ReplacementSessionEntryLike,
 } from "../../../../extensions/_shared/host/pi-api.js";
-import { isInPlanMode, loadModeState, planArtifactPath } from "../../../../extensions/plan/mode/mode-state.js";
+import { isInPlanMode, loadModeState } from "../../../../extensions/plan/mode/mode-state.js";
+import { planArtifactPath } from "../../../../extensions/plan/mode/plan-storage.js";
 import { createHarness, runTool } from "../../../test-harness.js";
 
 const tempRoots: string[] = [];

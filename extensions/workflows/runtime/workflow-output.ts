@@ -26,18 +26,22 @@ import {
 import path from "node:path";
 import {
   assertWorkflowRunId,
+  workflowRunDir,
   workflowRootDir,
   WORKFLOW_PLANS_DIRNAME,
   WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_WORKSPACES_DIRNAME,
 } from "./workflow-run-layout.js";
 
 const OUTPUT_COMPONENT_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]{0,199}";
 const OUTPUT_COMPONENT = new RegExp(`^${OUTPUT_COMPONENT_SOURCE}$`, "u");
-const WORKFLOW_PLANS_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
+const WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
+const WORKFLOW_WORKSPACES_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_WORKSPACES_DIRNAME].join("/");
 /** TypeBox-compatible grammar for the same confined path accepted by the runtime. */
 export const WORKFLOW_OUTPUT_DIR_PATTERN =
   `^(?:(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*|` +
-  `\\${WORKFLOW_ROOT_DIRNAME}/${WORKFLOW_PLANS_DIRNAME}/(?:${OUTPUT_COMPONENT_SOURCE}))$`;
+  `\\${WORKFLOW_ROOT_DIRNAME}/(?:${WORKFLOW_WORKSPACES_DIRNAME}|${WORKFLOW_PLANS_DIRNAME})/` +
+  `(?:${OUTPUT_COMPONENT_SOURCE}))$`;
 /** Shared aggregate bound for tool, command, and direct runtime callers. */
 export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
 export const WORKFLOW_RUN_NAME_MAX_CHARS = 200;
@@ -49,6 +53,10 @@ export const WORKFLOW_OUTPUT_LOCK_FILE = ".locus-pi-workflow.lock";
 const LEASE_OWNER_READ_ATTEMPTS = 20;
 const LEASE_OWNER_READ_RETRY_MS = 5;
 const LEASE_OWNER_READ_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+const WORKFLOW_WORKSPACE_RUNS_MARKER = "<!-- locus-pi:workflow-workspace-runs:v1 -->";
+const WORKFLOW_WORKSPACE_RUNS_HEADER =
+  `${WORKFLOW_WORKSPACE_RUNS_MARKER}\n# Связанные запуски workflow\n\n` +
+  `Статусы и история находятся в папках групп; этот файл содержит только ссылки.\n\n`;
 
 class InvalidJsonContentError extends Error {}
 class UnstableJsonReadError extends Error {}
@@ -141,7 +149,7 @@ function defaultWorkflowOutputDir(
   const leaf = OUTPUT_COMPONENT.test(readableLeaf)
     ? readableLeaf
     : `${workspaceRunId}-workflow-${createHash("sha256").update(workflowName).digest("hex")}`;
-  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${leaf}`;
+  return `${WORKFLOW_WORKSPACES_RELATIVE_ROOT}/${leaf}`;
 }
 
 export interface WorkflowOutputDirectoryPath {
@@ -169,12 +177,45 @@ export function resolveWorkflowOutputDirectoryPath(
   return { relativePath, absolutePath };
 }
 
-/** Expand a short run name into its project-local workflow workspace. */
-export function workflowWorkspaceRelativePathForRunName(runName: unknown): string {
+function workflowWorkspaceLeaf(runName: unknown): string {
   if (typeof runName !== "string" || !OUTPUT_COMPONENT.test(runName)) {
     throw new Error("workflow runName must be one safe folder name");
   }
-  return `${WORKFLOW_PLANS_RELATIVE_ROOT}/${runName}`;
+  return runName;
+}
+
+/**
+ * Select one named workspace without moving its physical target.
+ *
+ * Existing legacy workspaces stay under `.locus-pi/plans/`, preserving the
+ * physical identity that owns their checkpoint namespace. A name present in
+ * both roots is ambiguous and fails before workflow code can run.
+ */
+export function resolveNamedWorkflowWorkspacePath(projectRoot: string, runName: unknown): string {
+  const leaf = workflowWorkspaceLeaf(runName);
+  const root = path.resolve(projectRoot);
+  const currentRelativePath = `${WORKFLOW_WORKSPACES_RELATIVE_ROOT}/${leaf}`;
+  const legacyRelativePath = `${WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT}/${leaf}`;
+  const currentPath = path.resolve(root, ...currentRelativePath.split("/"));
+  const legacyPath = path.resolve(root, ...legacyRelativePath.split("/"));
+  const currentExists = lstatSync(currentPath, { throwIfNoEntry: false }) !== undefined;
+  const legacyExists = lstatSync(legacyPath, { throwIfNoEntry: false }) !== undefined;
+  if (currentExists && legacyExists) {
+    throw new Error(
+      `workflow runName ${JSON.stringify(leaf)} is ambiguous: both ${currentRelativePath} and ${legacyRelativePath} exist`,
+    );
+  }
+  return legacyExists ? legacyRelativePath : currentRelativePath;
+}
+
+/** Validate one run name without selecting or touching either workspace root. */
+export function assertWorkflowRunName(runName: unknown): string {
+  return workflowWorkspaceLeaf(runName);
+}
+
+/** True only for the retired workspace namespace; callers must never create it. */
+export function isLegacyWorkflowWorkspacePath(relativePath: string): boolean {
+  return relativePath.startsWith(`${WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT}/`);
 }
 
 function normalizeRequestedOutputDir(projectRoot: string, workingDirectory: string, requested: string): string {
@@ -457,6 +498,70 @@ export function releaseWorkflowRootLease(lease: WorkflowRootLease): void {
   removeLeaseFile(lease.projectRoot, lease.workspaceDir, lease.lockFile);
 }
 
+/** Runtime-owned atomic backlinks. Never replace a pre-existing user document. */
+export function writeWorkflowWorkspaceRunLink(
+  lease: WorkflowRootLease,
+  groupDir: string,
+  storageRootRunId: string,
+): void {
+  assertWorkflowRootLease(lease);
+  const file = path.join(lease.workspaceDir, ".workflow-runs.md");
+  const href = path.relative(lease.workspaceDir, groupDir).split(path.sep).map(encodeURIComponent).join("/");
+  const line = `- [Группа ${assertWorkflowRunId(storageRootRunId)}](${href}/README.md).\n`;
+  const exists = assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, file, "file", false);
+  const previous = exists ? readFileSync(file, "utf8") : WORKFLOW_WORKSPACE_RUNS_HEADER;
+  if (exists && !previous.startsWith(WORKFLOW_WORKSPACE_RUNS_MARKER + "\n")) {
+    throw new Error(`Reserved workflow workspace file already exists: ${file}`);
+  }
+  if (!validWorkflowWorkspaceRunLinks(previous, lease.projectRoot, lease.workspaceDir)) {
+    throw Object.assign(new Error(`Workflow backlink file requires recovery before it can be updated: ${file}`), {
+      code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED",
+    });
+  }
+  if (previous.split("\n").includes(line.trimEnd())) return;
+  assertWorkflowRootLease(lease);
+  replaceWorkflowWorkspaceTextFile(lease, file, previous + line);
+}
+
+function validWorkflowWorkspaceRunLinks(text: string, projectRoot: string, workspaceDir: string): boolean {
+  if (!text.startsWith(WORKFLOW_WORKSPACE_RUNS_HEADER) || !text.endsWith("\n")) return false;
+  const links = text.slice(WORKFLOW_WORKSPACE_RUNS_HEADER.length).split("\n").filter(Boolean);
+  const groups = new Set<string>();
+  for (const link of links) {
+    const match = /^- \[Группа ([A-Za-z0-9][A-Za-z0-9._-]{0,127})\]\(([^\r\n()]+)\/README\.md\)\.$/u.exec(link);
+    if (match === null || groups.has(match[1]!)) return false;
+    const groupId = match[1]!;
+    const expectedHref = path
+      .relative(workspaceDir, workflowRunDir(projectRoot, groupId))
+      .split(path.sep)
+      .map(encodeURIComponent)
+      .join("/");
+    if (match[2] !== expectedHref) return false;
+    groups.add(groupId);
+  }
+  return true;
+}
+
+function replaceWorkflowWorkspaceTextFile(lease: WorkflowRootLease, file: string, text: string): void {
+  const temporary = `${file}.tmp-${process.pid}-${randomUUID()}`;
+  assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, temporary, "file", false);
+  let created = false;
+  try {
+    writeNewDurableText(temporary, text);
+    created = true;
+    assertWorkflowRootLease(lease);
+    assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, temporary, "file", true);
+    assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, file, "file", false);
+    renameSync(temporary, file);
+    created = false;
+    fsyncDirectory(path.dirname(file));
+  } finally {
+    if (created && assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, temporary, "file", false)) {
+      unlinkSync(temporary);
+    }
+  }
+}
+
 export function readWorkflowCompletedCheckpoint(
   lease: WorkflowRootLease,
   identity: WorkflowCheckpointIdentity,
@@ -712,10 +817,13 @@ export function assertWorkflowOutputDirPath(value: unknown): string {
   if (value.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
     throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
   }
-  if (value.startsWith(`${WORKFLOW_PLANS_RELATIVE_ROOT}/`)) {
-    const planName = value.slice(WORKFLOW_PLANS_RELATIVE_ROOT.length + 1);
-    if (!OUTPUT_COMPONENT.test(planName)) {
-      throw new Error(`workflow outputDir contains an unsafe planning path component: ${JSON.stringify(value)}`);
+  const workspaceRoot = [WORKFLOW_WORKSPACES_RELATIVE_ROOT, WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT].find(
+    (candidate) => value.startsWith(`${candidate}/`),
+  );
+  if (workspaceRoot !== undefined) {
+    const workspaceName = value.slice(workspaceRoot.length + 1);
+    if (!OUTPUT_COMPONENT.test(workspaceName)) {
+      throw new Error(`workflow outputDir contains an unsafe workspace path component: ${JSON.stringify(value)}`);
     }
     return value;
   }
@@ -886,6 +994,16 @@ function writeNewDurableJson(file: string, value: unknown, options: { syncParent
     closeSync(fd);
   }
   if (options.syncParentDirectory) fsyncDirectory(path.dirname(file));
+}
+
+function writeNewDurableText(file: string, text: string): void {
+  const fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+  try {
+    writeFileSync(fd, text, "utf8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function fsyncDirectory(directory: string): void {

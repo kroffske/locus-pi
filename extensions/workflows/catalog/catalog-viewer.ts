@@ -3,7 +3,12 @@ import { sliceByColumn, visibleWidth, wrapTextWithAnsi } from "@earendil-works/p
 import { homedir } from "node:os";
 import path from "node:path";
 import type { CustomUiComponent, CustomUiTui } from "../../_shared/host/pi-api.js";
-import { renderOperatorBlock, type OperatorBlock, type OperatorThemeLike } from "../../_shared/operator/operator-ui.js";
+import {
+  renderOperatorBlock,
+  styleActiveSelection,
+  type OperatorBlock,
+  type OperatorThemeLike,
+} from "../../_shared/operator/operator-ui.js";
 import { clamp, clipLines, fitLine, viewerRows as sharedViewerRows } from "../../_shared/operator/viewer-geometry.js";
 import {
   readWorkflowCatalogSource,
@@ -17,7 +22,11 @@ import {
 } from "./workflow-catalog.js";
 import { workflowCopyDestinations, type WorkflowCopyDestination } from "./workflow-copy.js";
 import { packagedExamplesDir } from "../runtime/workflow-discovery.js";
-import { workflowRunsRootDir } from "../runtime/workflow-run-layout.js";
+import {
+  WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_SAVED_SOURCE_DIRNAME,
+  workflowRunsRootDir,
+} from "../runtime/workflow-run-layout.js";
 
 const DEFAULT_TERMINAL_ROWS = 24;
 // Keep two rows of breathing room above the one-row Locus footer so focused
@@ -28,7 +37,6 @@ const SOURCE_FRAME_ROWS = 2;
 // Same `keys action · keys action` shape every other footer in this browser uses,
 // so scroll hints read as a list instead of one run-on key sequence.
 const SCROLL_CONTROLS = "↑/↓ scroll · PgUp/PgDn page · Home/End jump";
-
 interface WorkflowCatalogTheme {
   fg?(color: string, text: string): string;
   bold?(text: string): string;
@@ -249,13 +257,14 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const tab = activeCatalogTab(this.#tabIndex);
     if (height <= 6)
       return compactCatalogProjection(this.model, tab.id, this.#selectedIndex, height, width, this.#theme);
-    const footer = catalogFooter(this.model, tab.id, width, this.#theme);
-    const footerHeight = Math.min(COMPACT_FOOTER_ROWS, Math.max(0, height - 1));
+    const tabs = fitLine(catalogTabBar(this.model, tab.id, width, this.#theme), width);
+    const controls = catalogControls(this.model, tab.id);
+    const footerHeight = Math.min(1, Math.max(0, height - 2));
     const location = catalogLocationLines(this.model, tab.id, this.projectRoot, width, this.#theme).slice(
       0,
-      Math.max(0, height - 1 - footerHeight),
+      Math.max(0, height - 2 - footerHeight),
     );
-    const bodyHeight = Math.max(0, height - 1 - location.length - footerHeight);
+    const bodyHeight = Math.max(0, height - 2 - location.length - footerHeight);
     const query = this.model.query === undefined ? "" : ` · query ${JSON.stringify(this.model.query)}`;
     const rows = selectableRows(this.model, tab.id);
     const header = fitLine(
@@ -265,9 +274,10 @@ export class WorkflowCatalogViewer implements CustomUiComponent {
     const body = catalogBody(this.model, tab.id, this.#selectedIndex, bodyHeight, width, this.#theme);
     return [
       header,
+      tabs,
       ...location,
       ...clipLines(body, bodyHeight, width),
-      ...footer.slice(0, footerHeight).map((line) => fitLine(line, width)),
+      ...(footerHeight === 0 ? [] : [fitLine(controls, width)]),
     ];
   }
 
@@ -447,19 +457,11 @@ function copyDestinationAction(destination: WorkflowCopyDestination): "copy-proj
   return destination === "project" ? "copy-project" : "copy-personal";
 }
 
-function catalogFooter(
-  model: WorkflowCatalogModel,
-  active: CatalogTabId,
-  width: number,
-  theme: WorkflowCatalogTheme,
-): string[] {
+function catalogControls(model: WorkflowCatalogModel, active: CatalogTabId): string {
   const rows = selectableRows(model, active);
-  return [
-    catalogTabBar(model, active, width, theme),
-    rows.length === 0
-      ? "Tab/←/→ source · Esc close · no rows in this source"
-      : `Tab/←/→ source · ↑/↓ select · Enter inspect · Esc close${active === "history" ? " · review-only" : ""}`,
-  ];
+  return rows.length === 0
+    ? "Tab/←/→ source · Esc close · no rows in this source"
+    : `Tab/←/→ source · ↑/↓ select · Enter inspect · Esc close${active === "history" ? " · review-only" : ""}`;
 }
 
 function catalogTabBar(
@@ -471,7 +473,9 @@ function catalogTabBar(
   const compact = width < 64;
   return CATALOG_TABS.map((tab) => {
     const label = `${compact ? tab.compactLabel : tab.label} ${selectableRows(model, tab.id).length}`;
-    return tab.id === active ? style(theme, "accent", `[${label}]`) : label;
+    if (tab.id !== active) return label;
+    const selected = `[${label}]`;
+    return styleActiveSelection(theme, selected);
   }).join("  ");
 }
 
@@ -564,7 +568,7 @@ function actionBar(
   return actions
     .map((action, index) => {
       const label = action === "review" && screen.state.kind !== "ready" ? "Diagnose" : title(action);
-      return index === selected ? style(theme, "warning", `› [${label}]`) : style(theme, "success", label);
+      return index === selected ? styleActiveSelection(theme, `› [${label}]`) : style(theme, "text", label);
     })
     .join(" ");
 }
@@ -666,8 +670,8 @@ function rowLines(
     return [selected ? bold(theme, style(theme, "accent", summary)) : style(theme, "text", summary)];
   }
   const isChild = row.kind === "current" && row.role === "child";
-  const pathPrefix = isChild ? "      · " : "    · ";
-  const continuationPrefix = isChild ? "        " : "      ";
+  const pathPrefix = isChild ? "      · " : "   · ";
+  const continuationPrefix = isChild ? "        " : "     ";
   const detailWidth = Math.max(0, width - visibleWidth(pathPrefix));
   const details = wrapPlain(row.description, Math.max(1, detailWidth));
   return [
@@ -689,7 +693,7 @@ function rowLines(
 function styledCatalogRowIdentity(row: SelectableWorkflowRow, selected: boolean, theme: WorkflowCatalogTheme): string {
   const marker = selected ? bold(theme, style(theme, "accent", ">")) : " ";
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const treeName = row.kind === "current" && row.role === "child" ? `└ ${row.label}` : row.name;
   const composition =
     row.kind !== "current" || row.role === "child" || row.children.length === 0
       ? ""
@@ -703,7 +707,7 @@ function styledCatalogRowIdentity(row: SelectableWorkflowRow, selected: boolean,
 
 function catalogRowIdentity(row: SelectableWorkflowRow): string {
   const run = row.kind === "history" ? ` · run ${row.runId}` : "";
-  const treeName = row.kind === "current" && row.role === "child" ? `  └ ${row.label}` : row.name;
+  const treeName = row.kind === "current" && row.role === "child" ? `└ ${row.label}` : row.name;
   const composition =
     row.kind !== "current" || row.role === "child" || row.children.length === 0
       ? ""
@@ -740,9 +744,9 @@ function catalogDirectories(model: WorkflowCatalogModel, tab: CatalogTabId, proj
     ),
   ];
   if (directories.length > 0) return directories;
-  if (tab === "personal") return [path.join(homedir(), ".pi", "workflows")];
+  if (tab === "personal") return [path.join(homedir(), WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME)];
   if (tab === "package") return [packagedExamplesDir()];
-  return [path.join(projectRoot, ".pi", "workflows")];
+  return [path.join(projectRoot, WORKFLOW_ROOT_DIRNAME, WORKFLOW_SAVED_SOURCE_DIRNAME)];
 }
 
 function catalogDirectoryForRow(row: WorkflowCatalogCurrentRow): string {

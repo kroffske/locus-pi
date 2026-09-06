@@ -14,6 +14,11 @@
  *   Hard VM/worker isolation is a pending seam — see TODO(trust-model) marker below.
  */
 
+import {
+  readInterruptedWorkflowResumeBinding,
+  workflowRecoveryInputHash,
+  confirmedRecoveryAgentCount,
+} from "./workflow-interrupted-recovery.js";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { readFileSync, realpathSync } from "node:fs";
@@ -57,7 +62,6 @@ import {
 import {
   claimNewWorkflowRun,
   workflowJournalFile,
-  workflowRunDir,
   readWorkflowRunResult,
   readWorkflowRunSummary,
   workflowPersistedResultInvalidity,
@@ -116,12 +120,14 @@ import {
 import {
   prepareWorkflowResult,
   isWorkflowResultExplicitFailure,
+  workflowFinalizationError,
   workflowDispositionForCompletion,
   workflowResultFile,
   workflowResultText,
   writeWorkflowResultJson,
   writeWorkflowResultText,
   type WorkflowDisposition,
+  type WorkflowFinalizationError,
   type WorkflowResultDiagnosticSentinel,
   type WorkflowResultPersistence,
 } from "./workflow-result.js";
@@ -136,6 +142,7 @@ import {
 } from "./workflow-script-identity.js";
 import {
   acquireWorkflowRootLease,
+  assertWorkflowRunName,
   assertFreshWorkflowOutputNamespace,
   assertFreshWorkflowOutputNamespacePath,
   assertUniqueWorkflowItemKeys,
@@ -143,6 +150,7 @@ import {
   assertWorkflowRootLease,
   commitWorkflowCompletedCheckpoint,
   ensureWorkflowWorkspaceFile,
+  isLegacyWorkflowWorkspacePath,
   isWorkflowPathWithinRoot,
   readWorkflowCompletedCheckpoint,
   referenceWorkflowPrimaryFile,
@@ -151,7 +159,7 @@ import {
   resolveWorkflowOutputDirectory,
   resolveWorkflowOutputDirectoryPath,
   resolveWorkflowOutputDirectoryForReuse,
-  workflowWorkspaceRelativePathForRunName,
+  resolveNamedWorkflowWorkspacePath,
   type WorkflowCheckpointIdentity,
   type WorkflowOutputDirectory,
   type WorkflowPrimaryFileReference,
@@ -185,9 +193,14 @@ import {
   readWorkflowRunTextFile,
   workflowLegacyRunMigrationMessage,
   workflowRunRuntimeDir,
+  workflowStorageRootRunId,
+  type WorkflowRunLocation,
+  WORKFLOW_PLANS_DIRNAME,
+  WORKFLOW_ROOT_DIRNAME,
+  WORKFLOW_WORKSPACES_DIRNAME,
 } from "./workflow-run-layout.js";
 import { verifyWorkflowPersistedSnapshot } from "./workflow-persisted-binding.js";
-import { workflowReportDir, writeWorkflowRunReport } from "./workflow-run-report.js";
+import { workflowReportDir, writeWorkflowRunReport, writeWorkflowRunGroupReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
   assertWorkflowHandoffClaimForContinuation,
@@ -234,6 +247,7 @@ interface ExpectedWorkflowChildSource {
 
 interface WorkflowRunnerCoordination {
   rootRunId: string;
+  storageRootRunId: string;
   depth: 0 | 1;
   parentRunId?: string;
   parentItemKey?: string;
@@ -294,7 +308,7 @@ export interface RunWorkflowScriptOptions {
   items?: readonly string[];
   /** Optional project-relative workflow workspace. */
   outputDir?: string;
-  /** Short workflow workspace name expanded under `.locus-pi/plans/`. */
+  /** Short workflow workspace name expanded under `.locus-pi/workspaces/` with legacy reuse. */
   runName?: string;
   /** Closed host-owned cross-run artifact binding. */
   continuation?: WorkflowContinuation;
@@ -304,15 +318,16 @@ export interface RunWorkflowScriptOptions {
   /** Host-owned exact source workspace proof for a validated handoff continuation. */
   operatorHandoffWorkspaceReuse?: WorkflowHandoffWorkspaceReuseBinding;
   resumeFromRunId?: string;
+  /** Explicit conservative hard-crash admission; absent terminal result, identical serial source, no in-flight effects. */
+  recoverInterrupted?: boolean;
   /**
    * Per-run narrowing or raising of the package budget contract, axis by axis.
    * Unstated axes take `DEFAULT_WORKFLOW_BUDGET`. Narrowing is silent; a raise is
    * journalled, never quiet.
    *
-   * Host-side by design (D3): neither production entrypoint passes it and a
-   * `*.workflow.mjs` cannot reach it, so the three run-level axes — `concurrency`,
-   * `totalAgents`, `runtimeMs` — are overridable by embedders and tests only. The
-   * four per-call axes additionally have an author surface in `agent(prompt, opts)`.
+   * The workflow tool and command launcher pass explicit operator-approved overrides.
+   * Workflow source cannot raise this shared execution-tree budget itself; four
+   * per-call axes additionally have an author surface in `agent(prompt, opts)`.
    */
   budget?: Partial<WorkflowBudget>;
   /**
@@ -343,6 +358,7 @@ export interface RunWorkflowScriptOptions {
 export interface RunWorkflowScriptResult {
   runId: string;
   runDir: string;
+  storageRootRunId?: string;
   ok: boolean;
   /** Runtime-owned terminal meaning. Optional only for legacy/test envelopes. */
   disposition?: WorkflowDisposition;
@@ -385,6 +401,8 @@ export interface RunWorkflowScriptResult {
    *  newest slice when a run produced more than the projection limit. */
   artifactRefs?: WorkflowArtifactRef[];
   artifactRefsOmitted?: number;
+  /** Bounded late failures persisted independently from the best-effort journal sink. */
+  finalizationErrors?: WorkflowFinalizationError[];
   resumeFromRunId?: string;
   resumeSourceRunSummary?: WorkflowRunSummary | null;
   continuation?: WorkflowContinuationJournal;
@@ -581,10 +599,15 @@ function readWorkflowResumeSemanticInputIdentity(
 export function readWorkflowResumeWorkspaceIdentity(
   projectRoot: string,
   runId: string,
+  resolvedRunDir?: string,
 ): WorkflowResumeWorkspaceIdentity {
-  const sourceResult = readWorkflowRunResult(projectRoot, runId);
-  const bindingPresent = workflowLaunchBindingExists(projectRoot, runId);
-  const binding = readWorkflowLaunchBinding(projectRoot, runId);
+  const sourceResult = readWorkflowRunResult(projectRoot, runId, resolvedRunDir);
+  const invalidity = workflowPersistedResultInvalidity(sourceResult);
+  if (invalidity !== undefined) {
+    throw new Error(`Cannot resume workflow: source run ${runId} has malformed persisted metadata (${invalidity}).`);
+  }
+  const bindingPresent = workflowLaunchBindingExists(projectRoot, runId, resolvedRunDir);
+  const binding = readWorkflowLaunchBinding(projectRoot, runId, resolvedRunDir);
   if (bindingPresent) {
     if (binding === null || sourceResult === null || !workflowLaunchBindingMatchesResult(binding, sourceResult)) {
       throw new Error(`Cannot resume post-code-review workflow: source run ${runId} has no valid host launch binding.`);
@@ -858,6 +881,7 @@ class SavedChildExecutionOwner {
   ): Promise<RunWorkflowScriptResult> {
     const childCoordination: WorkflowRunnerCoordination = {
       rootRunId: this.options.coordination.rootRunId,
+      storageRootRunId: this.options.coordination.storageRootRunId,
       depth: 1,
       parentRunId: this.options.parentRunId,
       parentItemKey: validated.key,
@@ -1036,18 +1060,39 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const resolvedBudget = inheritedCoordination?.budget === undefined ? resolveWorkflowBudget(opts.budget) : undefined;
   const budget = inheritedCoordination?.budget ?? resolvedBudget!.budget;
   const budgetRaises = resolvedBudget?.raises ?? [];
+  let storageLocation: WorkflowRunLocation | undefined;
+  let storageResolutionError: unknown;
+  if (inheritedCoordination !== undefined) {
+    storageLocation = { storageRootRunId: inheritedCoordination.storageRootRunId, kind: "child" };
+  } else if (opts.resumeFromRunId !== undefined) {
+    try {
+      storageLocation = {
+        storageRootRunId: workflowStorageRootRunId(projectRoot, opts.resumeFromRunId),
+        kind: "attempt",
+      };
+    } catch (error) {
+      // No safe group is known yet. Retain the rejected request in its own receipt.
+      storageResolutionError = error;
+    }
+  }
   const {
     runId,
+    runDir,
     journal,
     firstLine: budgetPrelude,
-  } = claimNewWorkflowRun(projectRoot, (mintedRunId) => ({
-    ts: new Date().toISOString(),
-    runId: mintedRunId,
-    kind: "log",
-    source: "runtime",
-    message: formatWorkflowBudgetPrelude(budget),
-  }));
-  const runDir = workflowRunDir(projectRoot, runId);
+  } = claimNewWorkflowRun(
+    projectRoot,
+    (mintedRunId) => ({
+      ts: new Date().toISOString(),
+      runId: mintedRunId,
+      kind: "log",
+      source: "runtime",
+      message: formatWorkflowBudgetPrelude(budget),
+    }),
+    undefined,
+    storageLocation,
+  );
+  const storageRootRunId = storageLocation?.storageRootRunId ?? runId;
   const runtimeDir = workflowRunRuntimeDir(runDir);
   const outputDir = workflowReportDir(projectRoot, runId);
   // Inherited coordination is the only authority for children: a saved child
@@ -1079,6 +1124,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   let resumeSourceRunSummary: WorkflowRunSummary | null | undefined;
   let resumeSourceWorkspace: WorkflowResumeWorkspaceIdentity | undefined;
   let resumeSourceBinding: WorkflowResumeSourceBinding | undefined;
+  let interruptedRecovery = false;
   let replayPlan: WorkflowReplayPlan | undefined;
   let replayController: WorkflowReplayController | undefined;
   let resourceLoader: WorkflowResourceLoader | undefined;
@@ -1111,8 +1157,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     opts.onEvent?.(line);
   };
   /**
-   * Evidence without a live announcement: the durable journal, `result.json` and
-   * the run report get the line; the progress surface does not.
+   * Evidence without a live announcement: the durable journal and run report
+   * get the line; the progress surface does not. `result.json` keeps terminal
+   * state, not a second copy of the event stream.
    *
    * Used for facts that are true of EVERY run. Pushing those through `onEvent`
    * would turn a run that emitted nothing into an eventful one and make the no-UI
@@ -1156,6 +1203,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     | "primaryFile"
     | "lineage"
     | "childRuns"
+    | "storageRootRunId"
   > => {
     const lineage: WorkflowRunLineage =
       inheritedCoordination === undefined
@@ -1187,19 +1235,17 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
             // repeat the source outputDir as an ordinary option.
             workspaceDirExplicit:
               handoffReuseOutput === undefined
-                ? resumeSourceWorkspace?.explicit === true || selectedOutputDir !== undefined
+                ? resumeSourceWorkspace?.explicit === true || opts.outputDir !== undefined
                 : opts.operatorHandoffWorkspaceReuse?.explicit === true,
-            ...(targetForMetadata !== undefined && isPostCodeReviewTarget(targetForMetadata, projectRoot)
-              ? {
-                  semanticInputPresent: requestedSemanticInput.present,
-                  semanticInputSha256: requestedSemanticInput.sha256,
-                }
-              : {}),
+            // Every new root launch has a binding; its result must project the same input identity.
+            semanticInputPresent: requestedSemanticInput.present,
+            semanticInputSha256: requestedSemanticInput.sha256,
             stableOutputDir: stableOutput.absolutePath,
             stableOutputDirRelative: stableOutput.relativePath,
           }),
       ...(primaryFile === undefined ? {} : { primaryFile }),
       lineage,
+      storageRootRunId,
       ...(childRuns.length === 0 ? {} : { childRuns: [...childRuns] }),
     };
   };
@@ -1210,6 +1256,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
     let primaryOutputPath: string | undefined;
+    const finalizationErrors: WorkflowFinalizationError[] = [];
     let enrichedFields: RunResultFields = {
       ...fields,
       ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
@@ -1352,6 +1399,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         message,
       };
       journal.write(outputFailure);
+      finalizationErrors.push(workflowFinalizationError("terminal-output", message));
       enrichedFields = withFailureDiagnostic({
         ...enrichedFields,
         ok: false,
@@ -1377,6 +1425,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           message,
         };
         journal.write(leaseFailure);
+        finalizationErrors.push(workflowFinalizationError("lease-release", message));
         leaseReleased = true;
         enrichedFields = withFailureDiagnostic({
           ...enrichedFields,
@@ -1393,13 +1442,14 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // the workflow explicitly publishes one. Files agents wrote themselves stay
     // under their own names in the separate project-local workflow workspace.
     // The envelope below stays the durable truth, and a report failure never fails
-    // the run. It runs BEFORE result.json so a failed write can still be recorded
-    // in the journal that result.json persists.
+    // the run. It runs BEFORE result.json so a failed write can still enter the
+    // bounded finalizationErrors projection even if its journal append also fails.
     if (artifactStore !== undefined) {
       const reportOutcome = writeWorkflowRunReport(
         {
           projectRoot,
           runId,
+          runDir,
           ...(enrichedFields.workspaceDir === undefined ? {} : { workspaceDir: enrichedFields.workspaceDir }),
           status: enrichedFields.disposition?.status ?? (enrichedFields.ok ? "completed" : "failed"),
           ...(enrichedFields.target === undefined
@@ -1432,6 +1482,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           message: `Workflow run report was not written to ${workflowReportDir(projectRoot, runId)}: ${reportOutcome.message}`,
         };
         journal.write(reportFailure);
+        finalizationErrors.push(
+          workflowFinalizationError("report", reportFailure.message ?? "Workflow run report failed."),
+        );
         try {
           opts.onEvent?.(reportFailure);
         } catch {
@@ -1441,9 +1494,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       }
     }
     const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
+    const { journal: _inMemoryJournal, ...persistedFields } = enrichedFields;
+    const finalizationProjection =
+      finalizationErrors.length === 0 ? {} : { finalizationErrors: [...finalizationErrors] };
     const resultPersistence = writeWorkflowResultJson(runDir, {
       runId,
-      ...enrichedFields,
+      ...persistedFields,
+      ...finalizationProjection,
       resultPersistence: intendedPersistence,
     });
     if (resultPersistence.ok) {
@@ -1451,6 +1508,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         runId,
         runDir,
         ...enrichedFields,
+        ...finalizationProjection,
         resultPersistence,
         ...(resultTextPath === undefined ? {} : { resultTextPath }),
         ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
@@ -1490,6 +1548,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         {
           projectRoot,
           runId,
+          runDir,
           ...(failedFields.workspaceDir === undefined ? {} : { workspaceDir: failedFields.workspaceDir }),
           status: failedFields.disposition?.status ?? "failed",
           ...(failedFields.target === undefined
@@ -1514,6 +1573,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       runId,
       runDir,
       ...failedFields,
+      ...finalizationProjection,
       resultPersistence,
       ...(resultTextPath === undefined ? {} : { resultTextPath }),
       ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
@@ -1559,6 +1619,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     assertWorkflowInput(opts.input);
     if (opts.continuation !== undefined) assertWorkflowContinuation(opts.continuation);
     if (hasResume) resumeFromRunId = assertWorkflowRunId(requestedResumeFromRunId);
+    if (
+      storageResolutionError !== undefined &&
+      !(
+        typeof storageResolutionError === "object" &&
+        storageResolutionError !== null &&
+        "code" in storageResolutionError &&
+        storageResolutionError.code === "ENOENT"
+      )
+    )
+      throw storageResolutionError;
     if (hasResume && opts.continuation !== undefined) {
       throw new Error("Workflow continuation and resumeFromRunId are mutually exclusive.");
     }
@@ -1633,7 +1703,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       if (opts.outputDir !== undefined) {
         throw new Error("workflow runName and outputDir are mutually exclusive");
       }
-      selectedOutputDir = workflowWorkspaceRelativePathForRunName(opts.runName);
+      assertWorkflowRunName(opts.runName);
     }
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
@@ -1661,6 +1731,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     return finishRun({ ok: false, result: undefined, journal: journalLines, error, target, ...resultMetadata() });
   }
   try {
+    if (opts.recoverInterrupted !== undefined && typeof opts.recoverInterrupted !== "boolean")
+      throw new Error("recoverInterrupted must be boolean");
+    if (opts.recoverInterrupted === true && resumeFromRunId === undefined)
+      throw new Error("recoverInterrupted requires resumeFromRunId");
     if (opts.operatorHandoffWorkspaceReuse !== undefined) {
       if (opts.operatorHandoffClaim === undefined || opts.continuation === undefined) {
         throw new Error("Workflow handoff workspace reuse requires a validated claim and continuation");
@@ -1676,9 +1750,26 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     if (resumeFromRunId !== undefined) {
       let sourceResult = readWorkflowRunResult(projectRoot, resumeFromRunId);
+      if (opts.recoverInterrupted === true) {
+        sourceResult = readInterruptedWorkflowResumeBinding(projectRoot, resumeFromRunId, {
+          target: { kind: target.kind, ref: target.ref, source: target.source },
+          scriptSha256: scriptIdentity.scriptSha256,
+          recoveryInputSha256: workflowRecoveryInputHash({
+            ...(opts.input === undefined ? {} : { input: opts.input }),
+            items,
+            budget,
+            ...(noOperator === undefined ? {} : { noOperator }),
+          }),
+        });
+        interruptedRecovery = true;
+      }
       let sourceLaunchBinding: WorkflowLaunchBinding | undefined;
       const currentOwner = isPostCodeReviewTarget(target, projectRoot);
-      const sourceLaunchBindingPresent = workflowLaunchBindingExists(projectRoot, resumeFromRunId);
+      // Every root now writes a launch binding, but only owner resume and explicit
+      // interrupted recovery treat it as admission authority. Ordinary resume keeps
+      // reading the persisted result envelope, including pre-binding runs.
+      const sourceLaunchBindingPresent =
+        (currentOwner || interruptedRecovery) && workflowLaunchBindingExists(projectRoot, resumeFromRunId);
       if (sourceLaunchBindingPresent) {
         if (sourceResult === null) {
           throw new Error(`Cannot resume workflow: source run ${resumeFromRunId} has no readable result.`);
@@ -1819,10 +1910,31 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         projectRoot,
         resumeSourceBinding.result.scriptIdentity?.sourcePath,
       ) === targetIdentityKey(target, projectRoot);
+    if (opts.runName !== undefined && resumeSourceWorkspace !== undefined) {
+      const expectedCurrent = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_WORKSPACES_DIRNAME, opts.runName].join("/");
+      const expectedLegacy = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME, opts.runName].join("/");
+      if (
+        resumeSourceWorkspace.relativePath !== expectedCurrent &&
+        resumeSourceWorkspace.relativePath !== expectedLegacy
+      ) {
+        throw new Error(
+          `Cannot resume workflow: runName ${JSON.stringify(opts.runName)} does not match the source workspace ` +
+            `${JSON.stringify(resumeSourceWorkspace.relativePath)}.`,
+        );
+      }
+    }
     const resumeReuseOutput =
       resumeSourceWorkspace !== undefined && selectedOutputDir === undefined && resumeSourceTargetMatches
         ? resolveWorkflowOutputDirectoryForReuse(projectRoot, resumeSourceWorkspace, { create: false })
         : undefined;
+    if (
+      opts.runName !== undefined &&
+      resumeSourceWorkspace === undefined &&
+      handoffReuseOutput === undefined &&
+      inheritedCoordination === undefined
+    ) {
+      selectedOutputDir = resolveNamedWorkflowWorkspacePath(projectRoot, opts.runName);
+    }
     const candidateOutputPath =
       handoffReuseOutput ??
       resumeReuseOutput ??
@@ -1833,6 +1945,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         workingDirectory,
         { runId },
       );
+    const reusesLegacyWorkspace = isLegacyWorkflowWorkspacePath(candidateOutputPath.relativePath);
     if (
       resumeSourceWorkspace !== undefined &&
       candidateOutputPath.relativePath !== resumeSourceWorkspace.relativePath
@@ -1860,7 +1973,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         workflowDefaultOutputName(target),
         workingDirectory,
         {
-          create: !hasResume,
+          create: !hasResume && !reusesLegacyWorkspace,
           runId,
         },
       );
@@ -1880,7 +1993,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       if (resumeSourceBinding === undefined) {
         throw new Error(`Cannot resume workflow: source run ${resumeFromRunId} has no validated binding.`);
       }
-      if (resumeSourceBinding.owner) {
+      if (resumeSourceBinding.owner || interruptedRecovery) {
         const sourceInput =
           resumeSourceBinding.launchBinding?.semanticInput ??
           readWorkflowResumeSemanticInputIdentity(resumeSourceBinding.result, resumeFromRunId);
@@ -1911,10 +2024,16 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // Persist the independent owner binding before acquiring the lease or
     // starting any child work. The result envelope written at terminal time is
     // only a projection and cannot be the source of resume/handoff authority.
-    if (inheritedCoordination === undefined && isPostCodeReviewTarget(target, projectRoot)) {
+    if (inheritedCoordination === undefined) {
       const launchBinding: WorkflowLaunchBinding = {
         schema: "locus-pi.workflow-launch-binding.v1",
         runId,
+        recoveryInputSha256: workflowRecoveryInputHash({
+          ...(opts.input === undefined ? {} : { input: opts.input }),
+          items,
+          budget,
+          ...(noOperator === undefined ? {} : { noOperator }),
+        }),
         target: { kind: target.kind, ref: target.ref, source: target.source },
         scriptIdentity,
         workspace: {
@@ -1925,7 +2044,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
           physicalIdentitySchemaVersion: 1,
           explicit:
             handoffReuseOutput === undefined
-              ? selectedOutputDir !== undefined
+              ? opts.outputDir !== undefined
               : opts.operatorHandoffWorkspaceReuse?.explicit === true,
         },
         semanticInput: requestedSemanticInput,
@@ -1947,8 +2066,25 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }
     if (inheritedCoordination === undefined) {
       rootLease = acquireWorkflowRootLease({ projectRoot, output: stableOutput, rootRunId: runId });
+      if (interruptedRecovery && resumeFromRunId !== undefined) {
+        readInterruptedWorkflowResumeBinding(projectRoot, resumeFromRunId, {
+          target: { kind: target.kind, ref: target.ref, source: target.source },
+          scriptSha256: scriptIdentity.scriptSha256,
+          recoveryInputSha256: workflowRecoveryInputHash({
+            ...(opts.input === undefined ? {} : { input: opts.input }),
+            items,
+            budget,
+            ...(noOperator === undefined ? {} : { noOperator }),
+          }),
+        });
+      }
+      writeWorkflowRunGroupReport(
+        { projectRoot, runId, storageRootRunId, workspaceDir: stableOutput.absolutePath, workflow: target.ref },
+        rootLease,
+      );
       coordination = {
         rootRunId: runId,
+        storageRootRunId,
         depth: 0,
         sharedExecution: createWorkflowSharedExecutionState({
           maxConcurrentAgents: budget.concurrency,
@@ -2039,15 +2175,40 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       ...resultMetadata(),
     });
   }
+  if (
+    interruptedRecovery &&
+    (!replayPlan.record || replayPlan.recorded === undefined || replayPlan.refusedReason !== undefined)
+  ) {
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: currentJournal(runtime),
+      error: "Interrupted recovery could not activate exact prefix replay",
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
+  }
   if (replayPlan.record) {
     replayController = createWorkflowReplayController({
       runDir,
+      ...(interruptedRecovery ? { requireRecordedPrefix: true } : {}),
       ...(replayPlan.recorded === undefined ? {} : { recorded: replayPlan.recorded }),
+      ...(replayPlan.sourceScriptChanged === true ? { sourceScriptChanged: true } : {}),
     });
   }
   // Silent on the default path. A plain run that records normally is the norm,
   // and announcing it would turn every zero-event run into an eventful one; the
   // record itself and the `replay` envelope in result.json carry that fact.
+  if (interruptedRecovery)
+    emitPrelude({
+      ts: new Date().toISOString(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message: "[workflow:interrupted-recovery] exact confirmed serial prefix; no terminal success inferred",
+      ...(resumeFromRunId === undefined ? {} : { resumeFromRunId }),
+    });
   const replayPlanNote = describeWorkflowReplayPlan(replayPlan);
   if (replayPlanNote !== undefined) {
     emitPrelude({
@@ -2067,6 +2228,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   workspaceManager = createWorkflowWorkspaceManager({
     projectRoot,
     runId,
+    runDir,
   });
   try {
     artifactStore = createWorkflowArtifactStore({ projectRoot, runId, runDir });
@@ -2132,6 +2294,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ctx: opts.ctx,
     signal: opts.signal,
     workflowRunId: runId,
+    workflowRunDir: runDir,
     workspaceManager,
     evidenceDestinations: (callId) => artifactStore!.childEvidenceDestinations(callId),
     workflowWorkspaceDir: stableOutput!.absolutePath,
@@ -2270,6 +2433,21 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
 
   const journalLines = currentJournal(runtime);
   const prepared = prepareWorkflowResult(result);
+  if (
+    interruptedRecovery &&
+    replayPlan?.recorded !== undefined &&
+    (replayController?.counts().replayedCalls ?? 0) < confirmedRecoveryAgentCount(replayPlan.recorded)
+  ) {
+    return finishRun({
+      ok: false,
+      result: undefined,
+      journal: currentJournal(runtime),
+      error: "Interrupted recovery ended before consuming the confirmed prefix",
+      target,
+      scriptIdentity,
+      ...resultMetadata(),
+    });
+  }
   const semanticOk = prepared.diagnostic === undefined && !isWorkflowResultExplicitFailure(prepared.value);
   try {
     // Result normalization can invoke script-defined toJSON(). Verify only after
@@ -2317,6 +2495,12 @@ interface WorkflowReplayPlan {
   sourceRunId?: string;
   refusedReason?: WorkflowReplayRefusalReason;
   notRecordedReason?: WorkflowReplayNotRecordedReason;
+  /**
+   * The source run's script bytes differ from the ones executing now. Repairing
+   * the stopped workflow in place is the expected reason, so this is reported to
+   * the controller instead of ending the resume.
+   */
+  sourceScriptChanged?: boolean;
 }
 
 interface PlanWorkflowReplayInput {
@@ -2376,13 +2560,16 @@ function planWorkflowReplay(input: PlanWorkflowReplayInput): WorkflowReplayPlan 
     return refuse("target-changed");
   }
   if (sourceSha256 === undefined) return refuse("source-run-unusable");
-  if (sourceSha256 !== scriptIdentity.scriptSha256) return refuse("script-changed");
   if (!coverageProven) return refuse("identity-coverage-unproven");
   if (replaySafety === "unproven") return refuse("replay-unsafe-script");
 
+  // Edited bytes are the operator's repair, not a reason to erase the progress
+  // that repair is meant to continue. The controller is told, and it makes the
+  // recorded node name mandatory for the rest of the run.
+  const sourceScriptChanged = sourceSha256 !== scriptIdentity.scriptSha256;
   const recorded = readWorkflowReplayLog(projectRoot, resumeFromRunId);
   if (recorded.length === 0) return refuse("no-recorded-calls");
-  return { record, recorded, sourceRunId: resumeFromRunId };
+  return { record, recorded, sourceRunId: resumeFromRunId, ...(sourceScriptChanged ? { sourceScriptChanged } : {}) };
 }
 
 /** Static replay-safety of the exact bytes this run executes; unreadable reads as unproven. */
@@ -2410,6 +2597,7 @@ function workflowReplayEnvelope(
     replayedCalls: counts.replayedCalls,
     freshCalls: counts.freshCalls,
     ...(counts.divergedAtCall !== undefined ? { divergedAtCall: counts.divergedAtCall } : {}),
+    ...(counts.divergedAtNode !== undefined ? { divergedAtNode: counts.divergedAtNode } : {}),
   };
 }
 

@@ -28,7 +28,16 @@ import {
   WORKFLOW_OUTPUT_DIR_PATTERN,
   WORKFLOW_OUTPUT_LOCK_FILE,
   workflowOutputStateDir,
+  writeWorkflowWorkspaceRunLink,
 } from "../../../../extensions/workflows/runtime/workflow-output.js";
+import {
+  createWorkflowArtifactStore,
+  readWorkflowArtifactIndex,
+  readWorkflowArtifactRecord,
+} from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
+import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import * as workflowRunLayout from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { writeWorkflowRunGroupReport } from "../../../../extensions/workflows/runtime/workflow-run-report.js";
 import {
   readWorkflowRunResult,
   readWorkflowRunResultText,
@@ -47,16 +56,16 @@ import { createHarness } from "../../../test-harness.js";
 
 function project(): string {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-durable-"));
-  mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+  mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
   return root;
 }
 
 function writeWorkflow(root: string, name: string, source: string): void {
-  writeFileSync(path.join(root, ".pi", "workflows", `${name}.workflow.mjs`), source, "utf8");
+  writeFileSync(path.join(root, ".locus-pi", "workflows", `${name}.workflow.mjs`), source, "utf8");
 }
 
 function writeWorkflowTree(root: string, name: string, entries: Record<string, string>): void {
-  const directory = path.join(root, ".pi", "workflows", name);
+  const directory = path.join(root, ".locus-pi", "workflows", name);
   mkdirSync(directory, { recursive: true });
   for (const [entry, source] of Object.entries(entries)) {
     writeFileSync(path.join(directory, `${entry}.workflow.mjs`), source, "utf8");
@@ -121,9 +130,9 @@ export default async function run(dsl, input) {
 `;
 
 describe("stable workflow output paths", () => {
-  it("does not re-resolve a host-bound target after source precedence changes", async () => {
+  it("does not fall back to a legacy source after a bound canonical source disappears", async () => {
     const root = project();
-    const piWorkflow = path.join(root, ".pi", "workflows", "switch.workflow.mjs");
+    const piWorkflow = path.join(root, ".locus-pi", "workflows", "switch.workflow.mjs");
     writeWorkflow(root, "switch", `export default () => "project-source";\n`);
     const target = resolveWorkflowTarget({ name: "switch" }, root, root);
     rmSync(piWorkflow);
@@ -167,9 +176,9 @@ describe("stable workflow output paths", () => {
     const root = project();
     const outside = mkdtempSync(path.join(tmpdir(), "workflow-bound-target-"));
     writeFileSync(path.join(outside, "switch.workflow.mjs"), 'export default () => "outside";\n');
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    rmSync(path.join(root, ".pi", "workflows"), { recursive: true, force: true });
-    symlinkSync(outside, path.join(root, ".pi", "workflows"), "dir");
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    rmSync(path.join(root, ".locus-pi", "workflows"), { recursive: true, force: true });
+    symlinkSync(outside, path.join(root, ".locus-pi", "workflows"), "dir");
     const harness = createHarness(root);
     const result = await runWorkflowScript({
       pi: harness.pi,
@@ -180,7 +189,7 @@ describe("stable workflow output paths", () => {
         kind: "name",
         ref: "switch",
         source: "project",
-        path: path.join(root, ".pi", "workflows", "switch.workflow.mjs"),
+        path: path.join(root, ".locus-pi", "workflows", "switch.workflow.mjs"),
       },
     });
     expect(result.ok).toBe(false);
@@ -189,9 +198,9 @@ describe("stable workflow output paths", () => {
 
   it("accepts an internally confined target symlink after physical proof", async () => {
     const root = project();
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
-    const real = path.join(root, ".pi", "workflows", "switch.workflow.mjs");
-    const alias = path.join(root, ".pi", "workflows", "alias.workflow.mjs");
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    const real = path.join(root, ".locus-pi", "workflows", "switch.workflow.mjs");
+    const alias = path.join(root, ".locus-pi", "workflows", "alias.workflow.mjs");
     writeFileSync(real, 'export default () => "project-source";\n');
     symlinkSync(real, alias);
     const harness = createHarness(root);
@@ -199,10 +208,10 @@ describe("stable workflow output paths", () => {
       pi: harness.pi,
       ctx: harness.ctx,
       signal: new AbortController().signal,
-      scriptPath: ".pi/workflows/alias.workflow.mjs",
+      scriptPath: ".locus-pi/workflows/alias.workflow.mjs",
       targetBinding: {
         kind: "scriptPath",
-        ref: ".pi/workflows/alias.workflow.mjs",
+        ref: ".locus-pi/workflows/alias.workflow.mjs",
         source: "project",
         path: alias,
       },
@@ -233,10 +242,17 @@ describe("stable workflow output paths", () => {
     expect(assertWorkflowOutputDirPath(".locus-pi/plans/20260819-120000-a1b2-task-draft")).toBe(
       ".locus-pi/plans/20260819-120000-a1b2-task-draft",
     );
+    expect(assertWorkflowOutputDirPath(".locus-pi/workspaces/20260819-120000-a1b2-task-draft")).toBe(
+      ".locus-pi/workspaces/20260819-120000-a1b2-task-draft",
+    );
     expect(new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u").test(".locus-pi/plans/20260819-120000-a1b2-task-draft")).toBe(
       true,
     );
+    expect(
+      new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u").test(".locus-pi/workspaces/20260819-120000-a1b2-task-draft"),
+    ).toBe(true);
     expect(() => assertWorkflowOutputDirPath(".locus-pi/plans/nested/task-draft")).toThrow();
+    expect(() => assertWorkflowOutputDirPath(".locus-pi/workspaces/nested/task-draft")).toThrow();
     expect(assertWorkflowPhysicalWorkspaceIdentity("packages/docs site/tmp/files")).toBe(
       "packages/docs site/tmp/files",
     );
@@ -249,15 +265,11 @@ describe("stable workflow output paths", () => {
   it.each([
     ["task/draft", "task-draft"],
     ["task/plan", "task-plan"],
-    ["task/implement-plan-template", "task-implement-plan-template"],
-    ["task/substep", "task-substep"],
   ])("gives every fresh %s run a distinct timestamped task workspace", async (name, slug) => {
     const root = project();
     writeWorkflowTree(root, "task", {
       draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
-      "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
       plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
-      substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
     });
 
     const firstHarness = createHarness(root);
@@ -277,8 +289,8 @@ describe("stable workflow output paths", () => {
 
     expect(first.ok, first.error).toBe(true);
     expect(second.ok, second.error).toBe(true);
-    expect(first.workspaceDirRelative).toBe(`.locus-pi/plans/${first.runId}-${slug}`);
-    expect(second.workspaceDirRelative).toBe(`.locus-pi/plans/${second.runId}-${slug}`);
+    expect(first.workspaceDirRelative).toBe(`.locus-pi/workspaces/${first.runId}-${slug}`);
+    expect(second.workspaceDirRelative).toBe(`.locus-pi/workspaces/${second.runId}-${slug}`);
     expect(second.workspaceDirRelative).not.toBe(first.workspaceDirRelative);
   });
 
@@ -287,12 +299,10 @@ describe("stable workflow output paths", () => {
     writeWorkflow(root, "ordinary", `export default (dsl) => dsl.outputDir();\n`);
     writeWorkflowTree(root, "task", {
       draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
-      "implement-plan-template": `export const meta = { name: "task/implement-plan-template" };\nexport default (dsl) => dsl.outputDir();\n`,
       plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
-      substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
     });
 
-    for (const name of ["ordinary", "task/draft", "task/plan", "task/implement-plan-template", "task/substep"]) {
+    for (const name of ["ordinary", "task/draft", "task/plan"]) {
       const harness = createHarness(root);
       const result = await runWorkflowScript({
         pi: harness.pi,
@@ -302,8 +312,200 @@ describe("stable workflow output paths", () => {
         runName: "airflow-builder",
       });
       expect(result.ok, result.error).toBe(true);
-      expect(result.workspaceDirRelative).toBe(".locus-pi/plans/airflow-builder");
+      expect(result.workspaceDirRelative).toBe(".locus-pi/workspaces/airflow-builder");
     }
+  });
+
+  it("reuses a legacy named workspace without changing its checkpoint namespace", async () => {
+    const root = project();
+    const runName = "legacy-builder";
+    const legacyWorkspace = `.locus-pi/plans/${runName}`;
+    mkdirSync(path.join(root, legacyWorkspace), { recursive: true });
+    writeFileSync(path.join(root, legacyWorkspace, "marker.txt"), "legacy\n", "utf8");
+    writeWorkflow(root, "legacy-named", `export default (dsl) => dsl.outputDir();\n`);
+    const legacyIdentity = resolveWorkflowOutputDirectory(root, legacyWorkspace, "unused", root, {
+      create: false,
+    }).identity;
+    const stateDirBefore = workflowOutputStateDir(root, legacyIdentity);
+
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "legacy-named",
+      runName,
+    });
+
+    expect(result.ok, result.error).toBe(true);
+    expect(result.workspaceDirRelative).toBe(legacyWorkspace);
+    expect(result.workspacePhysicalIdentity).toBe(legacyIdentity);
+    expect(workflowOutputStateDir(root, result.workspacePhysicalIdentity!)).toBe(stateDirBefore);
+    expect(readFileSync(path.join(result.workspaceDir!, "marker.txt"), "utf8")).toBe("legacy\n");
+  });
+
+  it("fails a dual-root runName before child work", async () => {
+    const root = project();
+    const runName = "ambiguous-builder";
+    mkdirSync(path.join(root, ".locus-pi", "workspaces", runName), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "plans", runName), { recursive: true });
+    writeWorkflow(root, "ambiguous-named", `export default (dsl) => dsl.agent("must not run");\n`);
+    let calls = 0;
+
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "ambiguous-named",
+      runName,
+      createExecutor: executor(() => {
+        calls += 1;
+        return "unexpected";
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain(
+      "both .locus-pi/workspaces/ambiguous-builder and .locus-pi/plans/ambiguous-builder exist",
+    );
+    expect(calls).toBe(0);
+  });
+
+  it("resumes through the recorded legacy binding even when both named roots later exist", async () => {
+    const root = project();
+    const runName = "resume-legacy-builder";
+    const legacyWorkspace = `.locus-pi/plans/${runName}`;
+    mkdirSync(path.join(root, legacyWorkspace), { recursive: true });
+    writeWorkflow(root, "resume-named", `export default (dsl) => dsl.outputDir();\n`);
+    const harness = createHarness(root);
+    const first = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "resume-named",
+      runName,
+    });
+    expect(first.ok, first.error).toBe(true);
+    expect(first.workspaceDirExplicit).toBe(false);
+    mkdirSync(path.join(root, ".locus-pi", "workspaces", runName), { recursive: true });
+
+    const resumed = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "resume-named",
+      runName,
+      resumeFromRunId: first.runId,
+    });
+
+    expect(resumed.ok, resumed.error).toBe(true);
+    expect(resumed.workspaceDirRelative).toBe(legacyWorkspace);
+    expect(resumed.workspacePhysicalIdentity).toBe(first.workspacePhysicalIdentity);
+  });
+
+  it.each(["current", "legacy"] as const)(
+    "rejects a mismatched runName when resuming a %s named workspace",
+    async (workspaceKind) => {
+      const root = project();
+      const runName = `${workspaceKind}-resume-name`;
+      if (workspaceKind === "legacy") {
+        mkdirSync(path.join(root, ".locus-pi", "plans", runName), { recursive: true });
+      }
+      writeWorkflow(root, "resume-name-match", `export default (dsl) => dsl.outputDir();\n`);
+      const harness = createHarness(root);
+      const first = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "resume-name-match",
+        runName,
+      });
+      expect(first.ok, first.error).toBe(true);
+
+      const resumed = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "resume-name-match",
+        runName: "different-name",
+        resumeFromRunId: first.runId,
+      });
+
+      expect(resumed.ok).toBe(false);
+      expect(resumed.error).toContain('runName "different-name" does not match the source workspace');
+      expect(existsSync(path.join(root, ".locus-pi", "workspaces", "different-name"))).toBe(false);
+      expect(existsSync(path.join(root, ".locus-pi", "plans", "different-name"))).toBe(false);
+    },
+  );
+
+  it("rejects a missing explicit legacy workspace instead of recreating the retired root", async () => {
+    const root = project();
+    writeWorkflow(root, "missing-legacy", `export default (dsl) => dsl.agent("must not run");\n`);
+    let calls = 0;
+
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "missing-legacy",
+      outputDir: ".locus-pi/plans/missing-legacy",
+      createExecutor: executor(() => {
+        calls += 1;
+        return "unexpected";
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/missing|does not exist|identity is unavailable/u);
+    expect(existsSync(path.join(root, ".locus-pi", "plans", "missing-legacy"))).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  it("persists a bounded lease-release finalization error", async () => {
+    const root = project();
+    const runName = "lease-finalization";
+    const workspace = path.join(root, ".locus-pi", "workspaces", runName);
+    const lockFile = path.join(workspace, WORKFLOW_OUTPUT_LOCK_FILE);
+    const outside = mkdtempSync(path.join(tmpdir(), "workflow-lease-finalization-"));
+    const sentinel = path.join(outside, "sentinel.txt");
+    writeFileSync(sentinel, "do-not-touch\n", "utf8");
+    writeWorkflow(root, "lease-finalization", `export default (dsl) => dsl.agent("replace lease");\n`);
+    const controller = new AbortController();
+
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: controller.signal,
+      name: "lease-finalization",
+      runName,
+      onEvent: (line) => {
+        if (line.message?.startsWith("[workflow:cancelled]") !== true) return;
+        rmSync(lockFile);
+        symlinkSync(sentinel, lockFile, "file");
+      },
+      createExecutor: executor(() => {
+        controller.abort({ kind: "operator_stop" });
+        return "done";
+      }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.finalizationErrors).toEqual([
+      { stage: "lease-release", message: expect.stringContaining("lease release failed") },
+    ]);
+    const persisted = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
+      journal?: unknown;
+      finalizationErrors?: Array<{ stage: string; message: string }>;
+    };
+    expect(persisted.journal).toBeUndefined();
+    expect(persisted.finalizationErrors).toEqual(result.finalizationErrors);
+    expect(readFileSync(sentinel, "utf8")).toBe("do-not-touch\n");
+
+    rmSync(lockFile);
+    rmSync(outside, { recursive: true, force: true });
   });
 
   it("rejects unsafe and conflicting runName selections", async () => {
@@ -358,15 +560,16 @@ describe("stable workflow output paths", () => {
     expect(relative.workspaceDirRelative).toBe("packages/docs/workspace");
   });
 
-  it.each(["task/plan", "task/substep"])(
+  it.each(["task/draft", "task/plan"])(
     "lets %s resume reuse an explicit source workspace without repeating outputDir",
     async (name) => {
       const root = project();
       writeWorkflowTree(root, "task", {
+        draft: `export const meta = { name: "task/draft" };\nexport default (dsl) => dsl.outputDir();\n`,
         plan: `export const meta = { name: "task/plan" };\nexport default (dsl) => dsl.outputDir();\n`,
-        substep: `export const meta = { name: "task/substep" };\nexport default (dsl) => dsl.outputDir();\n`,
       });
       const selectedWorkspace = ".locus-pi/plans/20260819-120000-a1b2-airflow-dag-builder";
+      mkdirSync(path.join(root, selectedWorkspace), { recursive: true });
       const firstHarness = createHarness(root);
       const first = await runWorkflowScript({
         pi: firstHarness.pi,
@@ -403,10 +606,10 @@ describe("stable workflow output paths", () => {
     },
   );
 
-  it("runs a generated implementation script in its selected task workspace", async () => {
+  it("runs a generated workflow script in its selected task workspace", async () => {
     const root = project();
-    const workspace = ".locus-pi/plans/20260819-120000-a1b2-task-implement-plan-template";
-    const scriptPath = path.join(root, workspace, "implement-plan.workflow.mjs");
+    const workspace = ".locus-pi/plans/20260819-120000-a1b2-task-plan";
+    const scriptPath = path.join(root, workspace, "workflow.mjs");
     mkdirSync(path.dirname(scriptPath), { recursive: true });
     writeFileSync(scriptPath, `export default (dsl) => dsl.outputDir();\n`, "utf8");
 
@@ -437,7 +640,7 @@ describe("stable workflow output paths", () => {
     });
 
     expect(result.ok, result.error).toBe(true);
-    expect(result.workspaceDirRelative).toBe(`.locus-pi/plans/${result.runId}-post-code-review`);
+    expect(result.workspaceDirRelative).toBe(`.locus-pi/workspaces/${result.runId}-post-code-review`);
     expect(existsSync(path.join(root, result.workspaceDirRelative!))).toBe(true);
   });
 
@@ -601,7 +804,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
   it("binds an absolute owner path to owner metadata and semantic input on resume", async () => {
     const root = project();
     writeWorkflow(root, "post-code-review", `export default (dsl) => dsl.outputDir();\n`);
-    const scriptPath = path.join(root, ".pi", "workflows", "post-code-review.workflow.mjs");
+    const scriptPath = path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs");
     const outputDir = "tmp/post-code-review/absolute-owner";
     const firstHarness = createHarness(root);
     const first = await runWorkflowScript({
@@ -757,9 +960,9 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
       name: "default-space",
     });
     expect(first.ok, first.error).toBe(true);
-    expect(first.workspacePhysicalIdentity).toBe(`.locus-pi/plans/${first.runId}-default-space`);
+    expect(first.workspacePhysicalIdentity).toBe(`.locus-pi/workspaces/${first.runId}-default-space`);
     expect(readWorkflowRunResult(root, first.runId)).toMatchObject({
-      workspacePhysicalIdentity: `.locus-pi/plans/${first.runId}-default-space`,
+      workspacePhysicalIdentity: `.locus-pi/workspaces/${first.runId}-default-space`,
     });
 
     const raw = JSON.parse(readFileSync(workflowResultFile(first.runDir), "utf8")) as Record<string, unknown>;
@@ -859,8 +1062,8 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
     });
 
     expect(result.ok, result.error).toBe(true);
-    expect(result.workspaceDirRelative).toBe(`.locus-pi/plans/${result.runId}-default-output`);
-    expect(result.workspaceDir).toBe(path.join(root, ".locus-pi", "plans", `${result.runId}-default-output`));
+    expect(result.workspaceDirRelative).toBe(`.locus-pi/workspaces/${result.runId}-default-output`);
+    expect(result.workspaceDir).toBe(path.join(root, ".locus-pi", "workspaces", `${result.runId}-default-output`));
   });
 
   it("derives distinct safe default namespaces for legacy names beginning with underscore or hyphen", async () => {
@@ -882,7 +1085,7 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
 
     for (const result of results) {
       expect(result.ok, result.error).toBe(true);
-      expect(result.workspaceDirRelative).toMatch(/^\.locus-pi\/plans\/[A-Za-z0-9][A-Za-z0-9._-]*$/u);
+      expect(result.workspaceDirRelative).toMatch(/^\.locus-pi\/workspaces\/[A-Za-z0-9][A-Za-z0-9._-]*$/u);
     }
     const namespaces = results.map((result) => result.workspaceDirRelative!);
     expect(new Set(namespaces).size).toBe(names.length);
@@ -1261,6 +1464,14 @@ export default (dsl, input) => dsl.agent(input);
       kind: "ready",
       target: { kind: "name", ref: "composed/worker", source: "project" },
     });
+    const childArtifacts = readWorkflowArtifactIndex(root, childRunId);
+    if (childArtifacts.status !== "ready") throw new Error(childArtifacts.message);
+    const answerRef = childArtifacts.index.artifacts.find((artifact) => artifact.kind === "answer");
+    if (answerRef === undefined) throw new Error("composed child answer was not persisted");
+    expect(readWorkflowArtifactRecord(root, childRunId, answerRef.artifactId)).toMatchObject({
+      status: "ready",
+      bytes: Buffer.from("done"),
+    });
 
     const direct = await runWorkflowScript({
       pi: harness.pi,
@@ -1271,7 +1482,7 @@ export default (dsl, input) => dsl.agent(input);
       createExecutor: executor(() => "direct done"),
     });
     expect(direct.ok, direct.error).toBe(true);
-    expect(direct.workspaceDirRelative).toBe(`.locus-pi/plans/${direct.runId}-composed-worker`);
+    expect(direct.workspaceDirRelative).toBe(`.locus-pi/workspaces/${direct.runId}-composed-worker`);
     expect(readWorkflowRunSummary(root, direct.runId!).status).toBe("completed");
     expect(readWorkflowRunScriptSnapshot(root, direct.runId!)).toMatchObject({
       kind: "ready",
@@ -1328,6 +1539,8 @@ export default (dsl) => dsl.outputDir();
       name: "alpha",
     });
     expect(first.ok, first.error).toBe(true);
+    const originalReadme = readFileSync(path.join(first.runDir, "README.md"), "utf8");
+    const originalBacklink = readFileSync(path.join(first.workspaceDir!, ".workflow-runs.md"), "utf8");
 
     let calls = 0;
     const resumed = await runWorkflowScript({
@@ -1344,6 +1557,10 @@ export default (dsl) => dsl.outputDir();
 
     expect(resumed.ok).toBe(false);
     expect(resumed.error).toContain("outputDir must equal the source workspace");
+    expect(resumed.runDir).toBe(path.join(first.runDir, "attempts", resumed.runId));
+    expect(resumed.resultPersistence.ok).toBe(true);
+    expect(readFileSync(path.join(first.runDir, "README.md"), "utf8")).toBe(originalReadme);
+    expect(readFileSync(path.join(first.workspaceDir!, ".workflow-runs.md"), "utf8")).toBe(originalBacklink);
     expect(calls).toBe(0);
     expect(existsSync(path.join(root, "tmp", "beta"))).toBe(false);
   });
@@ -1662,6 +1879,19 @@ export default (dsl) => dsl.outputDir();
       outputDir,
     });
     expect(first.ok, first.error).toBe(true);
+
+    const originalResolve = workflowRunLayout.resolveWorkflowRunDir;
+    const duplicateGroup = path.join(root, ".locus-pi", "runs", "duplicate-binding-group");
+    const resolve = vi.spyOn(workflowRunLayout, "resolveWorkflowRunDir").mockImplementation((projectRoot, runId) => {
+      const resolved = originalResolve(projectRoot, runId);
+      mkdirSync(path.join(duplicateGroup, "children", runId), { recursive: true });
+      return resolved;
+    });
+    const resolvedRunDir = workflowRunLayout.resolveWorkflowRunDir(root, first.runId);
+    expect(readWorkflowLaunchBinding(root, first.runId, resolvedRunDir)).not.toBeNull();
+    expect(resolve).toHaveBeenCalledTimes(1);
+    resolve.mockRestore();
+    rmSync(duplicateGroup, { recursive: true, force: true });
 
     const readSpy = vi.spyOn(workflowJournal, "readWorkflowRunResult");
     try {
@@ -2052,7 +2282,7 @@ export default (dsl) => dsl.outputDir();
       writeFileSync(path.join(root, "outputs", "retry", `${key}.md`), `${prompt}\n`, "utf8");
       return "written";
     });
-    const run = () =>
+    const run = (resumeFromRunId?: string) =>
       runWorkflowScript({
         pi: harness.pi,
         ctx: harness.ctx,
@@ -2061,6 +2291,7 @@ export default (dsl) => dsl.outputDir();
         input: "payload",
         items: ["alpha", "beta"],
         outputDir: "outputs/retry",
+        ...(resumeFromRunId === undefined ? {} : { resumeFromRunId }),
         createExecutor,
       });
 
@@ -2070,13 +2301,26 @@ export default (dsl) => dsl.outputDir();
 
     calls.length = 0;
     failBeta = false;
-    const resumed = await run();
+    const resumed = await run(interrupted.runId);
     expect(resumed.ok, resumed.error).toBe(true);
     expect(calls).toEqual(["write:payload:beta"]);
     expect(resumed.childRuns).toEqual([
       expect.objectContaining({ status: "skipped", key: "alpha" }),
       expect.objectContaining({ status: "completed", key: "beta" }),
     ]);
+    expect(resumed.storageRootRunId).toBe(interrupted.runId);
+    expect(resumed.runDir).toBe(path.join(interrupted.runDir, "attempts", resumed.runId));
+    expect(resumed.lineage).toEqual({ rootRunId: resumed.runId, depth: 0 });
+    const retriedChild = resumed.childRuns![1]!;
+    expect(retriedChild.runDir).toBe(path.join(interrupted.runDir, "children", retriedChild.runId!));
+    const childEnvelope = JSON.parse(readFileSync(workflowResultFile(retriedChild.runDir!), "utf8"));
+    expect(childEnvelope.storageRootRunId).toBe(interrupted.runId);
+    expect(childEnvelope.lineage.rootRunId).toBe(resumed.runId);
+    expect(readWorkflowRunScriptSnapshot(root, retriedChild.runId!)).toMatchObject({ kind: "ready" });
+    const resumedAgain = await run(resumed.runId);
+    expect(resumedAgain.ok, resumedAgain.error).toBe(true);
+    expect(resumedAgain.runDir).toBe(path.join(interrupted.runDir, "attempts", resumedAgain.runId));
+    expect(resumedAgain.childRuns!.every((child) => child.status === "skipped")).toBe(true);
 
     calls.length = 0;
     writeWorkflow(root, "child", `${CHILD}\n// changed source identity\n`);
@@ -2546,6 +2790,65 @@ export default (dsl) => dsl.outputDir();
 });
 
 describe("fenced output leases and atomic checkpoints", () => {
+  it("writes navigation only for the active root owner and preserves user backlink conflicts", async () => {
+    const root = project();
+    const output = resolveWorkflowOutputDirectory(root, "outputs/links", "links", root);
+    const groupDir = ensureWorkflowRunDir(root, "root-one");
+    const lease = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "root-one" });
+    const input = {
+      projectRoot: root,
+      runId: "root-one",
+      storageRootRunId: "root-one",
+      workspaceDir: output.absolutePath,
+      workflow: "links",
+    };
+    writeWorkflowRunGroupReport(input, lease);
+    const readme = readFileSync(path.join(groupDir, "README.md"), "utf8");
+    const backlinkFile = path.join(output.absolutePath, ".workflow-runs.md");
+    const backlink = readFileSync(backlinkFile, "utf8");
+    writeFileSync(path.join(groupDir, "README.md"), "<!-- locus-pi:workflow-run-group:v1 -->\npartial");
+    writeWorkflowRunGroupReport(input, lease);
+    expect(readFileSync(path.join(groupDir, "README.md"), "utf8")).toBe(readme);
+    writeFileSync(backlinkFile, "<!-- locus-pi:workflow-workspace-runs:v1 -->\npartial");
+    expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow(
+      expect.objectContaining({ code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED" }),
+    );
+    expect(readFileSync(backlinkFile, "utf8")).toBe("<!-- locus-pi:workflow-workspace-runs:v1 -->\npartial");
+    writeFileSync(backlinkFile, backlink);
+    writeFileSync(backlinkFile, backlink.replace("[Группа root-one]", "[Группа root-two]"));
+    expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow(
+      expect.objectContaining({ code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED" }),
+    );
+    writeFileSync(backlinkFile, backlink);
+    expect(readdirSync(groupDir).some((name) => name.includes(".tmp-"))).toBe(false);
+    expect(readdirSync(output.absolutePath).some((name) => name.includes(".tmp-"))).toBe(false);
+    expect(() => writeWorkflowRunGroupReport({ ...input, runId: "child" }, lease)).toThrow(
+      /Only the root lease owner/u,
+    );
+    releaseWorkflowRootLease(lease);
+    expect(() => writeWorkflowRunGroupReport(input, lease)).toThrow();
+    expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow();
+    expect(readFileSync(path.join(groupDir, "README.md"), "utf8")).toBe(readme);
+    expect(readFileSync(backlinkFile, "utf8")).toBe(backlink);
+
+    writeWorkflow(root, "links", 'export default () => "must not execute";');
+    const reserved = path.join(output.absolutePath, ".workflow-runs.md");
+    writeFileSync(reserved, "user document\n");
+    const harness = createHarness(root);
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "links",
+      outputDir: output.relativePath,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Reserved workflow workspace file/u);
+    expect(result.resultPersistence.ok).toBe(true);
+    expect(readFileSync(reserved, "utf8")).toBe("user document\n");
+    expect(existsSync(path.join(output.absolutePath, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(false);
+  });
+
   it("retries the live lock-create-to-write acquisition window", async () => {
     const root = project();
     const output = resolveWorkflowOutputDirectory(root, "outputs/racing-owner", "unused", root);

@@ -8,7 +8,8 @@
  */
 
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
-import { type CycleMode, listPlanSlugs, MODE_CYCLE, userPlansDir } from "../mode/mode-state.js";
+import { type CycleMode, MODE_CYCLE } from "../mode/mode-state.js";
+import { listPlanSlugs, planLibraryDir } from "../mode/plan-storage.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import type { PlanExitAction } from "../mode/plan-exit-handoff.js";
 
@@ -33,9 +34,20 @@ export function dialogFailureBlock(subject: string, reopenCommand: string, error
   };
 }
 
+export function savedPlansPreparationErrorBlock(error: unknown): OperatorBlock {
+  return {
+    type: "ERROR",
+    subject: "Saved plans",
+    primary: "The saved-plan library could not be prepared; no active plan was changed.",
+    metadata: [`reason: ${errorMessage(error)}`],
+    hint: ["The legacy library was not changed. Repair the reported conflict or unsafe entry, then retry."],
+    controls: ["Retry: /plan list"],
+  };
+}
+
 export function planListBlock(projectRoot: string): OperatorBlock {
   const slugs = listPlanSlugs(projectRoot);
-  const plansDir = userPlansDir(projectRoot);
+  const plansDir = planLibraryDir(projectRoot);
   return {
     type: "VIEW",
     subject: "Saved plans",
@@ -68,6 +80,7 @@ export function planHelpBlock(projectRoot: string): OperatorBlock {
 }
 
 export function planExitBlock(action: PlanExitAction): OperatorBlock {
+  if (typeof action === "object") return savedPlansPreparationErrorBlock(action.reason);
   switch (action) {
     case "kept":
       return {

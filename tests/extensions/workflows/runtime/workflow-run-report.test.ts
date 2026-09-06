@@ -17,17 +17,15 @@ import type { WorkflowArtifactRecord } from "../../../../extensions/workflows/ru
 import { DEFAULT_WORKFLOW_BUDGET } from "../../../../extensions/workflows/runtime/workflow-budget.js";
 import {
   workflowReportDir,
-  writeWorkflowRunReport,
+  writeWorkflowRunReport as writeClaimedWorkflowRunReport,
   type WorkflowRunReportEvidenceSource,
   type WorkflowRunReportInput,
 } from "../../../../extensions/workflows/runtime/workflow-run-report.js";
-import {
-  readWorkflowRunJournalState,
-  workflowRunDir,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunJournalState } from "../../../../extensions/workflows/runtime/workflow-journal.js";
 import {
   ensureWorkflowRunDir,
   workflowJournalFile,
+  workflowRunDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   workflowResultFile,
@@ -53,6 +51,23 @@ function project(): string {
 }
 
 const RUN_ID = "20260728-190000-abcd";
+
+type TestWorkflowRunReportInput = Omit<WorkflowRunReportInput, "runDir"> & { runDir?: string };
+
+function writeWorkflowRunReport(
+  input: TestWorkflowRunReportInput,
+  evidence: WorkflowRunReportEvidenceSource,
+): ReturnType<typeof writeClaimedWorkflowRunReport> {
+  let runDir = input.runDir;
+  if (runDir === undefined) {
+    try {
+      runDir = ensureWorkflowRunDir(input.projectRoot, input.runId);
+    } catch {
+      runDir = input.projectRoot;
+    }
+  }
+  return writeClaimedWorkflowRunReport({ ...input, runDir }, evidence);
+}
 
 function record(
   overrides: Partial<WorkflowArtifactRecord> & Pick<WorkflowArtifactRecord, "artifactId" | "name" | "kind">,
@@ -100,6 +115,17 @@ function evidenceFrom(
 }
 
 describe("workflow run report", () => {
+  it("refuses an unclaimed directory without creating a flat run", () => {
+    const root = project();
+    const runDir = path.join(root, ".locus-pi", "runs", RUN_ID);
+    const outcome = writeClaimedWorkflowRunReport(
+      { projectRoot: root, runId: RUN_ID, runDir, status: "failed", journal: [] },
+      evidenceFrom([], {}),
+    );
+    assert.equal(outcome.ok, false);
+    assert.equal(existsSync(runDir), false);
+  });
+
   it("projects each artifact name as ONE document holding its newest revision, with the chain in the README", () => {
     const root = project();
     ensureWorkflowRunDir(root, RUN_ID);
@@ -519,9 +545,9 @@ describe("workflow run report", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "report.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "report.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  dsl.publishArtifact("task.md", "the operator task");',
@@ -583,9 +609,9 @@ describe("workflow run report", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "retried.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "retried.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  return await dsl.agent("answer", {',
@@ -676,9 +702,9 @@ describe("workflow run report", () => {
       path.join(root, ".agents", "agents", "default.md"),
       "---\nname: default\ndescription: test\nevidence:\n  mode: none\n---\nTest.\n",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "threw.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "threw.workflow.mjs"),
       [
         "export default async function runWorkflow(dsl) {",
         '  return await dsl.agent("answer", {',
@@ -778,11 +804,15 @@ describe("workflow run report", () => {
   });
 
   it("keeps two interleaved calls apart when agent, label, phase and group all agree", () => {
-    // `parallel()` can run two calls that agree on every descriptive field, and their
-    // attempts then interleave in the journal. Grouping by those fields would put three of
-    // these four attempts in one group and leave the other looking like it never retried —
-    // a section that reads as evidence while attributing one stage's second bill to another.
-    // Only the runtime's own logical-call identity separates them.
+    // Two calls can agree on every descriptive field — a loop's second round, or two
+    // sequential calls on one slot — and once they overlap in the journal their attempts
+    // interleave. (Two CONCURRENT branches holding one slot no longer reach this shape:
+    // the runtime's slot guard refuses the second. The report still has to read journals
+    // written before that guard, and the sequential case stands either way.) Grouping by
+    // those fields would put three of these four attempts in one group and leave the other
+    // looking like it never retried — a section that reads as evidence while attributing
+    // one stage's second bill to another. Only the runtime's own logical-call identity
+    // separates them.
     const root = project();
     const shared = { runId: RUN_ID, kind: "agent_end" as const, agent: "default", label: "advise", phase: "advise" };
     const outcome = writeWorkflowRunReport(
@@ -862,9 +892,12 @@ describe("workflow run report", () => {
  */
 describe("workflow run report budget section", () => {
   function budgetInput(overrides: Partial<WorkflowRunReportInput> = {}): WorkflowRunReportInput {
+    const projectRoot = overrides.projectRoot ?? project();
+    const runId = overrides.runId ?? RUN_ID;
     return {
-      projectRoot: project(),
-      runId: RUN_ID,
+      projectRoot,
+      runId,
+      runDir: overrides.runDir ?? ensureWorkflowRunDir(projectRoot, runId),
       status: "completed",
       journal: [],
       budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 0 },
@@ -1255,9 +1288,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "unbounded.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "unbounded.workflow.mjs"),
       'export const meta = { name: "unbounded", description: "declares no limit of any kind" };\n' +
         "export default async function runWorkflow(dsl) {\n" +
         '  return await dsl.agent("answer");\n' +
@@ -1304,9 +1337,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "report-fail.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "report-fail.workflow.mjs"),
       'export const meta = { name: "report-fail", description: "one stage" };\n' +
         "export default async function runWorkflow(dsl) {\n" +
         '  return await dsl.agent("answer");\n' +
@@ -1359,18 +1392,76 @@ describe("workflow run report budget section", () => {
     const persisted = readFileSync(workflowJournalFile(result.runDir), "utf8");
     assert.match(persisted, /Workflow run report was not written/u);
     assert.match(persisted, /Workflow terminal output was not persisted/u);
-    // And so does result.json, which is the point of writing the report BEFORE it.
-    // journal.ndjson alone would not carry the guarantee — its sink swallows its own
-    // write failures so it can never throw into a running workflow — whereas
-    // result.json reports its own persistence outcome, so losing the line everywhere
-    // takes a second, separately reported, failure.
+    // result.json keeps only the bounded independent finalization projection.
+    // The complete chronological journal has one owner: journal.ndjson.
     assert.equal(result.resultPersistence.ok, true);
     const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
-      journal?: { message?: string }[];
+      journal?: unknown;
+      finalizationErrors?: Array<{ stage?: string; message?: string }>;
     };
-    assert.ok(
-      (envelope.journal ?? []).some((line) => (line.message ?? "").includes("Workflow run report was not written")),
-      "result.json must carry the failure line independently of the best-effort journal sink",
+    assert.equal(envelope.journal, undefined);
+    assert.deepEqual(
+      envelope.finalizationErrors?.map((entry) => entry.stage),
+      ["terminal-output", "report"],
+    );
+    assert.match(envelope.finalizationErrors?.[1]?.message ?? "", /Workflow run report was not written/u);
+  });
+
+  it("persists finalization errors when the best-effort journal append also fails", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "workflow-finalization-fallback-"));
+    roots.push(root);
+    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".agents", "agents", "default.md"),
+      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
+      "utf8",
+    );
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
+    writeFileSync(
+      path.join(root, ".locus-pi", "workflows", "finalization-fallback.workflow.mjs"),
+      'export default async function runWorkflow(dsl) { return await dsl.agent("answer"); }\n',
+      "utf8",
+    );
+    const harness = createHarness(root, { sessionId: "finalization-fallback" });
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "finalization-fallback",
+      onRunStart: ({ runDir }) => {
+        rmSync(path.join(runDir, "outputs"), { recursive: true });
+        writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
+        const journalPath = workflowJournalFile(runDir);
+        rmSync(journalPath);
+        mkdirSync(journalPath);
+      },
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          return {
+            status: "completed",
+            agentName: request.agent?.name ?? "sub-agent",
+            reason: "answered",
+            text: "answer",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(
+      result.finalizationErrors?.map((entry) => entry.stage),
+      ["terminal-output", "report"],
+    );
+    const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
+      journal?: unknown;
+      finalizationErrors?: Array<{ stage: string; message: string }>;
+    };
+    assert.equal(envelope.journal, undefined);
+    assert.deepEqual(
+      envelope.finalizationErrors?.map((entry) => entry.stage),
+      ["terminal-output", "report"],
     );
   });
 
@@ -1383,9 +1474,9 @@ describe("workflow run report budget section", () => {
       "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
       "utf8",
     );
-    mkdirSync(path.join(root, ".pi", "workflows"), { recursive: true });
+    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
     writeFileSync(
-      path.join(root, ".pi", "workflows", "result-fail.workflow.mjs"),
+      path.join(root, ".locus-pi", "workflows", "result-fail.workflow.mjs"),
       'export default async function runWorkflow() { return "answer"; }\n',
       "utf8",
     );

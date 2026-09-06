@@ -1,9 +1,9 @@
 /**
- * Host-owned launch binding for owner-specific resume and handoff admission.
+ * Host-owned launch binding for resume, interrupted recovery and handoff admission.
  *
  * `runtime/result.json` is a mutable presentation envelope. This sidecar is
  * written atomically from validated runtime values and is the authority for
- * post-code-review source/workspace/input identity.
+ * source/workspace/input identity. New root runs also carry an exact recovery-input fingerprint.
  */
 
 import path from "node:path";
@@ -12,7 +12,7 @@ import {
   assertWorkflowRunId,
   readWorkflowRunFile,
   renameWorkflowRunFile,
-  workflowRunDir,
+  resolveWorkflowRunDir,
   workflowRunRuntimeFile,
   workflowRunFileExists,
   writeWorkflowRunFile,
@@ -29,6 +29,8 @@ const WORKFLOW_LAUNCH_BINDING_TEMP_FILENAME = "launch-binding.json.tmp";
 export interface WorkflowLaunchBinding {
   schema: typeof WORKFLOW_LAUNCH_BINDING_SCHEMA;
   runId: string;
+  /** New root launches bind exact recovery inputs; old bindings remain readable, not crash-resumable. */
+  recoveryInputSha256?: string;
   target: {
     kind: "name" | "scriptPath";
     ref: string;
@@ -53,9 +55,9 @@ export function workflowLaunchBindingFile(runDir: string): string {
   return workflowRunRuntimeFile(runDir, WORKFLOW_LAUNCH_BINDING_FILENAME);
 }
 
-export function workflowLaunchBindingExists(projectRoot: string, runId: string): boolean {
+export function workflowLaunchBindingExists(projectRoot: string, runId: string, resolvedRunDir?: string): boolean {
   const safeRunId = assertWorkflowRunId(runId);
-  const runDir = workflowRunDir(projectRoot, safeRunId);
+  const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, safeRunId);
   return workflowRunFileExists(runDir, workflowLaunchBindingFile(runDir));
 }
 
@@ -73,12 +75,16 @@ export function writeWorkflowLaunchBinding(runDir: string, binding: WorkflowLaun
 }
 
 /** Best-effort read; malformed or missing bindings are unusable authority. */
-export function readWorkflowLaunchBinding(projectRoot: string, runId: string): WorkflowLaunchBinding | null {
+export function readWorkflowLaunchBinding(
+  projectRoot: string,
+  runId: string,
+  resolvedRunDir?: string,
+): WorkflowLaunchBinding | null {
   try {
     const safeRunId = assertWorkflowRunId(runId);
-    const runDir = workflowRunDir(projectRoot, safeRunId);
+    const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, safeRunId);
     const record: unknown = JSON.parse(readWorkflowRunFile(runDir, workflowLaunchBindingFile(runDir)).toString("utf8"));
-    return parseWorkflowLaunchBinding(record, safeRunId, projectRoot);
+    return parseWorkflowLaunchBinding(record, safeRunId, projectRoot, runDir);
   } catch {
     return null;
   }
@@ -103,10 +109,23 @@ export function workflowLaunchBindingMatchesResult(
   );
 }
 
-function parseWorkflowLaunchBinding(value: unknown, runId: string, projectRoot: string): WorkflowLaunchBinding {
+function parseWorkflowLaunchBinding(
+  value: unknown,
+  runId: string,
+  projectRoot: string,
+  runDir: string,
+): WorkflowLaunchBinding {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["schema", "runId", "target", "scriptIdentity", "workspace", "semanticInput"]) ||
+    !hasOnlyKeys(value, [
+      "schema",
+      "runId",
+      "target",
+      "scriptIdentity",
+      "workspace",
+      "semanticInput",
+      "recoveryInputSha256",
+    ]) ||
     value.schema !== WORKFLOW_LAUNCH_BINDING_SCHEMA ||
     value.runId !== runId
   ) {
@@ -119,7 +138,7 @@ function parseWorkflowLaunchBinding(value: unknown, runId: string, projectRoot: 
     { target: value.target, scriptIdentity: value.scriptIdentity },
     projectRoot,
     runId,
-    { verifySnapshot: true },
+    { verifySnapshot: true, runDir },
   );
   if (parsed.targetInvalid !== undefined || parsed.target === undefined) {
     throw new Error("workflow launch binding target is invalid");
@@ -137,8 +156,14 @@ function parseWorkflowLaunchBinding(value: unknown, runId: string, projectRoot: 
   if (!isSemanticInput(value.semanticInput)) {
     throw new Error("workflow launch binding semantic identity is invalid");
   }
+  if (
+    value.recoveryInputSha256 !== undefined &&
+    (typeof value.recoveryInputSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(value.recoveryInputSha256))
+  )
+    throw new Error("workflow recovery input identity is invalid");
   return {
     schema: WORKFLOW_LAUNCH_BINDING_SCHEMA,
+    ...(value.recoveryInputSha256 === undefined ? {} : { recoveryInputSha256: value.recoveryInputSha256 as string }),
     runId,
     target: parsed.target,
     scriptIdentity: parsed.scriptIdentity as WorkflowScriptIdentity,

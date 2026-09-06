@@ -7,7 +7,7 @@ import { roleSummaries } from "../../../extensions/model/model-role-selector.js"
 import { modelRoleStatusContribution } from "../../../extensions/model/operator-surface.js";
 import {
   buildModelRolesState,
-  getModelRolesConfigPaths,
+  getModelRolesConfigPath,
   loadModelRolesState,
 } from "../../../extensions/_shared/model/model-settings.js";
 import { createHarness, emit, type Harness } from "../../test-harness.js";
@@ -62,8 +62,10 @@ describe("model command surfaces", () => {
   });
 
   it("reports current model, effort, DEFAULT route and other routes in the read-only fallback", async () => {
-    const paths = getModelRolesConfigPaths(harness.ctx.session!.projectRoot);
-    await writeJson(paths.project, { version: 1, roles: { default: "test/fast:high", agent: "test/strong:low" } });
+    await writeJson(getModelRolesConfigPath(), {
+      version: 1,
+      roles: { default: "test/fast:high", agent: "test/strong:low" },
+    });
     harness.ctx.model = REASONING_MODELS[0]!;
     harness.pi.setThinkingLevel?.("high");
     delete harness.ctx.ui.custom;
@@ -75,7 +77,7 @@ describe("model command surfaces", () => {
     expect(widget).toContain("Current session effort: high");
     expect(widget).toContain("DEFAULT route: test/fast:high");
     expect(widget).toContain("Other routes: AGENT=test/strong:low");
-    expect(widget).toContain("storage: .pi/model-roles/config.json");
+    expect(widget).toContain("storage: ~/.pi/agent/model-roles/config.json");
   });
 
   it("names an unset model, unknown effort and unset routes when the host exposes neither", async () => {
@@ -97,7 +99,7 @@ describe("model command surfaces", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toBeUndefined();
     expect(joinFrames(harness)).toContain("[ERROR] Pi host did not expose current model switching for /model-roles.");
   });
@@ -110,7 +112,7 @@ describe("model command surfaces", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toBeUndefined();
     expect(joinFrames(harness)).toContain("[ERROR] host exploded");
   });
@@ -123,7 +125,7 @@ describe("model command surfaces", () => {
 
     await harness.commands.get("model-roles")!.handler("", harness.ctx);
 
-    const state = await loadModelRolesState(harness.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toEqual({ model: "test/fast", thinking: "high" });
     // The receipt wraps inside the selector frame, so it is pinned in the two
     // pieces the operator actually reads.
@@ -141,9 +143,38 @@ describe("model command surfaces", () => {
 
     await plain.commands.get("model-roles")!.handler("", plain.ctx);
 
-    const state = await loadModelRolesState(plain.ctx);
+    const state = await loadModelRolesState();
     expect(state.effective.get("default")?.assignment).toEqual({ model: "test/plain", thinking: "off" });
     expect(plain.thinkingLevel).toBe("off");
+  });
+
+  it("moves one strong focus from model to role to effort", async () => {
+    const customTheme = {
+      fg(_color: string, text: string) {
+        return text;
+      },
+      bold(text: string) {
+        return text;
+      },
+    };
+    harness = createHarness(join(root, "project"), { models: REASONING_MODELS, customTheme });
+    harness.ctx.model = REASONING_MODELS[0]!;
+    model(harness.pi);
+    harness.customInputQueue.push(ENTER, ENTER, "q");
+
+    await harness.commands.get("model-roles")!.handler("", harness.ctx);
+
+    const frames = harness.customRenderFrames.map((lines) => lines.join("\n"));
+    const models = frames.find((frame) => frame.includes("[models]")) ?? "";
+    const roles = frames.find((frame) => frame.includes("[roles]")) ?? "";
+    const effort = frames.find((frame) => frame.includes("[effort]")) ?? "";
+    const fill = "\x1b[48;2;88;61;121m";
+    expect(models.split(fill)).toHaveLength(3); // provider + model
+    expect(roles.split(fill)).toHaveLength(3); // provider + role
+    expect(roles).toContain(`[DEFAULT] ${fill}\x1b[38;2;248;241;255mSet as DEFAULT\x1b[0m`);
+    expect(roles).not.toContain(`${fill}\x1b[38;2;248;241;255m> [CURRENT]`);
+    expect(effort.split(fill)).toHaveLength(2); // effort only
+    expect(effort).toContain(`${fill}\x1b[38;2;248;241;255moff\x1b[0m`);
   });
 
   it("names mode, current level and supported levels when the effort selector cannot open", async () => {
@@ -164,19 +195,15 @@ describe("model command surfaces", () => {
   it("clears the routes status contribution while every role is unassigned", async () => {
     await emit(harness, "session_start");
 
-    expect(modelRoleStatusContribution(roleSummaries(await loadModelRolesState(harness.ctx)))).toBeUndefined();
+    expect(modelRoleStatusContribution(roleSummaries(await loadModelRolesState()))).toBeUndefined();
     expect(harness.statuses.has("locus")).toBe(false);
     expect(harness.statuses.has("model-roles")).toBe(false);
   });
 
   it("abbreviates roles and counts the overflow in the routes contribution", () => {
-    const state = buildModelRolesState(
-      { project: "/project/config.json", user: "/user/config.json" },
-      {},
-      {},
-      {},
-      { roles: { default: "openai/gpt-5.6:high", agent: "deepseek/v4:low", task: "openrouter/long-model-name" } },
-    );
+    const state = buildModelRolesState("/user/config.json", {
+      roles: { default: "openai/gpt-5.6:high", agent: "deepseek/v4:low", task: "openrouter/long-model-name" },
+    });
 
     const contribution = modelRoleStatusContribution(roleSummaries(state));
 
