@@ -7,6 +7,12 @@ description: Create or revise an orchestration-only locus-pi `.workflow.mjs` age
 
 This skill owns authoring only. Do not use merely to run an existing workflow; use the `locus-pi-workflow-run` skill for launch, stopped-run recovery and monitoring. Build does not run. No package-provided catalog agent is required.
 
+## Product goal and repair requests
+
+Build useful graphs of LLM agents. Do not optimize for deterministic re-execution of the whole JavaScript program. A deliberate graph may contain hundreds or thousands of small calls; count alone is not a defect and is not a reason to redesign it or invent a smaller cap. Do not assign model, effort or budget choices the user did not request.
+
+When the request is to fix a stopped workflow, read [Repair + Continue](references/repair-and-continue.md) first. Repair the same source and preserve the unaffected completed prefix, including literal labels, prompts, order and workspace assumptions. Do not rebuild the graph from scratch merely because execution stopped. Validate the exact repaired source, then hand the result to the run skill; authoring still does not launch it.
+
 ## Select the graph before loading details
 
 Read [the pattern index](references/INDEX.md), then only the selected card. Default to a fixed graph; choose adaptation when the requirement needs evidence-gated additional work. Claude Code is not a control plane or a required dependency.
@@ -35,3 +41,5 @@ Run `workflow_check_source` with `mode: "orchestration-only"` on every exact bui
 ## Trust and further references
 
 Reviewed JavaScript runs in the Pi host process; approval and worktrees are not a sandbox. Runtime/API authority is [REFERENCE.md](../../extensions/workflows/REFERENCE.md). Follow only the section needed by the selected graph. Do not load the entire runtime manual just to author a fixed chain.
+
+Read [large agent runs](references/large-agent-runs.md) for substantial fan-out. Existing monitoring and explicit operator stop are the control; do not inject a call-count cap, token floor or automatic budget change.

@@ -565,13 +565,17 @@ human-readable description and never replaces stable identity.
 
 ### Output acceptance is not semantic continuation
 
-Standard authoring may opt into `agent({ choice, returnVia: "tool" })` or the
-closed string `output` contract described in [output acceptance](references/output-acceptance.md).
+Standard authoring may opt into `agent({ choice, returnVia: "tool" })`, the
+closed string `output` contract, or `agent({ handoffs, returnVia: "tool" })`
+described in [output acceptance](references/output-acceptance.md).
 The workflow-only `workflow_return` tool validates a proposed value within the
-same child session; it does not certify the truth of a decision. Ordinary text,
+same child session; it does not certify the truth of a decision, nor the facts
+inside a shaped record. Ordinary text,
 legacy text-choice repair and adaptive fresh-worker rounds retain separate
 contracts. The standard source grammar still does not parse model prose or
-permit raw `schema`/`validate`. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
+permit raw `schema`/`validate`; `schema` with `returnVia: "tool"` is available
+to reviewed compatibility scripts only, because the strict checker refuses raw
+`schema` regardless of transport. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
 before selecting fixed, refinement, decomposition or human-gated execution.
 
 The owner contract separately forbids mandatory acknowledgement protocols whose

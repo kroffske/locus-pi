@@ -13,6 +13,21 @@ Workflow JavaScript is trusted code with full Node.js access in the Pi host. It
 is not sandboxed. Project approval is a broad Pi trust decision, not approval of
 one workflow file.
 
+## Preserve completed work before starting over
+
+For a stopped workflow the normal recovery goal is to avoid dispatching matching
+completed agent calls again after the source is repaired. A recorded answer is
+reused, not reproduced by asking a nondeterministic model a second time. Source
+edits are expected on this path. Read the procedure below and the authoring
+[repair card](../locus-pi-workflow-create/references/repair-and-continue.md);
+do not silently substitute a fully fresh run for a requested continuation.
+
+The mechanism reuses a matching prefix, not arbitrary completed nodes anywhere
+in the graph. The first fresh call makes the whole suffix fresh, and the fusion
+exception is named below. Reusing answers restores no files and repeats no
+external effect. A hard process interruption is a different, explicitly admitted
+recovery path.
+
 ## First action: choose by capability
 
 1. If the request supplies `items` or `continuation`, require a structured tool
@@ -206,7 +221,9 @@ from the new run's evidence afterwards.
   `--resume <runId>`). Editing the stopped workflow first is allowed and
   expected: repair is the point. The completed prefix is reused, the repaired
   node runs fresh, and so does the tail after it. Changed source bytes no longer
-  end a resume.
+  end a resume. Do not require whole-source equality for ordinary Repair +
+  Continue. Appending work may reuse the existing prefix; a changed earlier
+  prompt or option ends it sooner.
 - `refuse` — one of the cases below holds. Report it by name with the run id and
   the required operator action; do not launch a run that cannot honor the
   declared outcome.
@@ -232,7 +249,8 @@ What reuse costs and requires:
 
 A resume runs in the workspace of the source run. When that workspace was
 selected explicitly, repeat it with `outputDir` (operator surface:
-`--run-name <name>` for a stable `.locus-pi/plans/<name>` workspace). Omitting
+`--run-name <name>` for a stable `.locus-pi/workspaces/<name>` workspace; a
+legacy-only `.locus-pi/plans/<name>` stays bound in place). Omitting
 it or passing a different path fails closed instead of creating a new
 workspace silently.
 
@@ -260,7 +278,8 @@ describe are still there.
    answer through `/workflows continue <runId>`; it is not a recovery route and
    the answer must never be synthesized.
 6. The workspace or project tree changed since the source run, so replayed
-   answers would describe files that no longer exist.
+   answers would describe files that no longer exist. Repairing the workflow
+   source itself is not this refusal.
 7. Resume was requested without the source workspace, or with a different one.
 8. The stopped run was recorded before node names existed, or its calls carry no
    `label`, and the source must be repaired. Every call then misses with
@@ -303,3 +322,25 @@ The same structured tool accepts optional `budget` overrides forwarded to the
 single runtime budget owner and shown in approval details. Slash syntax above
 is unchanged. See [execution controls](../../extensions/workflows/references/execution-controls.md).
 Semantic extra rounds and same-session output corrections are not crash replay.
+
+## Large runs: observe and let the operator decide
+
+Hundreds of small agents can be the intended workload. Do not add a new
+total-agent limit, token-floor stop, estimated-cost gate or automatic graph
+reduction. Existing explicit operator settings and package fuses stay in force;
+this guidance removes none of them. Concurrency limits simultaneous work, not
+the total number of tasks.
+
+Use the existing `/ps`, `/workflows status <runId>` and explicit
+`/workflows stop <runId>` surfaces. Separate new physical attempts,
+queued/active/terminal calls and reused answers. Same-session format corrections
+are not fresh child sessions. Unknown endpoint usage stays unavailable; usage
+reported for only some calls is a partial subtotal, not a verified bill.
+
+Replayed answers still spend the run's `totalAgents` fuse: an attempt is charged
+whether its answer comes from the record or from a child. A continuation that
+would cross that fuse needs an explicit operator `budget` override on the
+structured tool; never raise it automatically, and never reinterpret
+interrupted-recovery binding checks as ordinary-resume rules. See
+[execution controls](../../extensions/workflows/references/execution-controls.md).
+Report actual reuse from the new result.
