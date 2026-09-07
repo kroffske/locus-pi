@@ -15,6 +15,7 @@ import {
 import {
   createWorkflowReturnController,
   normalizeWorkflowReturnContract,
+  type WorkflowReturnContract,
 } from "../../extensions/workflows/runtime/workflow-return.js";
 import { createWorkflowArtifactStore } from "../../extensions/workflows/runtime/workflow-artifacts.js";
 import {
@@ -53,6 +54,17 @@ const completed = (request: WorkflowAgentRequest, text: string): WorkflowAgentRe
   diagnostics: [],
   ...(request.executionMode === undefined ? {} : { executionMode: request.executionMode }),
 });
+/** One shaped answer reused by the tool-return contracts below. */
+const RESULT = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decision", "summary"],
+  properties: {
+    decision: { type: "string", enum: ["complete", "needs-work", "unknown"] },
+    summary: { type: "string", minLength: 1, maxLength: 4000 },
+  },
+};
+const RECORD = { decision: "complete", summary: "ok" };
 const cases: ContinuationContractCase[] = [];
 function test(name: string, run: () => Promise<void>): void {
   cases.push({ name, run });
@@ -271,6 +283,8 @@ test("new queue, title, item and decision events round-trip through the strict p
 // SDK execution is real production code; only the injected Pi session is simulated.
 interface SessionScenario {
   submissions: Array<Array<unknown>>;
+  /** Defaults to the single-line string contract; a shaped case supplies its own. */
+  contract?: WorkflowReturnContract;
   rejectPrompt?: number;
   providerFailure?: boolean;
   cancelAfterProposal?: boolean;
@@ -282,7 +296,8 @@ interface SessionScenario {
 async function runSession(scenario: SessionScenario) {
   return temporaryValue(async (root) => {
     const controller = createWorkflowReturnController(
-      normalizeWorkflowReturnContract({ output: { type: "string", singleLine: true }, repair: { maxAttempts: 3 } }),
+      scenario.contract ??
+        normalizeWorkflowReturnContract({ output: { type: "string", singleLine: true }, repair: { maxAttempts: 3 } }),
     );
     const abort = new AbortController();
     const prompts: string[] = [];
@@ -407,6 +422,84 @@ test("identical return proposal is idempotent; conflicting proposals never succe
   assert.equal(conflict.result.failureCause, "output-contract-conflict");
   assert.equal(conflict.result.outputAcceptance, undefined);
 });
+// The regexes below quote validator wording owned by workflow-schema.ts; a reword updates both.
+test("an off-shape record is corrected in the same session and the accepted value is canonical JSON", async () => {
+  const got = await runSession({
+    contract: normalizeWorkflowReturnContract({ schema: RESULT, repair: { maxAttempts: 2 } }),
+    submissions: [[{ decision: "complete" }], [RECORD]],
+  });
+  assert.equal(got.result.status, "completed");
+  assert.equal(got.result.text, '{"decision":"complete","summary":"ok"}');
+  assert.equal(got.created, 1);
+  assert.equal(got.prompts.length, 2);
+  assert.match(got.prompts[1]!, /summary/u);
+  assert.match(got.prompts[1]!, /Reuse your existing evidence/u);
+  assert.equal(got.result.outputAcceptance?.attempts, 2);
+  assert.ok(got.restrictions.every((names) => JSON.stringify(names) === '["workflow_return"]'));
+});
+test("a string containing JSON is a shape mismatch that is repaired, not parsed", async () => {
+  const got = await runSession({
+    contract: normalizeWorkflowReturnContract({ schema: RESULT, repair: { maxAttempts: 2 } }),
+    submissions: [[JSON.stringify(RECORD)], [RECORD]],
+  });
+  assert.equal(got.result.status, "completed");
+  assert.equal(got.result.outputAcceptance?.attempts, 2);
+  assert.match(got.prompts[1]!, /expected object, got string/u);
+});
+test("a shaped value over maxLength is corrected in the same session, not after the child ends", async () => {
+  const got = await runSession({
+    contract: normalizeWorkflowReturnContract({
+      schema: { type: "string", minLength: 1, maxLength: 200_000 },
+      repair: { maxAttempts: 2 },
+    }),
+    submissions: [["x".repeat(100_001)], ["short"]],
+  });
+  assert.equal(got.result.status, "completed");
+  assert.equal(got.created, 1);
+  assert.match(got.prompts[1]!, /exceeds 100000 characters/u);
+});
+test("exhausted schema repair fails the call without an unvalidated value", async () => {
+  const got = await runSession({
+    contract: normalizeWorkflowReturnContract({ schema: RESULT, repair: { maxAttempts: 2 } }),
+    submissions: [[{}], [{}]],
+  });
+  assert.equal(got.result.status, "failed");
+  assert.equal(got.result.failureCause, "output-contract-exhausted");
+  assert.equal(got.result.outputAcceptance, undefined);
+});
+test("identical record proposals are idempotent; a different record conflicts", async () => {
+  const duplicate = await runSession({
+    contract: normalizeWorkflowReturnContract({ schema: RESULT, repair: { maxAttempts: 2 } }),
+    submissions: [[RECORD, { ...RECORD }]],
+  });
+  assert.equal(duplicate.result.status, "completed");
+  assert.equal(duplicate.result.outputAcceptance?.attempts, 1);
+  const conflict = await runSession({
+    contract: normalizeWorkflowReturnContract({ schema: RESULT, repair: { maxAttempts: 2 } }),
+    submissions: [[RECORD, { ...RECORD, summary: "other" }]],
+  });
+  assert.equal(conflict.result.failureCause, "output-contract-conflict");
+  assert.equal(conflict.result.outputAcceptance, undefined);
+});
+test("handoffs through the tool use the same bounded unique array contract", async () => {
+  const contract = () =>
+    normalizeWorkflowReturnContract({
+      schema: {
+        type: "array",
+        items: { type: "string", minLength: 1, maxLength: 2000, nonBlank: true },
+        minItems: 1,
+        maxItems: 2,
+        uniqueTrimmedItems: true,
+      },
+      repair: { maxAttempts: 2 },
+    });
+  const repaired = await runSession({ contract: contract(), submissions: [[["a", " a "]], [["a", "b"]]] });
+  assert.equal(repaired.result.status, "completed");
+  assert.equal(repaired.result.text, '["a","b"]');
+  assert.match(repaired.prompts[1]!, /duplicates item 0/u);
+  const overflowing = await runSession({ contract: contract(), submissions: [[["a", "b", "c"]], [["a", "b", "c"]]] });
+  assert.equal(overflowing.result.failureCause, "output-contract-exhausted");
+});
 test("a proposed value is not success after provider failure or cancellation", async () => {
   const failed = await runSession({ submissions: [["orders"]], providerFailure: true });
   assert.equal(failed.result.failureCause, "provider-error");
@@ -446,6 +539,12 @@ test("malformed output contracts fail before any child starts", async () => {
     { returnVia: "tool", output: { type: "string" }, repair: { maxAttempts: 4 } },
     { returnVia: "tool", output: { type: "string", extra: true } },
     { returnVia: "tool", output: { type: "string" }, attempts: 2 },
+    { returnVia: "tool", schema: { type: "object" }, output: { type: "string" } },
+    { returnVia: "tool", schema: { type: "object" }, handoffs: { maxItems: 2 } },
+    { returnVia: "tool", schema: { type: "object" }, validate: () => [] },
+    { returnVia: "tool", schema: { type: "object", oneOf: [] } },
+    { returnVia: "tool", handoffs: { maxItems: 101 } },
+    { returnVia: "tool", schema: { type: "object" }, attempts: 2 },
   ];
   for (const options of invalid) await assert.rejects(runtime.dsl.agent("work", options as never));
   assert.equal(calls, 0);
@@ -459,6 +558,14 @@ test("runtime sends the output contract and accepts only a successful receipt, p
       artifactPorts: store,
       agentRunner: async (req) => {
         assert.equal(req.returnContract?.singleLine, true);
+        // These bytes are the replay key of every recorded string tool-return call.
+        assert.equal(
+          JSON.stringify(req.returnContract),
+          '{"version":1,"singleLine":true,"maxLength":100000,"maxAttempts":2}',
+        );
+        // The prompt is the other half of that replay key: a string contract keeps its 0.7.0 bytes.
+        assert.ok(req.prompt.endsWith("Finish the turn normally after acceptance."));
+        assert.ok(!req.prompt.includes("pass the JSON value itself"));
         return {
           ...completed(req, '"orders"'),
           outputAcceptance: { source: "tool", attempts: 2, toolName: "workflow_return" },
@@ -494,6 +601,63 @@ test("runtime sends the output contract and accepts only a successful receipt, p
       /acceptance|receipt|output/iu,
     );
   }));
+test("runtime returns the validated record and handoff list from a tool receipt and refuses off-shape canonical bytes", async () => {
+  const shaped = createWorkflowRuntime({
+    runId: "shaped-tool",
+    agentRunner: async (req) => {
+      assert.deepEqual(req.returnContract?.schema, RESULT);
+      assert.match(req.prompt, /pass the JSON value itself/u);
+      return {
+        ...completed(req, JSON.stringify(RECORD)),
+        outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+      };
+    },
+  });
+  assert.deepEqual(await shaped.dsl.agent("Verify", { label: "verify", schema: RESULT, returnVia: "tool" }), RECORD);
+  const end = shaped.getJournal().find((line) => line.kind === "agent_end");
+  assert.equal(end?.outputAcceptance?.attempts, 1);
+  assert.equal(end?.schemaValidation?.status, "valid");
+  const listed = createWorkflowRuntime({
+    runId: "handoff-tool",
+    agentRunner: async (req) => {
+      assert.deepEqual(req.returnContract?.schema, {
+        type: "array",
+        items: { type: "string", minLength: 1, maxLength: 8000, nonBlank: true },
+        minItems: 0,
+        maxItems: 3,
+        uniqueTrimmedItems: true,
+      });
+      assert.match(req.prompt, /workflow_return/u);
+      return {
+        ...completed(req, '["a","b"]'),
+        outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+      };
+    },
+  });
+  assert.deepEqual(
+    await listed.dsl.agent("Discover", { label: "discover", handoffs: { maxItems: 3 }, returnVia: "tool" }),
+    ["a", "b"],
+  );
+  const offShape = createWorkflowRuntime({
+    runId: "off-shape-tool",
+    agentRunner: async (req) => ({
+      ...completed(req, '["a","a"]'),
+      outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+    }),
+  });
+  await assert.rejects(
+    offShape.dsl.agent("Discover", { label: "discover", handoffs: { maxItems: 3 }, returnVia: "tool" }),
+    (error: unknown) => error instanceof Error && error.name === "SchemaValidationError",
+  );
+  const unreceipted = createWorkflowRuntime({
+    runId: "no-receipt-tool",
+    agentRunner: async (req) => completed(req, JSON.stringify(RECORD)),
+  });
+  await assert.rejects(
+    unreceipted.dsl.agent("Verify", { label: "verify", schema: RESULT, returnVia: "tool" }),
+    /acceptance|receipt|output/iu,
+  );
+});
 test("fallback has structured provenance and never masks provider failures", async () => {
   for (const failureCause of ["output-contract-exhausted", "provider-error", "output-contract-conflict"] as const) {
     const runtime = createWorkflowRuntime({
@@ -655,6 +819,66 @@ test("recorded adaptive prefix replays without repeating confirmed worker side e
     });
     await assert.rejects(changed.dsl.agent("changed goal", { label: "worker" }), /prefix divergence/u);
     assert.equal(effects, 2);
+  }));
+test("a changed schema contract does not reuse the recorded record, an identical one does", async () =>
+  temporary(async (root) => {
+    const source = tempRun(root, "shaped-source");
+    let effects = 0;
+    const record = createWorkflowRuntime({
+      runId: "shaped-source",
+      replay: createWorkflowReplayController({ runDir: source }),
+      agentRunner: async (req) => {
+        effects += 1;
+        return {
+          ...completed(req, JSON.stringify(RECORD)),
+          outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+        };
+      },
+    });
+    const shaped = { label: "verify", schema: RESULT, returnVia: "tool" } as const;
+    assert.deepEqual(await record.dsl.agent("Verify", shaped), RECORD);
+    const recorded = readWorkflowReplayLog(root, "shaped-source");
+    const replay = createWorkflowReplayController({
+      runDir: tempRun(root, "shaped-resume"),
+      recorded,
+      requireRecordedPrefix: true,
+    });
+    const resumed = createWorkflowRuntime({
+      runId: "shaped-resume",
+      replay,
+      agentRunner: async (req) => {
+        effects += 1;
+        return completed(req, '{"decision":"unknown","summary":"fresh"}');
+      },
+    });
+    assert.deepEqual(await resumed.dsl.agent("Verify", shaped), RECORD);
+    assert.equal(effects, 1);
+    assert.equal(replay.counts().replayedCalls, 1);
+    const strict = createWorkflowReplayController({
+      runDir: tempRun(root, "shaped-strict"),
+      recorded,
+      requireRecordedPrefix: true,
+    });
+    const changed = createWorkflowRuntime({
+      runId: "shaped-strict",
+      replay: strict,
+      agentRunner: async (req) => {
+        effects += 1;
+        return completed(req, JSON.stringify(RECORD));
+      },
+    });
+    await assert.rejects(
+      changed.dsl.agent("Verify", {
+        ...shaped,
+        schema: {
+          ...RESULT,
+          required: ["decision", "summary", "evidence"],
+          properties: { ...RESULT.properties, evidence: { type: "string", minLength: 1 } },
+        },
+      }),
+      /prefix divergence/u,
+    );
+    assert.equal(effects, 1);
   }));
 test("interrupted recovery fingerprints exact inputs and refuses missing authority without creating a result", async () =>
   temporary(async (root) => {

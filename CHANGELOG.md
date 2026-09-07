@@ -4,6 +4,11 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- `agent({ returnVia: "tool" })` now also accepts `schema` (a validated object) and `handoffs` (a bounded list of complete strings) through the same `workflow_return` tool: an agent that did the work but returned the wrong shape corrects it in the same child session under the existing `repair.maxAttempts`, and the workflow receives the validated value instead of text. Choice and closed-string contracts, one session, commit-on-completion and replay identity are unchanged; `validate` and transport `attempts` still do not combine with tool return. A correctly shaped record is not evidence that its facts are right.
+- The workflow-create skill gained two cards. Repair + Continue explains fixing the stopped `.workflow.mjs` in place, keeping the labels, prompts and order of the completed prefix, and proving reuse from `replayedCalls` and `divergedAtNode`; it names the limits, including the strict prefix, `unnamed-node`, the fusion tail, and the `totalAgents` fuse that replayed answers still spend. Large agent runs states that hundreds of small calls are a legitimate graph, observed through `/ps` and `/workflows status` and stopped only on operator request, with no new cap. The workflow-run skill now opens with preserving completed work before starting over, says that crossing the `totalAgents` fuse on a continuation needs an explicit operator `budget` override, and points `--run-name` at `.locus-pi/workspaces/<name>`.
+
 ## [0.7.0] - 2026-09-07
 
 ### Changed

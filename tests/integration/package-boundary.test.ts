@@ -349,7 +349,10 @@ describe("npm public package boundary", () => {
     // `skills/.ignore` rides along under `skills/` and is counted here.
     // 252 since output acceptance and interrupted recovery added two runtime modules,
     // three workflow reference pages, four runnable examples and five skill cards.
-    expect(dryRun.files).toHaveLength(252);
+    // 254 since the create skill gained the Repair + Continue and large-agent-runs cards.
+    // 256 since the shared schema validator became its own runtime module and the create
+    // skill gained the structured-results card.
+    expect(dryRun.files).toHaveLength(256);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

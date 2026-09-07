@@ -1,5 +1,6 @@
 import type { AgentResponseAcceptance } from "../../_shared/agent-runtime/agent-runner.js";
 import type { ReadOnlyAgentCustomTool } from "../../_shared/agent-runtime/agent-read-only-policy.js";
+import { assertSupportedAgentSchema, isRecord, validateAgainstSchema } from "./workflow-schema.js";
 /** Explicit output boundary, independent of semantic review and transport retries. */
 export interface WorkflowStringOutput {
   type: "string";
@@ -14,21 +15,26 @@ export interface WorkflowOutputRepair {
 export interface WorkflowReturnContract {
   version: 1;
   choices?: readonly string[];
+  /** Supported JSON-schema subset for a shaped value; handoffs arrive already desugared
+   *  to a bounded unique string array. */
+  schema?: Record<string, unknown>;
   singleLine: boolean;
   maxLength: number;
   maxAttempts: number;
   clarification?: string;
 }
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 export function normalizeWorkflowReturnContract(input: {
   output?: WorkflowStringOutput;
   choices?: readonly string[];
+  schema?: unknown;
   repair?: WorkflowOutputRepair;
 }): WorkflowReturnContract {
-  if ((input.output === undefined) === (input.choices === undefined))
-    throw new Error("returnVia: tool requires exactly one choice or string output contract");
+  if ([input.output, input.choices, input.schema].filter((part) => part !== undefined).length !== 1)
+    throw new Error("returnVia: tool requires exactly one choice, string output or schema contract");
+  if (input.schema !== undefined) {
+    if (!isRecord(input.schema)) throw new Error("agent schema must be a JSON-schema object");
+    assertSupportedAgentSchema(input.schema);
+  }
   if (
     input.output !== undefined &&
     (!isRecord(input.output) ||
@@ -62,6 +68,7 @@ export function normalizeWorkflowReturnContract(input: {
   return Object.freeze({
     version: 1,
     ...(input.choices === undefined ? {} : { choices: Object.freeze([...input.choices]) }),
+    ...(input.schema === undefined ? {} : { schema: input.schema as Record<string, unknown> }),
     singleLine: input.output?.singleLine ?? false,
     maxLength,
     maxAttempts,
@@ -69,6 +76,15 @@ export function normalizeWorkflowReturnContract(input: {
   });
 }
 export function workflowReturnValueError(value: unknown, contract: WorkflowReturnContract): string | undefined {
+  if (contract.schema !== undefined) {
+    const shape = validateAgainstSchema(value, contract.schema);
+    if (!shape.ok) return shape.errors.join("; ");
+    // The same size boundary the string contract enforces in-session, measured on the bytes
+    // that actually travel: without it an oversized record would only fail after the child
+    // completed, outside any repair the child could still do.
+    if (JSON.stringify(value).length > contract.maxLength) return `value exceeds ${contract.maxLength} characters`;
+    return undefined;
+  }
   if (typeof value !== "string" || value.trim() === "") return "value must be a nonblank string";
   if (value.length > contract.maxLength) return `value exceeds ${contract.maxLength} characters`;
   if (contract.singleLine && /[\r\n\u2028\u2029]/u.test(value)) return "value must contain one line only";
@@ -80,7 +96,11 @@ export function workflowReturnInstructions(contract: WorkflowReturnContract): st
   return (
     `Return the value using workflow_return({ value: ... }), not by formatting a final message. The host validates this contract: ${JSON.stringify(contract)}. ` +
     "Do all research before submitting. After submitting, use only workflow_return to correct the answer; do not repeat file writes or other " +
-    "external effects. Finish the turn normally after acceptance."
+    "external effects. Finish the turn normally after acceptance." +
+    // The prompt is part of the replay key, so a string or choice contract keeps its 0.7.0 bytes.
+    (contract.schema === undefined
+      ? ""
+      : " For a schema or handoffs contract, pass the JSON value itself (object or array) as value, not a string that contains JSON.")
   );
 }
 /** The accepted proposal becomes authoritative ONLY after the enclosing child completes successfully. */
@@ -89,7 +109,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
   acceptance: AgentResponseAcceptance;
 } {
   let attempts = 0;
-  let accepted: string | undefined;
+  let accepted: unknown;
   let failure: string | undefined;
   let lastError = "workflow_return was not called";
   let narrowTools: (() => void) | undefined;
@@ -116,7 +136,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
       const value = isRecord(input) ? input.value : undefined;
       const error = shapeError ?? workflowReturnValueError(value, contract);
       if (accepted !== undefined) {
-        if (error === undefined && value === accepted)
+        if (error === undefined && JSON.stringify(value) === JSON.stringify(accepted))
           return { content: [{ type: "text", text: "Identical proposal already accepted. Finish normally." }] };
         failure = "Conflicting workflow_return after an accepted proposal";
         return { content: [{ type: "text", text: failure }], isError: true };
@@ -129,7 +149,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
           isError: true,
         };
       }
-      accepted = value as string;
+      accepted = value;
       return {
         content: [
           {

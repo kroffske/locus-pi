@@ -518,6 +518,9 @@ ${authoring[1] ?? ""}
     expect(output).toContain("workflow_return");
     expect(output).toContain("same");
     expect(output).toContain("fallback");
+    expect(output).toContain("handoffs");
+    expect(output).toContain("schema");
+    expect(output).toContain("Format repair is not semantic retry");
   });
 
   it("keeps workflow-create snippets free of file parsing and default fuse boilerplate", () => {
@@ -593,6 +596,11 @@ ${authoring[1] ?? ""}
       expect(text.split("\n").length).toBeLessThan(12);
       expect(text).not.toContain("```js");
     }
+    // An output contract inside a card's graph, not a fifth graph form: a pointer, no table row.
+    expect(index).toContain("structured-results.md");
+    const structured = source(`${base}/structured-results.md`);
+    expect(structured.split("\n").length).toBeLessThan(12);
+    expect(structured).not.toContain("```js");
   });
 
   it("distinguishes recorded discovery replay from unsafe rediscovered checkpoint identity", () => {
