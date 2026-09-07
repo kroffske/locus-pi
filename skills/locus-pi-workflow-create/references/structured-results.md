@@ -1,6 +1,6 @@
 # Structured results and same-session format repair
 
-Supported: exact `choice`, closed string `output`, `handoffs` and compatibility `schema` all go through the one `workflow_return` tool with `returnVia: "tool"`; strict standard source may use choice, output and handoffs, while raw `schema` stays compatibility-only.
+After command execution or file writes, prefer same-session tool return; a schema-only echo selects no value and must not become success. The linked output acceptance contract owns the worked example. Supported: exact `choice`, closed string `output`, `handoffs` and compatibility `schema` all go through the one `workflow_return` tool with `returnVia: "tool"`; strict standard source may use choice, output and handoffs, while raw `schema` stays compatibility-only.
 
 Choose a choice for one routing decision, complete handoffs for independent worker instructions, and a schema record for several fields. Keep the payload limited to what downstream code needs; a bound on one answer is not a platform-wide agent cap. Do not parse Markdown fences or ask a second worker to rediscover facts solely because the first response has the wrong shape.
 

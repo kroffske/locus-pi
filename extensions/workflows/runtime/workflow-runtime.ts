@@ -1812,10 +1812,9 @@ function coerceExactChoiceAnswer(
 /**
  * Append the shape contract to a child prompt for agent({schema}).
  *
- * The host cannot force a tool call (Pi's agent-session surface exposes no tool choice), so the
- * prompt states the contract and the runtime ENFORCES it after the fact: parse, validate, retry,
- * fail closed. A retry repeats the request with the previous attempt's validator errors, which is
- * the only signal that makes a second try better than the first — a fresh child has no memory of it.
+ * This is the legacy text transport. The prompt states the value contract and the runtime
+ * enforces it after the fact: parse, validate, retry, fail closed. A retry repeats the request
+ * with the previous validator errors — a fresh child has no memory of the previous attempt.
  */
 function withSchemaContract(
   prompt: string,
@@ -1841,6 +1840,26 @@ function withSchemaContract(
           "Return the corrected JSON value only.",
         ].join("\n")
       : "";
+  // A choice asks for one value, not a description of its schema. Showing the
+  // schema itself encouraged schema-only echoes with no selected member.
+  // Keep richer string schemas intact so extra constraints stay visible.
+  const members = exactChoiceMembers(schema);
+  if (members !== undefined && Object.keys(schema).length === 2) {
+    return [
+      prompt,
+      "",
+      "## Required answer shape",
+      "",
+      "Your final message must be exactly ONE of the JSON string values below.",
+      "Choose the value supported by your result; no prose or explanation.",
+      "Do not return the list, a JSON object, or a JSON Schema.",
+      "Allowed answers (choose one):",
+      ...members.map((member) => `- ${JSON.stringify(member)}`),
+      repair,
+    ]
+      .join("\n")
+      .trimEnd();
+  }
   return [
     prompt,
     "",
@@ -3092,7 +3111,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // conditioned on which authority rejected which attempt, because the repair block must
     // state a TRUE budget ("attempt 1 of M") in text that enters the replay key, and at
     // render time nobody knows who will reject the next answer. A schema-only call keeps
-    // the old constant, so every existing recording's attempt-2 prompt is byte-identical.
+    // the same constant, so the retry budget is unchanged.
     const maxAttempts = validate === undefined ? SCHEMA_MAX_ATTEMPTS : SCHEMA_MAX_ATTEMPTS + 1;
 
     let lastErrors: string[] = [];

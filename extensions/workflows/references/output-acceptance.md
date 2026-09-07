@@ -73,3 +73,39 @@ An explicitly declared `choiceFallback` in tool mode applies only to `output-con
 This is a shape acceptance boundary, not a new domain-record database. The source archive does not contain the review's private Airflow catalog workflow/composer, so this change does not claim to migrate that workflow. A catalog needs owner-defined `candidateKey → dagRef → fieldKey`, a complete expected-key set and separate states for unknown, absent, failed and skipped. Do not correlate multiple DAGs by comma-separated position. Use accepted values/evidence as the input to that separately owned integration; an agent-written file is not authoritative merely because its returned value was valid.
 
 A conflicting second accepted proposal has `output-contract-conflict`, not exhaustion; it never selects choiceFallback. An explicit `repair` object must supply `maxAttempts`.
+
+## Command completed, answer rejected
+
+Observed failure: a catalog composer wrote its output, then returned
+`{"type":"string","enum":["success","failed"]}`. This lists choices but selects
+none. The runtime must reject it; accepting the first enum member would invent
+success. A file left on disk does not resolve the missing decision.
+
+For agents that execute commands or write files, use the existing tool return:
+
+```js
+const result = await agent(
+  'Run the command once. Call workflow_return({value:"success"}) only after exit 0; otherwise submit {value:"failed"}. Correct the answer format using the same command evidence, without repeating the command.',
+  {
+    label: "compose",
+    title: "Compose output files",
+    choice: ["success", "failed"],
+    returnVia: "tool",
+    repair: { maxAttempts: 2 },
+  },
+);
+if (result === "failed") throw new Error("Composition failed or was not confirmed; output files may exist.");
+```
+
+The success condition and `label` are authored for the actual stage. The portable
+rule is same-session format correction with no fabricated fallback. Validate the
+example's actual emitted options, a schema-only echo followed by a corrected value,
+and repeated invalid values. Mock graph and syntax checks alone cannot prove model
+compliance. A simple narrative lookup still uses plain `agent(prompt, { label, title })`;
+do not add tools or extra verification agents to it.
+
+Legacy text choices remain supported. They now show individual allowed values
+rather than an enum schema; validation still rejects a schema with no selected
+value. This wording changes their replay request identity. Updating the runtime
+can end prefix reuse at the first affected text-choice call; it does not preserve
+only the failed suffix of every old run.
