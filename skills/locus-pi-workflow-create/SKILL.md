@@ -30,9 +30,28 @@ A plain authoring request writes `.locus-pi/workflows/<name>/<name>.design.md`, 
 
 Build-only requests remain `Build design: <exact path>` and `Build approved design: <exact path>`. A material algorithm mismatch returns to design review; never hide it in source.
 
+## Returning a decision after work
+
+When an agent executes a command or writes files before returning a `choice`,
+use `returnVia: "tool"`. This keeps format correction in the same child session;
+legacy text choices can rerun the whole child on a mismatch. Put the actual
+success condition in the prompt, such as a confirmed command exit code.
+Never use a success fallback to conceal an unconfirmed result. An existing file
+does not prove the current command succeeded.
+
+Before authoring such a call, read [structured results](references/structured-results.md)
+for transport rules and the linked worked example of a schema-echo failure. Plain narrative agents
+need no output contract. For a stopped run, inspect the command transcript as
+well as the final answer: work may have finished before answer validation failed.
+
 ## Source and evidence boundary
 
 Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [AUTHORING.md](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe.
+
+Give every agent a concise human `title` describing its current work. In a
+`.map()`/`parallel()` list, derive it from the item and question so siblings are
+distinguishable, for example ``title: `${item.key} · ${field.key}```. Keep it within 240 characters. Verify a two-item example reaches
+the displayed rows; distinct labels alone do not prove readable titles.
 
 Every callsite needs its own literal `label`. A dynamic `title` is display text, not identity. Same-session output clarification is not a semantic round; semantic continuation creates a fresh worker. Recovery is a separate runtime capability.
 

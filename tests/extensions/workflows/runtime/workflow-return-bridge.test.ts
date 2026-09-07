@@ -15,6 +15,11 @@ import {
   agentLiveStore,
   type SdkAgentSessionEventLike,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import {
+  formatAgentLiveRowLine,
+  formatAgentDrillTitle,
+  statusMeta,
+} from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { createHarness } from "../../../test-harness.js";
 function tempRun(root: string, id: string): string {
   const dir = path.join(root, ".locus-pi", "runs", id);
@@ -59,13 +64,14 @@ function bridgeHarness(
         ...(opts.onLiveExecution === undefined ? {} : { onLiveExecution: opts.onLiveExecution }),
         createSession: async (sessionOptions) => {
           counters.sessions += 1;
+          const sessionId = counters.sessions === 1 ? "bridge-child" : `bridge-child-${counters.sessions}`;
           let active = ["read", "write", "workflow_return"];
           let emit: (event: SdkAgentSessionEventLike) => void = () => {};
           const tool = sessionOptions.customTools?.find((item) => item.name === "workflow_return");
           assert.ok(tool);
           return {
             session: {
-              sessionId: "bridge-child",
+              sessionId,
               subscribe(listener) {
                 emit = listener;
                 return () => {};
@@ -90,7 +96,7 @@ function bridgeHarness(
                 active = [...names];
               },
               getSessionStats: () => ({
-                sessionId: "bridge-child",
+                sessionId,
                 toolCalls: counters.prompts,
                 toolResults: counters.prompts,
               }),
@@ -99,7 +105,7 @@ function bridgeHarness(
                 const file = target ?? path.join(root, "trace.jsonl");
                 mkdirSync(path.dirname(file), { recursive: true });
                 // The host verifies the session header before adopting the trace.
-                writeFileSync(file, `${JSON.stringify({ type: "session", id: "bridge-child" })}\n`, "utf8");
+                writeFileSync(file, `${JSON.stringify({ type: "session", id: sessionId })}\n`, "utf8");
                 return file;
               },
               dispose() {
@@ -164,4 +170,43 @@ test("runtime -> bridge -> SDK returns the validated record after same-session s
     assert.equal(counters.prompts, 2);
     assert.equal(counters.disposals, 1);
     assert.equal(runtime.getJournal().find((line) => line.kind === "agent_end")?.outputAcceptance?.attempts, 2);
+  }));
+
+test("mapped agents keep distinct human titles through runtime, bridge, fleet rows and drill", async () =>
+  temporary(async (root) => {
+    const id = "bridge-mapped-titles";
+    const { runtime } = bridgeHarness(root, id, () => "done");
+    const fields = ["run_time", "mail"];
+    await runtime.dsl.parallel(
+      fields.map(
+        (field) => () =>
+          runtime.dsl.agent(`Extract ${field}`, {
+            label: "extract-field",
+            title: `orders.py · ${field}`,
+            returnVia: "tool",
+            output: { type: "string" },
+          }),
+      ),
+      { keys: fields },
+    );
+    const rows = [...agentLiveStore.rows.values()].filter(
+      (row) => row.workflowRunId === id && row.groupKind === undefined,
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(new Set(rows.map((row) => row.id)).size, 2);
+    for (const field of fields) {
+      const title = `orders.py · ${field}`;
+      const row = rows.find((row) => row.title === title);
+      assert.ok(row);
+      assert.ok(formatAgentLiveRowLine(row, statusMeta(row.status, 0), 160).includes(title));
+      assert.ok(formatAgentDrillTitle(row).includes(title));
+    }
+    assert.deepEqual(
+      runtime
+        .getJournal()
+        .filter((line) => line.kind === "agent_start")
+        .map((line) => line.title)
+        .sort(),
+      fields.map((field) => `orders.py · ${field}`).sort(),
+    );
   }));
