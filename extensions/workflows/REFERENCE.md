@@ -1553,6 +1553,10 @@ the runtime does not rename, move, or clean them. Confined absolute paths are
 accepted. `./path` resolves from the agent working directory. Traversal outside
 the project, whitespace tricks, backslashes, out-of-project working directories,
 and symlink escapes fail before a child starts.
+A task artifacts directory such as `.tasks/<task>/artifacts` is a legal
+`--output-dir`; running again into the same directory when it already holds
+durable workflow state fails closed through
+`assertFreshWorkflowOutputNamespace`.
 
 For `post-code-review`, the workspace is also a freshness boundary. Its
 generated default is unique. If a caller explicitly selects a workspace, fresh
