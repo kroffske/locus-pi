@@ -939,10 +939,13 @@ describe("workflow child task composition", () => {
     assert.match(task, /workflow workspace \(durable workflow files and evidence\)/u);
     assert.doesNotMatch(task, /write intermediate and final workflow files here/u);
     assert.match(task, /replace assigned files idempotently/u);
-    assert.match(task, /durable handoffs, final results, review evidence, and explicit resume inputs/u);
+    assert.match(task, /Durable handoffs, final results, review evidence, and explicit resume inputs/u);
     assert.match(task, /environments, dependency caches, test basetemp, transient renderer output, and staging/u);
-    assert.match(task, /write or promote it into the workflow workspace/u);
+    assert.match(task, /write or promote a final rendered deliverable there/u);
+    assert.match(task, /never beside evidence/u);
+    assert.match(task, /another owner's state/u);
     assert.match(task, /authored prompt that explicitly requests another placement remains authoritative/u);
+    assert.doesNotMatch(task, /do not invent another project-relative durable root/u);
   });
 
   it("distinguishes a worktree code workspace from the workflow workspace and project context", () => {
@@ -955,7 +958,11 @@ describe("workflow child task composition", () => {
     assert.match(task, /pwd \(code workspace\): \/worktrees\/child/u);
     assert.match(task, /project root \(source context\): \/projects\/main/u);
     assert.match(task, /Use pwd for code work/u);
-    assert.match(task, /not as a default artifact destination/u);
+    assert.match(
+      task,
+      /task artifact folder \(\.tasks\/<task>\/artifacts\/<stage>\/\) when the authored prompt selects one/u,
+    );
+    assert.doesNotMatch(task, /not as a default artifact destination/u);
   });
 
   it("leaves the prompt untouched when no directory or location is configured", () => {
