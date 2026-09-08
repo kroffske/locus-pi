@@ -197,6 +197,15 @@ Keep stable stage option groups together near the top. Keep prompts, calls,
 branches, and handoffs visible at their execution edges. Stage prompts own their
 roles; package agent names are never required.
 
+Give an agent its task, relevant context and completion condition, each stated
+once in a coherent brief rather than a mandatory set of headings. Let it choose
+the work steps; prescribe a procedure only for a real repository constraint or
+known failure. Reports and narrative handoffs use ordinary `agent()` text.
+Reserve `choice` for routing and `handoffs` for independently scheduled work
+units. Do not wrap a report in a singleton list or guess a response-length cap.
+An author-selected bound must come from an explicit user requirement, actual
+consumer contract or measured failure. Runtime safety budgets remain in force.
+
 ```js
 export const meta = {
   name: "review-task",

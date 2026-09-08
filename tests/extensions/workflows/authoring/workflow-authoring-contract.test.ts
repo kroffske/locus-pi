@@ -596,11 +596,14 @@ ${authoring[1] ?? ""}
       expect(text.split("\n").length).toBeLessThan(12);
       expect(text).not.toContain("```js");
     }
-    // An output contract inside a card's graph, not a fifth graph form: a pointer, no table row.
+    // Return contracts refine a graph; the worked example must use the real standard DSL.
     expect(index).toContain("structured-results.md");
-    const structured = source(`${base}/structured-results.md`);
-    expect(structured.split("\n").length).toBeLessThan(12);
-    expect(structured).not.toContain("```js");
+    const snippets = javascriptDocSnippets(`${base}/structured-results.md`);
+    expect(snippets.length).toBeGreaterThan(0);
+    for (const snippet of snippets) {
+      const workflow = standardSource(`export default async function run({ agent, input }) {\n${snippet}\n}`);
+      expect(standardWorkflowSourceShapeErrors(workflow)).toEqual([]);
+    }
   });
 
   it("distinguishes recorded discovery replay from unsafe rediscovered checkpoint identity", () => {

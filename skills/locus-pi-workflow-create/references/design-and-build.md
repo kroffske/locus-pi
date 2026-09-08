@@ -75,6 +75,14 @@ Status: REVIEWED — ready for build.
 Count orchestration machinery, not agents. More agents are fine when the task
 really decomposes into more coherent subtasks.
 
+Review whether each brief gives the agent enough to complete its task. Remove
+mechanical headings, repeated completion criteria, tool choreography and
+general policy that add no task-specific information.
+For each shaped result or author-selected limit, identify the consuming edge
+and why it needs that contract. Plain narrative is passed whole without an
+invented length cap; structured controls belong only at real routing or
+decomposition edges.
+
 Read [the pattern index](INDEX.md), then only the selected
 pattern card. The cards are algorithms and small snippets, not full workflows to
 copy blindly.

@@ -30,7 +30,25 @@ A plain authoring request writes `.locus-pi/workflows/<name>/<name>.design.md`, 
 
 Build-only requests remain `Build design: <exact path>` and `Build approved design: <exact path>`. A material algorithm mismatch returns to design review; never hide it in source.
 
-## Returning a decision after work
+## Agent briefs and returns
+
+Give each agent a coherent task, relevant context and a clear completion
+condition. These are ingredients, not mandatory headings. State each fact once;
+do not restate the task under a second "definition of done" section.
+Let the agent choose how to inspect, implement and verify.
+Add procedural instructions only for a concrete repository constraint or known
+failure; do not script tool sequences or repeat a general policy in every node.
+
+Choose the return shape from its consumer. Ordinary reports and intermediate
+narrative use plain `agent()` text, without `output`, `schema`, `handoffs` or an
+author-guessed length target. Use `choice` when code branches on a decision and
+`handoffs` when it schedules independent discovered work units. A singleton
+array must not become a report envelope or a success signal.
+
+Add an output bound or per-call budget only for an explicit user requirement,
+an actual consumer contract or a measured failure at that boundary. Name that
+reason; do not guess a number, copy one from an example or keep raising it after
+an otherwise valid report is rejected. Runtime safety limits still apply.
 
 When an agent executes a command or writes files before returning a `choice`,
 use `returnVia: "tool"`. This keeps format correction in the same child session;

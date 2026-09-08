@@ -153,6 +153,21 @@ const RESULT = {
   },
 };
 
+test("a large discovered work unit passes runtime -> bridge -> SDK in one session and proposal", async () =>
+  temporary(async (root) => {
+    const workUnit = "Migrate this source section\n".repeat(20_000);
+    const { runtime, counters } = bridgeHarness(root, "bridge-large-handoff", () => [workUnit]);
+    const value = await runtime.dsl.agent("Discover migration work units with their source context.", {
+      label: "discover",
+      handoffs: { minItems: 0, maxItems: 1, maxItemChars: workUnit.length },
+      maxAnswerChars: JSON.stringify([workUnit]).length,
+      returnVia: "tool",
+    });
+    assert.deepEqual(value, [workUnit]);
+    assert.deepEqual(counters, { sessions: 1, prompts: 1, disposals: 1 });
+    assert.equal(runtime.getJournal().find((line) => line.kind === "agent_end")?.outputAcceptance?.attempts, 1);
+  }));
+
 test("runtime -> bridge -> SDK returns the validated record after same-session shape repair", async () =>
   temporary(async (root) => {
     const id = "bridge-shaped";

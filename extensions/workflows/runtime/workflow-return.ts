@@ -27,6 +27,8 @@ export function normalizeWorkflowReturnContract(input: {
   output?: WorkflowStringOutput;
   choices?: readonly string[];
   schema?: unknown;
+  /** Runtime-derived canonical JSON allowance for explicitly enlarged handoffs. */
+  schemaMaxLength?: number;
   repair?: WorkflowOutputRepair;
 }): WorkflowReturnContract {
   if ([input.output, input.choices, input.schema].filter((part) => part !== undefined).length !== 1)
@@ -45,8 +47,13 @@ export function normalizeWorkflowReturnContract(input: {
   }
   if (input.output?.singleLine !== undefined && typeof input.output.singleLine !== "boolean")
     throw new Error("output.singleLine must be boolean");
-  const maxLength = input.output?.maxLength ?? 100_000;
-  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || maxLength > 500_000)
+  const maxLength = input.output?.maxLength ?? input.schemaMaxLength ?? 100_000;
+  if (
+    input.schemaMaxLength !== undefined &&
+    (input.schema === undefined || !Number.isSafeInteger(input.schemaMaxLength) || input.schemaMaxLength < 1)
+  )
+    throw new Error("schemaMaxLength requires a schema and a positive safe integer");
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || (input.schemaMaxLength === undefined && maxLength > 500_000))
     throw new Error("output.maxLength must be in 1..500000");
   if (
     input.repair !== undefined &&
