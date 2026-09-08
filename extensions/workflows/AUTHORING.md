@@ -197,6 +197,15 @@ Keep stable stage option groups together near the top. Keep prompts, calls,
 branches, and handoffs visible at their execution edges. Stage prompts own their
 roles; package agent names are never required.
 
+Give an agent its task, relevant context and completion condition, each stated
+once in a coherent brief rather than a mandatory set of headings. Let it choose
+the work steps; prescribe a procedure only for a real repository constraint or
+known failure. Reports and narrative handoffs use ordinary `agent()` text.
+Reserve `choice` for routing and `handoffs` for independently scheduled work
+units. Do not wrap a report in a singleton list or guess a response-length cap.
+An author-selected bound must come from an explicit user requirement, actual
+consumer contract or measured failure. Runtime safety budgets remain in force.
+
 ```js
 export const meta = {
   name: "review-task",
@@ -249,6 +258,15 @@ rule. Package task drafting and planning use the same workspace contract;
 saved children and later manual stages share the selected named path. Use
 `projectRoot()` for source context. Do not add permission/tool fields,
 another default writable root, a path parser, or an information-gathering script.
+
+The workflow workspace is the durable location for handoffs, final results,
+review evidence, and explicit resume inputs. Keep disposable environments,
+dependency caches, test basetemp, transient renderer output, and staging in the
+ordinary OS or tool temporary and cache locations. When renderer output is the
+final deliverable, write or promote it into the workflow workspace. Promote any
+scratch output needed for review or resume before its temporary or cache location
+expires. This guidance reduces accidental mixing; an authored prompt that
+explicitly requests another placement remains authoritative.
 
 That path-oriented shape is compatibility guidance for existing hand-authored
 workflows. The packaged authoring skill does not generate it. New source puts
@@ -329,14 +347,14 @@ file under that root and returns its path, byte count, and SHA-256 digest withou
 copying or interpreting the content. Failed runs leave workspace files intact for
 inspection and retry.
 
-Runtime связывает workspace с группой в `.locus-pi/runs/<storageRootRunId>/README.md`.
-Saved children сохраняют отдельные IDs в `children/<runId>/`, root resume — в
-`attempts/<runId>/`. Не вычисляйте путь evidence из одного runId: используйте
-возвращённый `runDir` или команды status/result. Автоматические файлы группы и
-workspace `.workflow-runs.md` принадлежат runtime; не поручайте agents их переписывать.
-Resume сохраняет workspace и физическую группу, но создаёт новый execution root;
-`lineage.rootRunId` не означает первый запуск группы. Checkpoint/replay правила от
-группировки не меняются, старые flat runs и workspace не мигрируют.
+Runtime links the workspace to the group at `.locus-pi/runs/<storageRootRunId>/README.md`.
+Saved children keep separate IDs in `children/<runId>/`, and root resume in
+`attempts/<runId>/`. Do not compute the evidence path from a single runId: use the
+returned `runDir` or the status/result commands. The group's automatic files and
+workspace `.workflow-runs.md` belong to the runtime; do not ask agents to rewrite them.
+Resume preserves the workspace and physical group but creates a new execution root;
+`lineage.rootRunId` does not mean the group's first launch. Grouping does not change
+checkpoint or replay rules, and old flat runs and workspaces are not migrated.
 
 Completed-item checkpoints are keyed by parent source hash, child source hash,
 workflow workspace, and exact item key. A matching checkpoint skips that
@@ -565,13 +583,17 @@ human-readable description and never replaces stable identity.
 
 ### Output acceptance is not semantic continuation
 
-Standard authoring may opt into `agent({ choice, returnVia: "tool" })` or the
-closed string `output` contract described in [output acceptance](references/output-acceptance.md).
+Standard authoring may opt into `agent({ choice, returnVia: "tool" })`, the
+closed string `output` contract, or `agent({ handoffs, returnVia: "tool" })`
+described in [output acceptance](references/output-acceptance.md).
 The workflow-only `workflow_return` tool validates a proposed value within the
-same child session; it does not certify the truth of a decision. Ordinary text,
+same child session; it does not certify the truth of a decision, nor the facts
+inside a shaped record. Ordinary text,
 legacy text-choice repair and adaptive fresh-worker rounds retain separate
 contracts. The standard source grammar still does not parse model prose or
-permit raw `schema`/`validate`. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
+permit raw `schema`/`validate`; `schema` with `returnVia: "tool"` is available
+to reviewed compatibility scripts only, because the strict checker refuses raw
+`schema` regardless of transport. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
 before selecting fixed, refinement, decomposition or human-gated execution.
 
 The owner contract separately forbids mandatory acknowledgement protocols whose
@@ -639,7 +661,7 @@ Failure statuses remain domain detail; the durable run disposition is
 Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
-budget allows 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer
+budget allows 1,000 tool calls, a 24-hour timeout, 1,000 turns, and 500,000 answer
 characters per child attempt. One run admits at most 10,000 physical attempts,
 starts no new child after its 24-hour gate, and executes at most four attempts
 concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
@@ -648,6 +670,14 @@ Same-session tool-output corrections consume the existing child budgets instead
 of creating a new physical invocation. Structured launchers may explicitly set
 the shared budget; see [execution controls](references/execution-controls.md).
 The SDK timeout is a later transport backstop, not authored workflow policy.
+
+Turns count SDK model cycles, including ordinary tool use and output
+clarification within the same child. They are not workflow retries or return
+submissions. The default is an emergency allowance, not a prompt instruction to
+consume it. Explicit `maxTurns` values must be positive safe integers whose
+combined SDK timer is representable. When resuming work recorded under an older
+default, pin completed calls to their recorded effective value before changing
+the unfinished suffix, then verify prefix reuse.
 
 `meta.profile` makes authoring intent explicit. New generated source uses
 `"standard"`; existing compatibility-heavy entries use `"legacy"`, end-to-end

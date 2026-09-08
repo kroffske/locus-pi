@@ -30,7 +30,7 @@ export interface WorkflowFailureDiagnostic {
   workflow?: string;
   /** Author-owned script path; project-relative when it lives inside the root. */
   scriptPath?: string;
-  /** Failing stage's agent answer, when the run persisted one. */
+  /** Evidence for this failure, when the run persisted an answer, result, or transcript. */
   evidencePath?: string;
   /** Always present: the run's own journal is written before anything can fail. */
   journalPath: string;
@@ -48,7 +48,14 @@ export interface BuildWorkflowFailureDiagnosticInput {
   error?: string;
   target?: { ref?: string };
   scriptIdentity?: { sourcePath?: string };
-  artifacts?: readonly { kind: string; stage?: string; relativePath: string }[];
+  /** Typed child result from WorkflowAgentExecutionError, when one caused the throw. */
+  failedChild?: {
+    childTrace?: { path: string };
+    resultArtifact?: string;
+  };
+  /** A group error has no exact typed link to the child that caused its branch failure. */
+  unhandledGroupFailure?: true;
+  artifacts?: readonly { kind: string; stage?: string; relativePath: string; callId?: string }[];
 }
 
 const MAX_DIAGNOSTIC_MESSAGE_CHARS = 240;
@@ -64,7 +71,16 @@ export function buildWorkflowFailureDiagnostic(input: BuildWorkflowFailureDiagno
   const stage = lastReachedStage(input.journal);
   const workflow = compactMessage(input.target?.ref);
   const scriptPath = relativizePath(input.projectRoot, input.scriptIdentity?.sourcePath);
-  const evidencePath = failingAnswerPath(input.projectRoot, input.runDir, input.artifacts ?? [], stage);
+  const evidencePath = failingEvidencePath(
+    input.projectRoot,
+    input.runDir,
+    input.artifacts ?? [],
+    input.journal,
+    stage,
+    input.failedChild,
+    input.unhandledGroupFailure,
+    origin,
+  );
   const journalPath = relativizePath(input.projectRoot, input.journalPath) ?? input.journalPath;
   return {
     origin,
@@ -96,7 +112,7 @@ export function formatWorkflowFailureDiagnosticLines(
   ].filter((part): part is string => part !== undefined);
   return [
     ...(head.length === 0 ? [] : [head.join(" · ")]),
-    ...(diagnostic.evidencePath === undefined ? [] : [`answer: ${diagnostic.evidencePath}`]),
+    ...(diagnostic.evidencePath === undefined ? [] : [`evidence: ${diagnostic.evidencePath}`]),
     `journal: ${diagnostic.journalPath}`,
     ...(options.repairRequest === true ? [`copy: ${diagnostic.repairRequest}`] : []),
   ];
@@ -147,7 +163,7 @@ function buildRepairRequest(parts: {
   const sentences = [
     `${stripTrailingPeriod(lead)}.`,
     parts.scriptPath === undefined ? undefined : `Script: ${parts.scriptPath}.`,
-    parts.evidencePath === undefined ? undefined : `Failing stage answer: ${parts.evidencePath}.`,
+    parts.evidencePath === undefined ? undefined : `Failure evidence: ${parts.evidencePath}.`,
     `Run journal: ${parts.journalPath}.`,
   ].filter((sentence): sentence is string => sentence !== undefined);
   return truncateText(sentences.join(" "), MAX_REPAIR_REQUEST_CHARS);
@@ -163,25 +179,69 @@ function lastReachedStage(journal: readonly WorkflowJournalLine[]): string | und
   return undefined;
 }
 
-/**
- * The answer the failing stage produced, when the run persisted one. Prefers an
- * answer recorded for the failing stage and otherwise falls back to the newest
- * answer — a script that validates a handoff fails right after receiving it.
- */
-function failingAnswerPath(
+/** Select current failure evidence without borrowing unrelated answers. */
+function failingEvidencePath(
   projectRoot: string,
   runDir: string,
-  artifacts: readonly { kind: string; stage?: string; relativePath: string }[],
+  artifacts: readonly { kind: string; stage?: string; relativePath: string; callId?: string }[],
+  journal: readonly WorkflowJournalLine[],
   stage: string | undefined,
+  failedChild: BuildWorkflowFailureDiagnosticInput["failedChild"],
+  unhandledGroupFailure: true | undefined,
+  origin: WorkflowFailureOrigin,
 ): string | undefined {
-  const answers = artifacts.filter((record) => record.kind === "answer");
-  const forStage = stage === undefined ? [] : answers.filter((record) => record.stage === stage);
-  const record = forStage.at(-1) ?? answers.at(-1);
+  let record: (typeof artifacts)[number] | undefined;
+  if (failedChild !== undefined) {
+    const terminalCallId = failedChildCallId(journal, failedChild);
+    if (terminalCallId === undefined) return undefined;
+    record = artifacts
+      .filter(
+        (record) =>
+          record.callId === terminalCallId &&
+          (record.kind === "result" || record.kind === "transcript" || record.kind === "answer"),
+      )
+      .sort((left, right) => evidenceRank(left.kind) - evidenceRank(right.kind))[0];
+  } else {
+    if (unhandledGroupFailure || origin !== "script") return undefined;
+    const last = journal.at(-1);
+    // Only immediate validation of this completed call has a single answer
+    // owner. A new phase, group barrier, log, or error ends that evidence link.
+    if (last?.kind !== "agent_end" || last.status !== "completed" || last.callId === undefined) return undefined;
+    if (stage !== undefined && last.phase !== stage) return undefined;
+    record = artifacts.filter((item) => item.kind === "answer" && item.callId === last.callId).at(-1);
+  }
   if (record === undefined) return undefined;
   // `relativePath` is written relative to the artifacts directory, not to the
   // run directory. Joining it onto `runDir` printed a pointer that resolves to
   // nothing, so the operator's first move after a failure hit a missing file.
   return relativizePath(projectRoot, path.join(workflowRunArtifactsDir(runDir), record.relativePath));
+}
+
+function evidenceRank(kind: string): number {
+  if (kind === "result") return 0;
+  if (kind === "transcript") return 1;
+  if (kind === "answer") return 2;
+  return 3;
+}
+
+/** Resolve one terminal failed child from typed evidence; ambiguity stays pointer-less. */
+function failedChildCallId(
+  journal: readonly WorkflowJournalLine[],
+  failedChild: NonNullable<BuildWorkflowFailureDiagnosticInput["failedChild"]>,
+): string | undefined {
+  const terminal = journal.filter(
+    (line) =>
+      line.callId !== undefined &&
+      ((line.kind === "agent_end" && line.status !== undefined && line.status !== "completed") ||
+        line.kind === "error"),
+  );
+  const matches = terminal.filter(
+    (line) =>
+      (failedChild.resultArtifact !== undefined && line.resultArtifact === failedChild.resultArtifact) ||
+      (failedChild.childTrace?.path !== undefined && line.childTrace?.path === failedChild.childTrace.path),
+  );
+  const ids = [...new Set(matches.map((line) => line.callId))];
+  return ids.length === 1 ? ids[0] : undefined;
 }
 
 /** Project-relative when the path is inside the root; the absolute path otherwise. */

@@ -1,5 +1,6 @@
 import type { AgentResponseAcceptance } from "../../_shared/agent-runtime/agent-runner.js";
 import type { ReadOnlyAgentCustomTool } from "../../_shared/agent-runtime/agent-read-only-policy.js";
+import { assertSupportedAgentSchema, isRecord, validateAgainstSchema } from "./workflow-schema.js";
 /** Explicit output boundary, independent of semantic review and transport retries. */
 export interface WorkflowStringOutput {
   type: "string";
@@ -14,21 +15,28 @@ export interface WorkflowOutputRepair {
 export interface WorkflowReturnContract {
   version: 1;
   choices?: readonly string[];
+  /** Supported JSON-schema subset for a shaped value; handoffs arrive already desugared
+   *  to a bounded unique string array. */
+  schema?: Record<string, unknown>;
   singleLine: boolean;
   maxLength: number;
   maxAttempts: number;
   clarification?: string;
 }
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 export function normalizeWorkflowReturnContract(input: {
   output?: WorkflowStringOutput;
   choices?: readonly string[];
+  schema?: unknown;
+  /** Runtime-derived canonical JSON allowance for explicitly enlarged handoffs. */
+  schemaMaxLength?: number;
   repair?: WorkflowOutputRepair;
 }): WorkflowReturnContract {
-  if ((input.output === undefined) === (input.choices === undefined))
-    throw new Error("returnVia: tool requires exactly one choice or string output contract");
+  if ([input.output, input.choices, input.schema].filter((part) => part !== undefined).length !== 1)
+    throw new Error("returnVia: tool requires exactly one choice, string output or schema contract");
+  if (input.schema !== undefined) {
+    if (!isRecord(input.schema)) throw new Error("agent schema must be a JSON-schema object");
+    assertSupportedAgentSchema(input.schema);
+  }
   if (
     input.output !== undefined &&
     (!isRecord(input.output) ||
@@ -39,8 +47,13 @@ export function normalizeWorkflowReturnContract(input: {
   }
   if (input.output?.singleLine !== undefined && typeof input.output.singleLine !== "boolean")
     throw new Error("output.singleLine must be boolean");
-  const maxLength = input.output?.maxLength ?? 100_000;
-  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || maxLength > 500_000)
+  const maxLength = input.output?.maxLength ?? input.schemaMaxLength ?? 100_000;
+  if (
+    input.schemaMaxLength !== undefined &&
+    (input.schema === undefined || !Number.isSafeInteger(input.schemaMaxLength) || input.schemaMaxLength < 1)
+  )
+    throw new Error("schemaMaxLength requires a schema and a positive safe integer");
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || (input.schemaMaxLength === undefined && maxLength > 500_000))
     throw new Error("output.maxLength must be in 1..500000");
   if (
     input.repair !== undefined &&
@@ -62,6 +75,7 @@ export function normalizeWorkflowReturnContract(input: {
   return Object.freeze({
     version: 1,
     ...(input.choices === undefined ? {} : { choices: Object.freeze([...input.choices]) }),
+    ...(input.schema === undefined ? {} : { schema: input.schema as Record<string, unknown> }),
     singleLine: input.output?.singleLine ?? false,
     maxLength,
     maxAttempts,
@@ -69,6 +83,15 @@ export function normalizeWorkflowReturnContract(input: {
   });
 }
 export function workflowReturnValueError(value: unknown, contract: WorkflowReturnContract): string | undefined {
+  if (contract.schema !== undefined) {
+    const shape = validateAgainstSchema(value, contract.schema);
+    if (!shape.ok) return shape.errors.join("; ");
+    // The same size boundary the string contract enforces in-session, measured on the bytes
+    // that actually travel: without it an oversized record would only fail after the child
+    // completed, outside any repair the child could still do.
+    if (JSON.stringify(value).length > contract.maxLength) return `value exceeds ${contract.maxLength} characters`;
+    return undefined;
+  }
   if (typeof value !== "string" || value.trim() === "") return "value must be a nonblank string";
   if (value.length > contract.maxLength) return `value exceeds ${contract.maxLength} characters`;
   if (contract.singleLine && /[\r\n\u2028\u2029]/u.test(value)) return "value must contain one line only";
@@ -80,7 +103,23 @@ export function workflowReturnInstructions(contract: WorkflowReturnContract): st
   return (
     `Return the value using workflow_return({ value: ... }), not by formatting a final message. The host validates this contract: ${JSON.stringify(contract)}. ` +
     "Do all research before submitting. After submitting, use only workflow_return to correct the answer; do not repeat file writes or other " +
-    "external effects. Finish the turn normally after acceptance."
+    "external effects. Finish the turn normally after acceptance." +
+    // The prompt is part of the replay key, so a string or choice contract keeps its 0.7.0 bytes.
+    (contract.schema === undefined
+      ? ""
+      : " For a schema or handoffs contract, pass the JSON value itself (object or array) as value, not a string that contains JSON.")
+  );
+}
+
+/** Syntax guidance only: the agent keeps its content and still has to satisfy the schema. */
+function workflowReturnCorrectionExample(contract: WorkflowReturnContract, value: unknown): string {
+  const type = contract.schema?.type;
+  if (type !== "array" && type !== "object") return "";
+  if (type === "array" ? Array.isArray(value) : isRecord(value)) return "";
+  const example = type === "array" ? '{"value":[]}' : '{"value":{}}';
+  return (
+    ` Raw ${type} tool-argument syntax: ${example}. This shows the container only; ` +
+    "fill it with your existing schema-matching content. Pass value directly, without JSON.stringify or wrapping the JSON in quotes."
   );
 }
 /** The accepted proposal becomes authoritative ONLY after the enclosing child completes successfully. */
@@ -89,9 +128,10 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
   acceptance: AgentResponseAcceptance;
 } {
   let attempts = 0;
-  let accepted: string | undefined;
+  let accepted: unknown;
   let failure: string | undefined;
   let lastError = "workflow_return was not called";
+  let correctionExample = "";
   let narrowTools: (() => void) | undefined;
   const reject = (reason: string): void => {
     lastError = reason;
@@ -116,7 +156,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
       const value = isRecord(input) ? input.value : undefined;
       const error = shapeError ?? workflowReturnValueError(value, contract);
       if (accepted !== undefined) {
-        if (error === undefined && value === accepted)
+        if (error === undefined && JSON.stringify(value) === JSON.stringify(accepted))
           return { content: [{ type: "text", text: "Identical proposal already accepted. Finish normally." }] };
         failure = "Conflicting workflow_return after an accepted proposal";
         return { content: [{ type: "text", text: failure }], isError: true };
@@ -124,12 +164,18 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
       attempts += 1;
       if (error !== undefined) {
         reject(error);
+        correctionExample = workflowReturnCorrectionExample(contract, value);
         return {
-          content: [{ type: "text", text: failure ?? `${error}. Correct workflow_return only; do not redo the task.` }],
+          content: [
+            {
+              type: "text",
+              text: failure ?? `${error}. Correct workflow_return only; do not redo the task.${correctionExample}`,
+            },
+          ],
           isError: true,
         };
       }
-      accepted = value as string;
+      accepted = value;
       return {
         content: [
           {
@@ -164,7 +210,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
           reason: failure,
           failureCause: accepted === undefined ? "output-contract-exhausted" : "output-contract-conflict",
         };
-      const prompt = `${lastError}. Call workflow_return with the corrected value only. Reuse your existing evidence; do not perform the task again. ${contract.clarification ?? ""}`;
+      const prompt = `${lastError}. Call workflow_return with the corrected value only. Reuse your existing evidence; do not perform the task again. ${contract.clarification ?? ""}${correctionExample}`;
       lastError = "workflow_return was not called";
       return { status: "retry", prompt };
     },

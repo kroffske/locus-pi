@@ -26,6 +26,11 @@ Recovery is a runtime capability, not a fifth algorithm, and generated source
 is an authoring lifecycle. The historical recipes below remain compatibility
 material, not additional standard patterns or a second source grammar.
 
+For new source, brief each agent with its task, relevant context and definition
+of done. Ordinary narrative returns as text; structured controls are justified
+by actual routing or decomposition. Do not copy a historical recipe's detailed
+procedure, output schema or numeric limit without a current consumer need.
+
 ## Choose a shape
 
 | Requirement                              | Minimal shape                               |

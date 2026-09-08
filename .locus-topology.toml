@@ -20,10 +20,10 @@ trigger = "Split when the directory exceeds 12 direct files or a stable agent-ru
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-run-layout.test.ts"
 rule = "code-lines"
-ceiling = 629
+ceiling = 965
 owner = "workflow run layout tests"
-reason = "The two-line growth verifies the semantic hasJournal projection while the test moves to its production owner."
-trigger = "Any growth above 629 lines requires a responsibility split."
+reason = "The base already contains 961 lines. Four added assertions verify durable-versus-scratch placement in the existing child filesystem note; layout behavior is unchanged."
+trigger = "Any growth above 965 lines requires a run-layout test responsibility split."
 
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-run-report.test.ts"
@@ -60,10 +60,10 @@ trigger = "Any growth above 730 lines requires a run-view responsibility split."
 [[exceptions]]
 path = "extensions/workflows/runtime/workflow-agent-bridge.ts"
 rule = "code-lines"
-ceiling = 1056
+ceiling = 1080
 owner = "workflow child-agent bridge"
-reason = "T-195 carries the runtime-owned mapped occurrence through the bridge's existing live-row projection; extracting three lines would create a shallow module."
-trigger = "Any growth above 1056 lines, another slot/live-row identity policy, or another bridge policy requires a bridge responsibility split."
+reason = "The base already contains 1077 lines. This three-line growth corrects the existing filesystem note without introducing a new runtime responsibility or a shallow prompt wrapper."
+trigger = "Any growth above 1080 lines, another slot/live-row identity policy, or another bridge policy requires a bridge responsibility split."
 
 [[exceptions]]
 path = "extensions/workflows/runtime/workflow-runtime.ts"
@@ -184,3 +184,27 @@ ceiling = 690
 owner = "workflow input tests"
 reason = "Two T-188 lines update the canonical generated-workspace prefix in the existing input contract."
 trigger = "Any growth above 690 lines requires a workflow-input test responsibility split."
+
+[[exceptions]]
+path = "extensions/agents/fleet/session-viewer.ts"
+rule = "code-lines"
+ceiling = 1017
+owner = "agent session viewer"
+reason = "The 15-line growth wires the separate workflow-return renderer and platform-specific hint into the existing native component adapter; rendering logic remains outside this owner."
+trigger = "Further growth above 1017 lines requires a viewer responsibility-split review."
+
+[[exceptions]]
+path = "tests/extensions/agents/fleet/agent-session-viewer.test.ts"
+rule = "code-lines"
+ceiling = 1621
+owner = "agent session viewer integration tests"
+reason = "The 130-line growth covers the native workflow-return lifecycle, nested Markdown, raw preservation and existing paging through the established viewer harness."
+trigger = "Further growth above 1621 lines or a second custom tool renderer requires a viewer-test responsibility split."
+
+[[exceptions]]
+path = "tests/integration/package-boundary.test.ts"
+rule = "code-lines"
+ceiling = 813
+owner = "npm package boundary tests"
+reason = "One comment line documents the single added viewer renderer beside the existing package inventory assertion."
+trigger = "Further growth above 813 lines requires a package-boundary test responsibility-split review."

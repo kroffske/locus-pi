@@ -192,6 +192,25 @@ describe("design-first readable workflow authoring", () => {
     expect(storage).toContain("must never resolve to the same directory");
   });
 
+  it("teaches durable workflow files separately from disposable scratch", () => {
+    for (const relativePath of [
+      "skills/locus-pi-workflow-create/SKILL.md",
+      "extensions/workflows/AUTHORING.md",
+      "extensions/workflows/REFERENCE.md",
+      "docs/workflows.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toMatch(/durable (?:handoffs|location)/iu);
+      expect(text).toMatch(/final results/iu);
+      expect(text).toMatch(/review evidence/iu);
+      expect(text).toMatch(/explicit resume inputs/iu);
+      expect(text).toMatch(/dependency caches/iu);
+      expect(text).toMatch(/test basetemp/iu);
+      expect(text).toMatch(/temporary and cache locations/iu);
+      expect(text).toMatch(/explicit.*remains authoritative/isu);
+    }
+  });
+
   it("checks canonical AUTHORING fragments while keeping the installed router code-free", () => {
     const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
@@ -518,6 +537,9 @@ ${authoring[1] ?? ""}
     expect(output).toContain("workflow_return");
     expect(output).toContain("same");
     expect(output).toContain("fallback");
+    expect(output).toContain("handoffs");
+    expect(output).toContain("schema");
+    expect(output).toContain("Format repair is not semantic retry");
   });
 
   it("keeps workflow-create snippets free of file parsing and default fuse boilerplate", () => {
@@ -543,13 +565,13 @@ ${authoring[1] ?? ""}
     expect(human).toContain("Do not label that example standard");
   });
 
-  it("keeps unchanged defaults and legacy handoff limits in the runtime owner, not the router", () => {
+  it("keeps current defaults and legacy handoff limits in the runtime owner, not the router", () => {
     const manual = source("extensions/workflows/REFERENCE.md");
     expect(manual).toContain("MAX_DAGS_IN_SCOPE");
     expect(manual).toMatch(/1\.\.100|1–100/u);
     expect(manual).toMatch(/1,000 (?:tool )?calls/u);
     expect(manual).toMatch(/24-hour/u);
-    expect(manual).toMatch(/20 turns/u);
+    expect(manual).toMatch(/1,000 turns/u);
     expect(manual).toMatch(/500,000\s+(?:answer\s+)?characters/u);
     expect(manual).toMatch(/SDK timeout.*later transport backstop/isu);
     expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain("10,000");
@@ -592,6 +614,14 @@ ${authoring[1] ?? ""}
       const text = source(`${base}/${name}.md`);
       expect(text.split("\n").length).toBeLessThan(12);
       expect(text).not.toContain("```js");
+    }
+    // Return contracts refine a graph; the worked example must use the real standard DSL.
+    expect(index).toContain("structured-results.md");
+    const snippets = javascriptDocSnippets(`${base}/structured-results.md`);
+    expect(snippets.length).toBeGreaterThan(0);
+    for (const snippet of snippets) {
+      const workflow = standardSource(`export default async function run({ agent, input }) {\n${snippet}\n}`);
+      expect(standardWorkflowSourceShapeErrors(workflow)).toEqual([]);
     }
   });
 

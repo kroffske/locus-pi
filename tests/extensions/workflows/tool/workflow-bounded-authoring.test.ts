@@ -77,6 +77,21 @@ describe("standard bounded carry and author-owned records; requires native ast-g
       'dsl.parallel(records.map((record) => () => dsl.agent(record.value, { label: "write" })));';
     expect(errors(wrap(body)).length).toBeGreaterThan(0);
   });
+  it("admits handoffs through the return tool and still refuses raw schema regardless of transport", () => {
+    expect(
+      errors(
+        wrap(
+          'const units = await dsl.agent(input, { label: "discover", handoffs: { minItems: 1, maxItems: 3 }, returnVia: "tool", ' +
+            'repair: { maxAttempts: 2 } }); return dsl.parallel(units.map((unit) => () => dsl.agent(unit, { label: "work" })));',
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      errors(wrap('return dsl.agent(input, { label: "verify", schema: { type: "object" }, returnVia: "tool" });')).map(
+        (item) => item.message,
+      ),
+    ).toContainEqual(expect.stringMatching(/owns no raw schema/u));
+  });
   it("keeps discovered handoffs opaque despite the new author-record syntax", () => {
     const body =
       'const values = await dsl.agent(input, { label: "discover", handoffs: { maxItems: 3 } }); return dsl.parallel(values.map(({ key }) => () => dsl.agent(key, { label: "work" })));';

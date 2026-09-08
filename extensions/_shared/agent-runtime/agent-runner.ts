@@ -257,7 +257,8 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
 }
 
 export function validateRunPolicy(request: AgentRunRequest): string | undefined {
-  if (request.maxTurns < 1 || request.maxTurns > 20) return "maxTurns must be between 1 and 20.";
+  if (!Number.isSafeInteger(request.maxTurns) || request.maxTurns < 1)
+    return "maxTurns must be a positive safe integer.";
   if (request.depth < 0) return "depth must be non-negative.";
   if (request.depth >= request.maxDepth) return "Agent run depth limit reached.";
   if (request.executionMode === "named" && !isAllowedToolSubset(request.agent.allowedTools, request.allowedTools))

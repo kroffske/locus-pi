@@ -920,7 +920,7 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /\| `runtimeMs` \| 86400000 ms \|/u);
     assert.match(readme, /\| `timeoutMs` \| 86400000 ms \|/u);
     assert.match(readme, /\| `toolCalls` \| 1000 \|/u);
-    assert.match(readme, /\| `turns` \| 20 \|/u);
+    assert.match(readme, /\| `turns` \| 1000 \|/u);
     assert.match(readme, /\| `answerChars` \| 500000 \|/u);
   });
 
@@ -1325,7 +1325,7 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /\| `totalAgents` \| 10000 \| 1 invocations \|/u);
     assert.match(readme, /\| `timeoutMs` \| 86400000 ms \|/u);
     assert.match(readme, /\| `toolCalls` \| 1000 \| not recorded \|/u);
-    assert.match(readme, /\| `turns` \| 20 \| not recorded \|/u);
+    assert.match(readme, /\| `turns` \| 1000 \| not recorded \|/u);
   });
 
   it("journals a failed report write instead of letting the budget evidence vanish silently", async () => {

@@ -4,8 +4,10 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
   type Component,
+  type MarkdownTheme,
   type TUI,
 } from "@earendil-works/pi-tui";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
@@ -31,6 +33,7 @@ import { errorMessage } from "../../_shared/host/error-text.js";
 import { padLine, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";
 import type { DrillRoundsConfig } from "./drill-overlay.js";
+import { renderWorkflowReturnCall } from "./workflow-return-renderer.js";
 
 /** Pi's own TUI mode; host wrappers that omit it are treated as unknown. */
 type ViewerTuiMode = "regular" | "fullscreen";
@@ -41,6 +44,7 @@ type ViewerTui = CustomUiTui & {
 };
 
 interface NativeComponentModule {
+  getMarkdownTheme?: () => MarkdownTheme;
   AssistantMessageComponent: new (
     message?: unknown,
     hideThinkingBlock?: boolean,
@@ -55,7 +59,7 @@ interface NativeComponentModule {
     toolCallId: string,
     args: unknown,
     options: { showImages?: boolean },
-    toolDefinition: undefined,
+    toolDefinition: NativeToolDefinition | undefined,
     ui: TUI,
     cwd: string,
   ) => Component & {
@@ -74,6 +78,10 @@ interface NativeComponentModule {
     onCancel: () => void,
     options?: { autocompleteMaxVisible?: number },
   ) => NativeInputComponent;
+}
+
+interface NativeToolDefinition {
+  renderCall(args: unknown, theme: Theme, context: { expanded: boolean }): Component;
 }
 
 interface NativeInputComponent extends Component {
@@ -168,8 +176,14 @@ export type AgentViewerCapabilityResult =
 /** One guarded Pi-version boundary for both public native components. */
 export class AgentViewerCapability {
   readonly #components = new Map<string, NativeComponentEntry>();
+  readonly #workflowReturnToolDefinition: NativeToolDefinition;
 
-  constructor(private readonly module: NativeComponentModule) {}
+  constructor(private readonly module: NativeComponentModule) {
+    this.#workflowReturnToolDefinition = {
+      renderCall: (args, theme, context) =>
+        renderWorkflowReturnCall(args, theme, context, this.module.getMarkdownTheme?.()),
+    };
+  }
 
   render(blocks: readonly AgentTranscriptBlock[], tui: ViewerTui, width: number, expanded: boolean): string[] {
     const liveIds = new Set(blocks.map((block) => block.id));
@@ -229,7 +243,7 @@ export class AgentViewerCapability {
       block.toolCallId,
       block.args,
       { showImages: false },
-      undefined,
+      block.toolName === "workflow_return" ? this.#workflowReturnToolDefinition : undefined,
       tui as TUI,
       block.cwd,
     );
@@ -696,8 +710,9 @@ export class AgentSessionViewer implements CustomUiComponent {
    * actions gets them back, and regular mode never had the problem.
    */
   #historyControls(): string {
-    if (this.#mouseScrollOwned) return "wheel/pgup/pgdn history";
-    return this.tui.mode === "fullscreen" ? "" : "pgup/pgdn history";
+    const keys = process.platform === "darwin" ? "fn+Up/Down" : "pgup/pgdn";
+    if (this.#mouseScrollOwned) return `wheel/${keys} history`;
+    return this.tui.mode === "fullscreen" ? "" : `${keys} history`;
   }
 }
 

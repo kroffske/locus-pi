@@ -122,6 +122,8 @@ export interface SdkCreateSessionOptionsLike {
   sessionManager?: unknown;
   /** Internal default-adapter input; stripped before createAgentSession. */
   evidenceSessionDir?: string;
+  /** Internal CLI transport deadline; never applied to HTTP provider sessions. */
+  cliRequestTimeoutMs?: number;
   tools?: string[];
   /** Host-level default suppression. Tool-free Fusion always requests `all`. */
   noTools?: "all" | "builtin";
@@ -845,6 +847,8 @@ export interface AgentSdkSessionExecutorOptions {
    * value in tests to exercise the timeout fail-closed path deterministically.
    */
   turnTimeoutMs?: number;
+  /** Exact caller deadline for a CLI-backed provider, separate from the SDK backstop. */
+  cliRequestTimeoutMs?: number;
   /** Maximum wait for the SDK abort acknowledgement before evidence persistence continues. */
   abortTimeoutMs?: number;
   /** Optional fail-closed tool-call budget for this child. */
@@ -874,7 +878,12 @@ export interface AgentSdkSessionExecutorOptions {
 }
 
 export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOptions = {}): AgentExecutor {
-  const createSession = options.createSession ?? defaultCreateAgentSession;
+  const sessionFactory = options.createSession ?? defaultCreateAgentSession;
+  const createSession: CreateAgentSessionFactory = (sessionOptions) =>
+    sessionFactory({
+      ...sessionOptions,
+      ...(options.cliRequestTimeoutMs === undefined ? {} : { cliRequestTimeoutMs: options.cliRequestTimeoutMs }),
+    });
   const now = options.now ?? (() => new Date().toISOString());
   const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_AGENT_SDK_TURN_TIMEOUT_MS;
   const abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_AGENT_SDK_ABORT_TIMEOUT_MS;
@@ -1039,6 +1048,15 @@ async function runChildSession(
     // the `createSession` failure paths below).
     agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
     return cancelledResult(request, reason);
+  }
+
+  // Validate the actual timer before constructing a session. Node turns an
+  // overflowing delay into 1 ms, which would abort a legitimate long child.
+  const turnBudgetMs = turnTimeoutMs * request.maxTurns;
+  if (!Number.isSafeInteger(turnBudgetMs) || turnBudgetMs < 1 || turnBudgetMs > 2_147_483_647) {
+    const reason = "Child timer budget cannot be represented by Node timers; lower maxTurns or turnTimeoutMs.";
+    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", finalAnswer: reason, errors: [reason] });
+    return failedResult(request, reason, "run-policy-blocked", [reason]);
   }
 
   const diagnostics: string[] = [];
@@ -1299,9 +1317,6 @@ async function runChildSession(
       acceptance.bindToolRestriction(restrictAcceptanceTools);
     }
 
-    // Budget scales with maxTurns so a legitimately long multi-turn child is not
-    // killed prematurely, while a stuck child still has a hard ceiling.
-    const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
     const ledger: ChildTurnLedger = { toolCalls: 0, assistantTurns: 0, toolNames: new Set() };
     const deadline = Date.now() + turnBudgetMs;
     let acceptedOutput:
@@ -1316,7 +1331,7 @@ async function runChildSession(
       maxToolCalls,
       execution,
       ledger,
-      acceptance === undefined ? undefined : request.maxTurns,
+      request.maxTurns,
     );
     if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
     while (
@@ -1734,7 +1749,8 @@ export async function materializeSdkSessionOptions(
   mod: unknown,
   opts: SdkCreateSessionOptionsLike,
 ): Promise<Record<string, unknown>> {
-  const { appendSystemPrompt, resourceLoaderOptions, evidenceSessionDir, ...sessionOptions } = opts;
+  const { appendSystemPrompt, resourceLoaderOptions, evidenceSessionDir, cliRequestTimeoutMs, ...sessionOptions } =
+    opts;
   if (!isRecord(mod)) {
     throw new AgentSdkUnavailableError("Installed Pi host does not expose SessionManager for isolated child sessions.");
   }
@@ -1748,8 +1764,54 @@ export async function materializeSdkSessionOptions(
     opts.cwd,
     evidenceSessionDir ?? path.join(runtimeStateDir(opts.cwd ?? process.cwd()), "reports", ".sessions"),
   );
-  const isolatedSessionOptions = { ...sessionOptions, sessionManager: isolatedSessionManager };
-  if (appendSystemPrompt === undefined && resourceLoaderOptions === undefined) return isolatedSessionOptions;
+  const isolatedSessionOptions: Record<string, unknown> = { ...sessionOptions, sessionManager: isolatedSessionManager };
+  // Pi's implicit HTTP idle timeout is a whole-process timeout to a CLI adapter.
+  // Override only this child's settings, retaining explicit operator limits and
+  // the SDK's higher-precedence request options. Native HTTP sessions stay intact.
+  if (
+    cliRequestTimeoutMs !== undefined &&
+    isRecord(opts.model) &&
+    typeof opts.model.baseUrl === "string" &&
+    opts.model.baseUrl.startsWith("cli://")
+  ) {
+    if (!Number.isSafeInteger(cliRequestTimeoutMs) || cliRequestTimeoutMs < 1 || cliRequestTimeoutMs > 2_147_483_647) {
+      throw new Error("cliRequestTimeoutMs must be a positive Node timer duration");
+    }
+    const SettingsManager = mod.SettingsManager as
+      | {
+          create(cwd: string): {
+            getProviderRetrySettings(): { timeoutMs?: number };
+            getGlobalSettings(): { httpIdleTimeoutMs?: number };
+            getProjectSettings(): { httpIdleTimeoutMs?: number };
+            getHttpIdleTimeoutMs(): number;
+            applyOverrides(settings: { retry: { provider: { timeoutMs: number } } }): void;
+          };
+        }
+      | undefined;
+    if (typeof SettingsManager?.create !== "function") {
+      throw new AgentSdkUnavailableError("Installed Pi host does not expose SettingsManager.create for CLI deadlines.");
+    }
+    const settings = SettingsManager.create(opts.cwd ?? process.cwd());
+    const explicitHttpTimeout =
+      settings.getProjectSettings().httpIdleTimeoutMs ?? settings.getGlobalSettings().httpIdleTimeoutMs;
+    const configuredTimeout =
+      settings.getProviderRetrySettings().timeoutMs ??
+      (explicitHttpTimeout === undefined ? undefined : settings.getHttpIdleTimeoutMs() || undefined);
+    settings.applyOverrides({
+      retry: {
+        provider: {
+          timeoutMs: Math.min(cliRequestTimeoutMs, configuredTimeout ?? cliRequestTimeoutMs),
+        },
+      },
+    });
+    isolatedSessionOptions.settingsManager = settings;
+  }
+  if (
+    appendSystemPrompt === undefined &&
+    resourceLoaderOptions === undefined &&
+    isolatedSessionOptions.settingsManager === undefined
+  )
+    return isolatedSessionOptions;
   if (!isRecord(mod) || typeof mod.DefaultResourceLoader !== "function") {
     throw new AgentSdkUnavailableError(
       "Installed Pi host does not expose DefaultResourceLoader for package-owned prompt resources.",
@@ -1762,7 +1824,9 @@ export async function materializeSdkSessionOptions(
     resourceLoaderOptions === undefined
       ? {
           cwd: opts.cwd,
-          appendSystemPromptOverride: (base: string[]) => [...base, appendSystemPrompt!],
+          ...(appendSystemPrompt === undefined
+            ? {}
+            : { appendSystemPromptOverride: (base: string[]) => [...base, appendSystemPrompt] }),
         }
       : {
           cwd: opts.cwd,
@@ -1773,6 +1837,8 @@ export async function materializeSdkSessionOptions(
   if (typeof mod.getAgentDir === "function") loaderOptions.agentDir = (mod.getAgentDir as () => string)();
   const loader = new DefaultResourceLoader(loaderOptions);
   await loader.reload?.();
+  // The loader has its own settings manager. Supplying the loaded resource
+  // snapshot prevents SDK startup from reloading away the child-only overlay.
   return { ...isolatedSessionOptions, resourceLoader: loader };
 }
 

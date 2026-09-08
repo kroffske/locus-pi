@@ -30,7 +30,9 @@ import {
 import { assessWorkflowReplaySafety } from "../../../../extensions/workflows/runtime/workflow-script-identity.js";
 import {
   WorkflowGroupFailureError,
+  WorkflowInvocationCapError,
   createWorkflowRuntime,
+  type WorkflowAgentRequest,
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflowsExt from "../../../../extensions/workflows/index.js";
@@ -119,6 +121,8 @@ async function runWorkflow(
     resumeFromRunId?: string;
     outputDir?: string;
     roles?: Record<string, string>;
+    /** Exact work units for `dsl.items()`, separate from semantic input. */
+    items?: readonly string[];
     /** Override the scripted child's answer for a prompt; may throw to fail that child. */
     answer?: (prompt: string) => string;
   } = {},
@@ -152,6 +156,7 @@ async function runWorkflow(
     name,
     createExecutor,
     ...(options.input !== undefined ? { input: options.input } : {}),
+    ...(options.items !== undefined ? { items: options.items } : {}),
     ...(options.outputDir !== undefined ? { outputDir: options.outputDir } : {}),
     ...(options.resumeFromRunId !== undefined ? { resumeFromRunId: options.resumeFromRunId } : {}),
   });
@@ -543,6 +548,262 @@ export default async function runWorkflow(dsl) {
       divergedAtCall: 0,
       divergedAtNode: nodeName("node-a"),
     });
+  });
+
+  it("continues a run that failed at B once B is repaired: A replayed, B and C fresh", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b"));
+
+    // The shape a repair actually starts from: the stop is a REJECTED child at B,
+    // not a clean finish. A is already paid for and C was never reached.
+    const first = await runWorkflow(root, "labeled", {
+      answer: (prompt) => {
+        if (prompt === "stage-b") throw new Error("review child rejected OLD_FORMAT");
+        return `answer(${prompt})`;
+      },
+    });
+    expect(first.ok).toBe(false);
+    expect(first.executedPrompts).toEqual(["stage-a", "stage-b"]);
+    // The record keeps the failed ordinal, so the prefix ends at a named failure
+    // rather than simply running out of entries.
+    expect(readWorkflowReplayLog(root, first.runId).filter((entry) => entry.kind === "agent")).toMatchObject([
+      { node: nodeName("node-a"), ok: true },
+      { node: nodeName("node-b"), ok: false },
+    ]);
+
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b repaired"));
+    const resumed = await runWorkflow(root, "labeled", { resumeFromRunId: first.runId });
+
+    expect(resumed.executedPrompts).toEqual(["stage-b repaired", "stage-c"]);
+    expect(resumed.executedPrompts).not.toContain("stage-a");
+    expect(resumed.replay).toMatchObject({
+      replayed: true,
+      replayedCalls: 1,
+      freshCalls: 2,
+      divergedAtCall: 1,
+      divergedAtNode: nodeName("node-b"),
+    });
+    expect(resumed.replay.refusedReason).toBeUndefined();
+    expect(resumed.ok).toBe(true);
+    expect(resumed.result).toMatchObject({
+      summary: "answer(stage-a) | answer(stage-b repaired) | answer(stage-c)",
+    });
+  });
+
+  it("ends reuse at a repaired A and serves no recorded tail answer, even for unchanged B and C", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b"));
+    const first = await runWorkflow(root, "labeled");
+
+    // Only A is repaired. The load-bearing assertion is the RESULT: the second
+    // run answers `fresh(...)`, so a recorded `answer(stage-b)` reaching the
+    // summary would prove the tail was substituted from the old record. The
+    // counter-only tests above cannot see that.
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b").replace('"stage-a"', '"stage-a repaired"'));
+    const resumed = await runWorkflow(root, "labeled", {
+      resumeFromRunId: first.runId,
+      answer: (prompt) => `fresh(${prompt})`,
+    });
+
+    expect(resumed.executedPrompts).toEqual(["stage-a repaired", "stage-b", "stage-c"]);
+    expect(resumed.replay).toMatchObject({
+      replayedCalls: 0,
+      freshCalls: 3,
+      divergedAtCall: 0,
+      divergedAtNode: nodeName("node-a"),
+    });
+    expect(resumed.result).toMatchObject({
+      summary: "fresh(stage-a repaired) | fresh(stage-b) | fresh(stage-c)",
+    });
+    expect(JSON.stringify(resumed.result)).not.toContain("answer(");
+  });
+
+  it("reuses the unchanged prefix when the same source runs over a longer item list", async () => {
+    const root = temporaryProject();
+    writeWorkflow(
+      root,
+      "units",
+      `export const meta = { name: "units", description: "one labeled call per item" };
+export default async function runWorkflow(dsl) {
+  const out = [];
+  for (const item of dsl.items()) out.push(await dsl.agent("unit " + item, { label: "unit" }));
+  return { out };
+}
+`,
+    );
+
+    const first = await runWorkflow(root, "units", { items: ["a", "b", "c"] });
+    expect(first.executedPrompts).toEqual(["unit a", "unit b", "unit c"]);
+
+    // Same bytes, more work units. Appending is the cheap half of Repair +
+    // Continue: the three completed calls keep their answers and only the two
+    // new ones reach a child.
+    const resumed = await runWorkflow(root, "units", {
+      items: ["a", "b", "c", "d", "e"],
+      resumeFromRunId: first.runId,
+    });
+
+    expect(resumed.executedPrompts).toEqual(["unit d", "unit e"]);
+    expect(resumed.ok).toBe(true);
+    expect(resumed.replay).toMatchObject({
+      replayed: true,
+      replayedCalls: 3,
+      freshCalls: 2,
+      divergedAtCall: 3,
+      divergedAtNode: nodeName("unit", 3),
+    });
+    expect(resumed.replay.refusedReason).toBeUndefined();
+    expect(resumed.result).toMatchObject({
+      out: ["answer(unit a)", "answer(unit b)", "answer(unit c)", "answer(unit d)", "answer(unit e)"],
+    });
+  });
+
+  it("keeps 10000 recorded calls replayed and dispatches only the 5000 appended ones", async () => {
+    const root = temporaryProject();
+    const sourceRunId = "20260907-010101-b001";
+    const resumedRunId = "20260907-010102-b002";
+    const cappedRunId = "20260907-010103-b003";
+    const RECORDED = 10_000;
+    const APPENDED = 5_000;
+    const runtimeFor = (
+      runId: string,
+      replay: WorkflowReplayController,
+      counter: { dispatches: number },
+      options: { maxTotalAgentInvocations?: number; replaySourceRunId?: string } = {},
+    ): ReturnType<typeof createWorkflowRuntime> =>
+      createWorkflowRuntime({
+        runId,
+        replay,
+        ...(options.maxTotalAgentInvocations === undefined
+          ? {}
+          : { maxTotalAgentInvocations: options.maxTotalAgentInvocations }),
+        ...(options.replaySourceRunId === undefined ? {} : { replaySourceRunId: options.replaySourceRunId }),
+        agentRunner: async (request) => {
+          counter.dispatches += 1;
+          return {
+            ok: true,
+            status: "completed",
+            summary: "done",
+            text: `answer(${request.prompt})`,
+            diagnostics: [],
+            agent: request.agent,
+          };
+        },
+      });
+
+    // The source run takes NO override, so this also states that a ten-thousand
+    // call graph fits under the untouched package default.
+    const sourceCounter = { dispatches: 0 };
+    const source = runtimeFor(
+      sourceRunId,
+      createWorkflowReplayController({ runDir: ensureWorkflowRunDir(root, sourceRunId) }),
+      sourceCounter,
+    );
+    for (let i = 0; i < RECORDED; i++) await source.dsl.agent(`unit ${i}`, { label: "unit" });
+    expect(sourceCounter.dispatches).toBe(RECORDED);
+    const recorded = readWorkflowReplayLog(root, sourceRunId);
+
+    // Continuing past the fuse is an OPERATOR decision, expressed here as the
+    // embedding option behind `budget.totalAgents`: a replayed attempt spends an
+    // invocation like any other (pinned in workflow-run-report.test.ts, "counts a
+    // replayed call as an invocation but never as a child that ran").
+    const resumedCounter = { dispatches: 0 };
+    const resumedController = createWorkflowReplayController({
+      runDir: ensureWorkflowRunDir(root, resumedRunId),
+      recorded,
+      sourceScriptChanged: true,
+    });
+    const resumed = runtimeFor(resumedRunId, resumedController, resumedCounter, {
+      maxTotalAgentInvocations: RECORDED + APPENDED,
+      replaySourceRunId: sourceRunId,
+    });
+    for (let i = 0; i < RECORDED + APPENDED; i++) await resumed.dsl.agent(`unit ${i}`, { label: "unit" });
+    expect(resumedCounter.dispatches).toBe(APPENDED);
+    expect(resumedController.counts()).toEqual({
+      replayedCalls: RECORDED,
+      freshCalls: APPENDED,
+      divergedAtCall: RECORDED,
+      divergedAtNode: nodeName("unit", RECORDED),
+    });
+
+    // Without that override the same continuation dies at the fuse: the whole
+    // prefix replays, the first appended call is admitted by the record check and
+    // then refused by the invocation counter, and no child ever runs. This is the
+    // limitation the skills state, not one they may quietly raise.
+    const cappedCounter = { dispatches: 0 };
+    const cappedController = createWorkflowReplayController({
+      runDir: ensureWorkflowRunDir(root, cappedRunId),
+      recorded,
+      sourceScriptChanged: true,
+    });
+    const capped = runtimeFor(cappedRunId, cappedController, cappedCounter, { replaySourceRunId: sourceRunId });
+    let caught: unknown;
+    try {
+      for (let i = 0; i < RECORDED + APPENDED; i++) await capped.dsl.agent(`unit ${i}`, { label: "unit" });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(WorkflowInvocationCapError);
+    expect((caught as WorkflowInvocationCapError).cap).toBe(DEFAULT_WORKFLOW_BUDGET.totalAgents);
+    expect(cappedCounter.dispatches).toBe(0);
+    expect(cappedController.counts()).toEqual({
+      replayedCalls: RECORDED,
+      freshCalls: 1,
+      divergedAtCall: RECORDED,
+      divergedAtNode: nodeName("unit", RECORDED),
+    });
+  }, 300_000);
+
+  it("does not imply interrupted recovery on a repaired-source resume", async () => {
+    const root = temporaryProject();
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b"));
+    const first = await runWorkflow(root, "labeled");
+    writeWorkflow(root, "labeled", labeledThreeStageWorkflow("stage-b repaired"));
+
+    const resumed = await runWorkflow(root, "labeled", { resumeFromRunId: first.runId });
+    expect(resumed.ok).toBe(true);
+    expect(resumed.replay.replayedCalls).toBe(1);
+    // Ordinary Repair + Continue is not the opt-in crash path, and does not
+    // quietly borrow its admission.
+    expect(
+      resumed.journal.some(
+        (line) => line.kind === "log" && String(line.message ?? "").includes("[workflow:interrupted-recovery]"),
+      ),
+    ).toBe(false);
+
+    // The opt-in flag is a different, stricter admission: it demands an ABSENT
+    // result.json, so it refuses this completed source run before any child. It
+    // cannot go through `runWorkflow`, whose replay-envelope expectation would
+    // fire first — a refusal this early leaves no replay plan to report, and that
+    // absence is itself the proof that admission stopped ahead of planning.
+    process.env.PI_MODEL_ROLES_HOME = path.join(root, ".pi-user");
+    const harness = createHarness(root, { sessionId: "replay-labeled-recover" });
+    let dispatches = 0;
+    const refused = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "labeled",
+      createExecutor: (): AgentExecutor => ({
+        async run(request: AgentRunRequest) {
+          dispatches += 1;
+          return {
+            status: "completed" as const,
+            agentName: request.agent?.name ?? "sub-agent",
+            reason: "answered",
+            text: "fresh",
+            diagnostics: [],
+            lifecycleEntryIds: [],
+          };
+        },
+      }),
+      resumeFromRunId: first.runId,
+      recoverInterrupted: true,
+    });
+    expect(refused.ok).toBe(false);
+    expect(refused.error ?? "").toMatch(/absent result\.json/u);
+    expect(dispatches).toBe(0);
+    expect(refused.replay).toBeUndefined();
   });
 
   it("compares the recorded node name before the request key when the source changed", () => {
@@ -1691,5 +1952,34 @@ describe("maxTurns is part of the replay key", () => {
     await expect(resumed.dsl.agent("stage-1")).resolves.toBe("answer(stage-1)");
     expect(resumed.prompts).toEqual([]);
     expect(controller.counts()).toEqual({ replayedCalls: 1, freshCalls: 0 });
+  });
+
+  it("reuses a four-call legacy prefix under the new default and runs only the larger-budget suffix", async () => {
+    const runDir = recordDir();
+    const prefix = ["preflight", "placement", "placement-gate", "implement"];
+    const original = answeringTurns("legacy-prefix", 20, createWorkflowReplayController({ runDir }));
+    for (const label of prefix) await original.dsl.agent(label, { label });
+    const recorded = readFileSync(workflowReplayFile(runDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as WorkflowReplayEntry);
+    const controller = createWorkflowReplayController({ runDir: recordDir(), recorded });
+    const dispatched: WorkflowAgentRequest[] = [];
+    const resumed = createWorkflowRuntime({
+      runId: "larger-turns-suffix",
+      replay: controller,
+      defaultMaxTurns: 1000,
+      agentRunner: async (request) => {
+        dispatched.push(request);
+        return { ok: true, status: "completed", summary: "done", text: "review complete", diagnostics: [] };
+      },
+    });
+    for (const label of prefix) {
+      await expect(resumed.dsl.agent(label, { label, maxTurns: 20 })).resolves.toBe(`answer(${label})`);
+    }
+    await expect(resumed.dsl.agent("review", { label: "review", maxTurns: 1000 })).resolves.toBe("review complete");
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.maxTurns).toBe(1000);
+    expect(controller.counts()).toMatchObject({ replayedCalls: 4, freshCalls: 1, divergedAtCall: 4 });
   });
 });
