@@ -259,6 +259,15 @@ saved children and later manual stages share the selected named path. Use
 `projectRoot()` for source context. Do not add permission/tool fields,
 another default writable root, a path parser, or an information-gathering script.
 
+The workflow workspace is the durable location for handoffs, final results,
+review evidence, and explicit resume inputs. Keep disposable environments,
+dependency caches, test basetemp, transient renderer output, and staging in the
+ordinary OS or tool temporary and cache locations. When renderer output is the
+final deliverable, write or promote it into the workflow workspace. Promote any
+scratch output needed for review or resume before its temporary or cache location
+expires. This guidance reduces accidental mixing; an authored prompt that
+explicitly requests another placement remains authoritative.
+
 That path-oriented shape is compatibility guidance for existing hand-authored
 workflows. The packaged authoring skill does not generate it. New source puts
 source-inspection instructions in an `agent()` prompt and leaves filesystem work

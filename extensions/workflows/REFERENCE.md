@@ -1578,6 +1578,15 @@ replacement and path-based open/rename/unlink one indivisible operation against
 a hostile local process. Workspace files survive failed runs; run-local evidence
 remains immutable under the run id.
 
+The workflow workspace is the durable location for handoffs, final results,
+review evidence, and explicit resume inputs. Keep disposable environments,
+dependency caches, test basetemp, transient renderer output, and staging in
+ordinary OS or tool temporary and cache locations. If renderer output is the
+final deliverable, write or promote it into the workflow workspace. Promote any
+scratch output needed for review or resume before its temporary or cache location
+expires. This guidance reduces accidental mixing; an authored prompt that
+explicitly requests another placement remains authoritative.
+
 `invokeWorkflow()` accepts exactly one source-bound sibling `child`, saved
 `name`, project-relative `scriptPath`, or exact legacy `packageName`, optional
 semantic `input` and exact `items`, one safe item `key`, the complete unique

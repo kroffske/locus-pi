@@ -175,13 +175,16 @@ export function composeWorkflowChildTask(
     "",
     ...(workflowWorkspaceDir === undefined
       ? []
-      : [`workflow workspace (write intermediate and final workflow files here): ${workflowWorkspaceDir}`]),
+      : [`workflow workspace (durable workflow files and evidence): ${workflowWorkspaceDir}`]),
     ...(locations.pwd === undefined ? [] : [`pwd (code workspace): ${locations.pwd}`]),
     ...(locations.projectRoot === undefined ? [] : [`project root (source context): ${locations.projectRoot}`]),
     "",
-    "Use pwd for code work. Use the workflow workspace for workflow artifacts; replace assigned files idempotently.",
+    "Use pwd for code work. Use the workflow workspace for durable handoffs, final results, review evidence, and explicit resume inputs; replace assigned files idempotently.",
+    "Keep disposable environments, dependency caches, test basetemp, transient renderer output, and staging in ordinary OS/tool temporary or cache locations.",
+    "If rendered output is the final deliverable, write or promote it into the workflow workspace. Promote any scratch output needed for review or resume before its temporary or cache location expires.",
     "Treat the project root as source context, not as a default artifact destination.",
-    "Use the exact paths above. Do not substitute the user home directory or /tmp.",
+    "Use the exact workflow workspace path above for durable files; do not invent another project-relative durable root for scratch.",
+    "This is placement guidance only. An authored prompt that explicitly requests another placement remains authoritative.",
     "Workflow files keep their exact names; runtime records references and does not reconstruct their content.",
   ].join("\n");
   return `${note}${WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR}${prompt}`;
