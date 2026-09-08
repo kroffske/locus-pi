@@ -546,13 +546,13 @@ ${authoring[1] ?? ""}
     expect(human).toContain("Do not label that example standard");
   });
 
-  it("keeps unchanged defaults and legacy handoff limits in the runtime owner, not the router", () => {
+  it("keeps current defaults and legacy handoff limits in the runtime owner, not the router", () => {
     const manual = source("extensions/workflows/REFERENCE.md");
     expect(manual).toContain("MAX_DAGS_IN_SCOPE");
     expect(manual).toMatch(/1\.\.100|1–100/u);
     expect(manual).toMatch(/1,000 (?:tool )?calls/u);
     expect(manual).toMatch(/24-hour/u);
-    expect(manual).toMatch(/20 turns/u);
+    expect(manual).toMatch(/1,000 turns/u);
     expect(manual).toMatch(/500,000\s+(?:answer\s+)?characters/u);
     expect(manual).toMatch(/SDK timeout.*later transport backstop/isu);
     expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain("10,000");

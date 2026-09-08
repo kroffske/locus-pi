@@ -877,6 +877,7 @@ describe("same-session output acceptance — the causes the return contract owns
     submissions?: (readonly unknown[])[];
     maxAttempts?: number;
     maxTurns?: number;
+    workTurns?: number[];
     withRestriction?: boolean;
   }) {
     const contract = normalizeWorkflowReturnContract({
@@ -899,7 +900,7 @@ describe("same-session output acceptance — the causes the return contract owns
       async prompt() {
         const submission = config.submissions?.[prompts];
         prompts += 1;
-        listener?.({ type: "turn_start" });
+        for (let i = 0; i < (config.workTurns?.[prompts - 1] ?? 1); i += 1) listener?.({ type: "turn_start" });
         if (submission !== undefined) {
           listener?.({ type: "tool_execution_start", toolName: tool.name, toolCallId: `t${prompts}` });
           for (const value of submission) {
@@ -972,6 +973,34 @@ describe("same-session output acceptance — the causes the return contract owns
     const { result } = await runAcceptanceHost({ submissions: [], maxAttempts: 3, maxTurns: 1 });
     expect(result.status).toBe("failed");
     expect(result.failureCause).toBe("assistant-turn-budget");
+  });
+
+  it.each([
+    { maxTurns: 20, cycles: 21, status: "failed" },
+    { maxTurns: 1000, cycles: 25, status: "completed" },
+    { maxTurns: 1000, cycles: 1000, status: "completed" },
+    { maxTurns: 1000, cycles: 1001, status: "failed" },
+  ])("counts ordinary work before the first tool return ($maxTurns/$cycles)", async ({ maxTurns, cycles, status }) => {
+    const { result, prompts } = await runAcceptanceHost({
+      submissions: [["complete review"]],
+      maxTurns,
+      workTurns: [cycles],
+    });
+    expect(result.status).toBe(status);
+    expect(prompts()).toBe(1);
+    if (status === "failed") expect(result.failureCause).toBe("assistant-turn-budget");
+  });
+
+  it.each([20, 21])("keeps work and clarification on one cumulative turn ledger (%s)", async (maxTurns) => {
+    const { result, prompts } = await runAcceptanceHost({
+      submissions: [[], ["complete review"]],
+      maxTurns,
+      workTurns: [20, 1],
+      maxAttempts: 3,
+    });
+    expect(result.status).toBe(maxTurns === 20 ? "failed" : "completed");
+    expect(prompts()).toBe(maxTurns === 20 ? 1 : 2);
+    if (maxTurns === 20) expect(result.failureCause).toBe("assistant-turn-budget");
   });
 });
 

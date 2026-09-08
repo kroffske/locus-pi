@@ -1,4 +1,13 @@
-import { lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -58,7 +67,7 @@ describe("workflow skill host command", () => {
       userHome: f.userHome,
     });
     expect(first.rows.filter((row) => !row.legacy).map((row) => row.changed)).toEqual(
-      Array.from({ length: 4 }, () => "created"),
+      Array.from({ length: 6 }, () => "created"),
     );
     for (const hostRoot of [path.join(f.userHome, ".agents", "skills"), path.join(f.userHome, ".claude", "skills")]) {
       for (const skill of WORKFLOW_SKILL_NAMES) {
@@ -114,6 +123,40 @@ describe("workflow skill host command", () => {
       path.join(f.packageRoot, "skills", skill),
     );
     expect(lstatSync(path.join(hostRoot, "locus-pi-workflows"), { throwIfNoEntry: false })).toBeUndefined();
+  });
+
+  it("adds the external session skill to a two-skill installation without replacing existing links", () => {
+    const f = fixture();
+    const hostRoot = path.join(f.userHome, ".agents", "skills");
+    mkdirSync(hostRoot, { recursive: true });
+    const previous = ["locus-pi-workflow-create", "locus-pi-workflow-run"];
+    for (const name of previous)
+      symlinkSync(path.join(f.packageRoot, "skills", name), path.join(hostRoot, name), "dir");
+    mkdirSync(path.join(hostRoot, "user-owned-skill"));
+    writeFileSync(
+      path.join(hostRoot, WORKFLOW_SKILL_STATE_FILE),
+      JSON.stringify({ schema: "locus-pi.workflow-skills.v1", owner: "@kroffske/locus-pi", links: previous }),
+    );
+
+    const result = operateWorkflowSkillHosts({
+      action: "sync",
+      host: "codex",
+      scope: "user",
+      projectRoot: f.projectRoot,
+      packageRoot: f.packageRoot,
+      userHome: f.userHome,
+    });
+    expect(result.rows.filter((row) => row.changed !== "none")).toEqual([
+      expect.objectContaining({ skill: "external-locus-pi", changed: "created" }),
+    ]);
+    for (const name of previous)
+      expect(readlinkSync(path.join(hostRoot, name))).toBe(path.join(f.packageRoot, "skills", name));
+    expect(lstatSync(path.join(hostRoot, "user-owned-skill")).isDirectory()).toBe(true);
+    expect(JSON.parse(readFileSync(path.join(hostRoot, WORKFLOW_SKILL_STATE_FILE), "utf8")).links).toEqual([
+      "external-locus-pi",
+      "locus-pi-workflow-create",
+      "locus-pi-workflow-run",
+    ]);
   });
 
   it("preflights every target and refuses host-owned paths without partial writes", () => {

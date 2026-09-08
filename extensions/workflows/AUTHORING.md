@@ -652,7 +652,7 @@ Failure statuses remain domain detail; the durable run disposition is
 Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
-budget allows 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer
+budget allows 1,000 tool calls, a 24-hour timeout, 1,000 turns, and 500,000 answer
 characters per child attempt. One run admits at most 10,000 physical attempts,
 starts no new child after its 24-hour gate, and executes at most four attempts
 concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
@@ -661,6 +661,14 @@ Same-session tool-output corrections consume the existing child budgets instead
 of creating a new physical invocation. Structured launchers may explicitly set
 the shared budget; see [execution controls](references/execution-controls.md).
 The SDK timeout is a later transport backstop, not authored workflow policy.
+
+Turns count SDK model cycles, including ordinary tool use and output
+clarification within the same child. They are not workflow retries or return
+submissions. The default is an emergency allowance, not a prompt instruction to
+consume it. Explicit `maxTurns` values must be positive safe integers whose
+combined SDK timer is representable. When resuming work recorded under an older
+default, pin completed calls to their recorded effective value before changing
+the unfinished suffix, then verify prefix reuse.
 
 `meta.profile` makes authoring intent explicit. New generated source uses
 `"standard"`; existing compatibility-heavy entries use `"legacy"`, end-to-end

@@ -24,6 +24,48 @@ This conservative first version refuses parallel/nested runs and unconfirmed eff
 
 A confirmed cached answer does not recreate files or recheck an externally changed repository. Do not change the workspace, provider routes or agent profiles while relying on old evidence. Require fresh verification before irreversible external effects. Filesystem/power-loss durability and real Pi execution require their own acceptance evidence; process-kill prefix tests do not establish those stronger guarantees.
 
+### Reconcile an unconfirmed call
+
+Missing `agent_end`, `workflow_end` and `result.json` after process loss do not
+prove that the child did nothing. Preserve the evidence and identify the actual
+process and descendants by PID/start, working directory and stream paths. Check
+for a newer matching run and respect the existing workspace lease before any
+continuation. If descendants or external operations are still active or unknown,
+resolve that concrete effect first. An unexplained exit is not proof of a signal,
+OOM or timeout.
+
+The project owner inspects the current diff, accepted scope, partial artifacts,
+command records and any external readback. Record what is retained, incomplete
+or uncertain and whether the completed prefix's prerequisites are still usable.
+This is reconciliation of current state, not acceptance of the interrupted child.
+Existing authorization for scoped repair and continuation remains sufficient;
+preserve real safety and external-action boundaries.
+
+If an authorized checkpoint commit occurred between attempts, reconcile content
+separately from `HEAD`, index and inventory changes. Keep the original step-entry
+baseline tar and manifest through the checkpoint and recovery. Compare the full
+current step against that baseline, including additions and deletions; a clean
+working-tree diff after commit does not mean the step made no changes. Explain
+checkpoint/report-only differences separately and validate actual content changes
+against the accepted scope. Do not replace the baseline with the new commit or
+require historical `HEAD` equality as a substitute for that comparison. A checkpoint
+already authorized by the owner needs no repeat approval and proves no acceptance.
+
+If a verified terminal ancestor has the same target, physical workspace and
+original semantic input, ordinary `--resume <ancestorRunId>` is a supported new
+branch after that reconciliation. Preserve the suitable prefix's exact requests;
+repair the first fresh stage to inspect retained changes and finish or repair the
+accepted work. Keep downstream review and QA fresh. Verify the source and actual
+prefix reuse. Report the terminal ancestor as `resumeFromRunId` and the orphan as
+separate reconciliation context; do not claim direct recovery of the orphan.
+
+If the prefix is no longer suitable, make an earlier stage fresh or author an
+explicitly declared fresh recovery workflow from current state. If no terminal
+ancestor is usable, no prefix replay is available through this route. Neither
+path deletes partial work, fabricates a terminal record, edits historical replay,
+skips required checks or retries an unconfirmed external effect blindly. Runtime
+does not perform the domain reconciliation or guarantee exactly-once effects.
+
 ## Human continuation
 
 `awaitOperator({ reason, operatorHandoff? })` declares a terminal disposition and does not pause the JavaScript stack. Return immediately. A resumable handoff places references under `operatorHandoff.continuationArtifactRefs`, not a top-level `artifactRefs` property. The handoff service validates claims, target/workspace identity and artifact digests, then starts a new run with the real operator answer. It does not synthesize approval.

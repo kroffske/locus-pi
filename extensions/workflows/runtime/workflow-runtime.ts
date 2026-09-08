@@ -23,8 +23,6 @@ import type { AgentOutputAcceptance } from "../../_shared/agent-runtime/agent-ru
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DEFAULT_WORKFLOW_BUDGET,
-  WORKFLOW_AGENT_MAX_TURNS,
-  WORKFLOW_AGENT_MIN_TURNS,
   WORKFLOW_MAX_TIMEOUT_MS,
   assertWorkflowBudgetValue,
   formatWorkflowBudgetRaise,
@@ -570,10 +568,9 @@ export interface WorkflowAgentOptions {
    */
   timeoutMs?: number;
   /**
-   * Assistant turns for one child attempt, within the host clamp of 1..20. It was
-   * a hardcoded `5` in the bridge and invisible to authors, while the child's whole
-   * wall clock is computed from it — a budget the package was making in silence.
-   * A value outside the clamp is refused before any child starts.
+   * SDK model cycles for one child attempt, including ordinary tool use and
+   * output clarification. Positive safe integer, not a restart count. The
+   * computed timeout/turn pair must fit the host timer.
    */
   maxTurns?: number;
   /**
@@ -999,7 +996,7 @@ export interface WorkflowRuntimeOptions {
   /** Default wall-clock fuse for one child attempt. Absent means a call that
    *  declares none arms no workflow-level fuse and is bounded only by the SDK host. */
   defaultTimeoutMs?: number;
-  /** Default assistant turns per child attempt, within the host clamp of 1..20.
+  /** Default cumulative SDK model cycles per child attempt.
    *  Absent leaves the bridge's own default in place. */
   defaultMaxTurns?: number;
   /**
@@ -1338,14 +1335,10 @@ function executedModelEvidence(
   };
 }
 
-/** The host clamps `maxTurns` to 1..20 (`agent-runner.ts`). The runtime refuses an
- *  out-of-range value here, BEFORE any child starts, so an author sees the rule
- *  instead of a request-validation failure after the run has begun spending. */
+/** Refuse unrepresentable assistant-turn counts before spending on a child. */
 function normalizeMaxTurns(maxTurns: number): number {
-  if (!Number.isSafeInteger(maxTurns) || maxTurns < WORKFLOW_AGENT_MIN_TURNS || maxTurns > WORKFLOW_AGENT_MAX_TURNS) {
-    throw new Error(
-      `agent maxTurns must be an integer between ${WORKFLOW_AGENT_MIN_TURNS} and ${WORKFLOW_AGENT_MAX_TURNS}`,
-    );
+  if (!Number.isSafeInteger(maxTurns) || maxTurns < 1) {
+    throw new Error("agent maxTurns must be a positive safe integer");
   }
   return maxTurns;
 }

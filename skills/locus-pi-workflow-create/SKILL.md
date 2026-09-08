@@ -39,6 +39,13 @@ Let the agent choose how to inspect, implement and verify.
 Add procedural instructions only for a concrete repository constraint or known
 failure; do not script tool sequences or repeat a general policy in every node.
 
+Implementation briefs and templates must distinguish completion from preparation:
+after an authorized environment repair, continue the accepted implementation and
+verify its requested behavior. Passing baseline tests is not implementation.
+Unfinished work alone is not a blocker; a blocked result needs a concrete obstacle
+that cannot be resolved within scope, or an observed resource limit. For this
+failure, read [Repair + Continue](references/repair-and-continue.md#unfinished-implementation).
+
 Choose the return shape from its consumer. Ordinary reports and intermediate
 narrative use plain `agent()` text, without `output`, `schema`, `handoffs` or an
 author-guessed length target. Use `choice` when code branches on a decision and
@@ -49,6 +56,15 @@ Add an output bound or per-call budget only for an explicit user requirement,
 an actual consumer contract or a measured failure at that boundary. Name that
 reason; do not guess a number, copy one from an example or keep raising it after
 an otherwise valid report is rejected. Runtime safety limits still apply.
+
+`maxTurns` counts SDK model cycles within a child, including normal tool use;
+it is not a workflow retry or output-repair count. Keep routine stages on the
+runtime default. For a confirmed turn-budget stop, follow
+[Repair + Continue](references/repair-and-continue.md#turn-budget-failures).
+
+When repairing an output-contract failure, inspect the whole unfinished suffix
+for the same narrative-wrapper mistake. Preserve completed calls and genuine
+decision/fan-out contracts; see [Repair + Continue](references/repair-and-continue.md#repeated-output-contract-failures).
 
 When an agent executes a command or writes files before returning a `choice`,
 use `returnVia: "tool"`. This keeps format correction in the same child session;

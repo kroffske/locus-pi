@@ -1,5 +1,5 @@
 /**
- * Install the two packaged workflow skills into external agent hosts.
+ * Install packaged workflow skills into external agent hosts.
  *
  * Package skill directories remain canonical. Host entries are managed
  * symlinks, so a package update changes the source without creating a second
@@ -25,7 +25,7 @@ import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 import { errorMessage, workflowWarningBlock } from "../operator/operator-ui.js";
 
-export const WORKFLOW_SKILL_NAMES = ["locus-pi-workflow-create", "locus-pi-workflow-run"] as const;
+export const WORKFLOW_SKILL_NAMES = ["locus-pi-workflow-create", "locus-pi-workflow-run", "external-locus-pi"] as const;
 
 const LEGACY_WORKFLOW_SKILL_NAMES = [
   "locus-pi-workflows",

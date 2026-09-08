@@ -54,7 +54,19 @@ After submission, and before a clarification prompt, the host narrows active too
 
 Tools, assistant turns and the wall-clock deadline accumulate across clarification. The original outer workflow timeout remains armed. A candidate is committed only when the child finishes successfully; a provider error, cancellation, timeout or budget failure after a proposal still fails. The session is disposed once.
 
+Assistant turns are SDK model cycles (`turn_start`), including normal tool use
+before the first proposal. The same cumulative `maxTurns` limit applies to plain
+text and tool-return children; `repair.maxAttempts` separately limits output
+submissions. A long review can exhaust turns without ever calling
+`workflow_return`. Inspect its transcript before diagnosing a format-repair loop.
+
 Format repair is not semantic retry: a record with the right shape is not evidence that its facts are right. A required verifier stays required, and content review is a separate agent call with the original goal and exact feedback, never a hidden continuation of shape clarification.
+
+When an array or object container has the wrong type, correction feedback shows
+the raw `value` container syntax.
+The agent must fill that container with its existing schema-matching content;
+the host never parses a JSON string into an accepted array or object. Correction
+examples do not change the initial prompt or the completed-call replay key.
 
 Legacy `choice`, `schema` and `schema + validate` keep their current fresh-session shape repair; ordinary text calls are unchanged. Tool return is opt-in. A semantic `continue` still requires a new worker call and a new conversation.
 

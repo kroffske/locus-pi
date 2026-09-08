@@ -1824,6 +1824,50 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(disposeSpy).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { maxTurns: 20, cycles: 20, status: "completed" },
+    { maxTurns: 20, cycles: 21, status: "failed" },
+    { maxTurns: 1000, cycles: 25, status: "completed" },
+    { maxTurns: 1000, cycles: 1000, status: "completed" },
+    { maxTurns: 1000, cycles: 1001, status: "failed" },
+  ])("enforces $maxTurns assistant cycles on plain text ($cycles cycles)", async ({ maxTurns, cycles, status }) => {
+    const { session, abortSpy } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "Review complete.",
+      events: Array.from({ length: cycles }, () => [
+        { type: "turn_start" },
+        { type: "message_start", message: { role: "assistant" } },
+      ]).flat(),
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      turnTimeoutMs: 1000,
+    });
+    const result = await executor.run({ ...request(), maxTurns }, new AbortController().signal);
+    expect(result.status).toBe(status);
+    if (status === "failed") {
+      expect(result.failureCause).toBe("assistant-turn-budget");
+      expect(abortSpy).toHaveBeenCalledOnce();
+      expect(result.text).toBeUndefined();
+    } else {
+      expect(result.text).toBe("Review complete.");
+      expect(abortSpy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses an overflowing computed timer before creating a session", async () => {
+    const createSession = vi.fn<CreateAgentSessionFactory>();
+    const executor = createAgentSdkSessionExecutor({ createSession, turnTimeoutMs: 2_147_483_647 });
+    const result = await executor.run({ ...request(), maxTurns: 2 }, new AbortController().signal);
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("run-policy-blocked");
+    expect(result.reason).toContain("cannot be represented by Node timers");
+    expect(createSession).not.toHaveBeenCalled();
+    expect(result.executedModel).toBeUndefined();
+  });
+
   it("fails closed when the child starts a tool call beyond its configured budget", async () => {
     const { session, disposeSpy, abortSpy } = fakeSession({
       toolCalls: 4,
