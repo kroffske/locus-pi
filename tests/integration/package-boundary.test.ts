@@ -353,7 +353,8 @@ describe("npm public package boundary", () => {
     // 256 since the shared schema validator became its own runtime module and the create
     // skill gained the structured-results card.
     // 259 with the external-session skill and its interactive/JSON lifecycle references.
-    expect(dryRun.files).toHaveLength(259);
+    // 260 with the agent viewer's workflow_return renderer.
+    expect(dryRun.files).toHaveLength(260);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

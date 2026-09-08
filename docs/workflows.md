@@ -82,6 +82,15 @@ Open the group README: it links the original launch, workspace, saved children, 
 
 Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent root launches receive different groups even in one session; resume uses the original workspace but writes its own receipt. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
 
+The workflow workspace is the durable location for handoffs, final results,
+review evidence, and explicit resume inputs. Keep disposable environments,
+dependency caches, test basetemp, transient renderer output, and staging in
+ordinary OS or tool temporary and cache locations. If renderer output is the
+final deliverable, write or promote it into the workflow workspace. Promote any
+scratch output needed for review or resume before its temporary or cache location
+expires. This guidance reduces accidental mixing; an authored prompt that
+explicitly requests another placement remains authoritative.
+
 Workspace `.workflow-runs.md` contains backlinks. It is a reserved runtime file: a user file with this name is never overwritten, and the launch explicitly rejects. The group README and backlink are replaced with complete durable content through temp+rename and parent-directory sync. An incomplete runtime-owned README is restored from root metadata; an incomplete backlink returns an explicit recovery error so earlier links are not lost. The shared pages contain permanent links, not the “latest status”; see each execution's current state in its `runtime/result.json` and journal. They are written only by the root under the workspace lease, never after it is released.
 
 Old flat runs remain readable and resumable in place. Each runId is resolved through the shared confined lookup; symlink paths and ambiguous IDs are never selected arbitrarily. A safely located resume adds `attempts/<newRunId>/`; an early unsafe or missing source stores a separate rejected receipt. Runs and workspaces are never migrated or deleted automatically.

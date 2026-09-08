@@ -192,6 +192,25 @@ describe("design-first readable workflow authoring", () => {
     expect(storage).toContain("must never resolve to the same directory");
   });
 
+  it("teaches durable workflow files separately from disposable scratch", () => {
+    for (const relativePath of [
+      "skills/locus-pi-workflow-create/SKILL.md",
+      "extensions/workflows/AUTHORING.md",
+      "extensions/workflows/REFERENCE.md",
+      "docs/workflows.md",
+    ]) {
+      const text = source(relativePath);
+      expect(text).toMatch(/durable (?:handoffs|location)/iu);
+      expect(text).toMatch(/final results/iu);
+      expect(text).toMatch(/review evidence/iu);
+      expect(text).toMatch(/explicit resume inputs/iu);
+      expect(text).toMatch(/dependency caches/iu);
+      expect(text).toMatch(/test basetemp/iu);
+      expect(text).toMatch(/temporary and cache locations/iu);
+      expect(text).toMatch(/explicit.*remains authoritative/isu);
+    }
+  });
+
   it("checks canonical AUTHORING fragments while keeping the installed router code-free", () => {
     const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");

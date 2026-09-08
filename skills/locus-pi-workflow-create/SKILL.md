@@ -80,7 +80,7 @@ well as the final answer: work may have finished before answer validation failed
 
 ## Source and evidence boundary
 
-Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [AUTHORING.md](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe.
+Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [AUTHORING.md](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe. When agents write files, keep durable handoffs, final results, review evidence, and explicit resume inputs in the runtime-assigned workflow workspace; use ordinary OS or tool temporary and cache locations for disposable environments, dependency caches, test basetemp, transient renderer output, and staging. A final rendered asset belongs in the workflow workspace, and explicit authored placement remains authoritative.
 
 Give every agent a concise human `title` describing its current work. In a
 `.map()`/`parallel()` list, derive it from the item and question so siblings are

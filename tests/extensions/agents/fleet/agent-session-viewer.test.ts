@@ -8,6 +8,7 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentTranscriptToolBlock } from "../../../../extensions/_shared/agent-runtime/agent-live-transcript.js";
 import { statusMeta } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import agents from "../../../../extensions/agents/index.js";
@@ -18,6 +19,8 @@ import {
   loadAgentViewerCapability,
 } from "../../../../extensions/agents/fleet/session-viewer.js";
 import { createHarness, emit } from "../../../test-harness.js";
+
+const PAGE_HISTORY_HINT = process.platform === "darwin" ? "fn+Up/Down history" : "pgup/pgdn history";
 
 class FakeAssistantComponent {
   #message: any;
@@ -193,6 +196,20 @@ function executionFor(rowId: string): AgentLiveExecutionHandle {
   const execution = agentLiveStore.captureExecutionAuthority(rowId);
   if (execution === undefined) throw new Error(`No live execution for ${rowId}`);
   return execution;
+}
+
+function workflowReturnBlock(args: unknown): AgentTranscriptToolBlock {
+  return {
+    id: "tool:workflow-return",
+    kind: "tool",
+    toolCallId: "workflow-return",
+    toolName: "workflow_return",
+    args,
+    cwd: process.cwd(),
+    executionStarted: false,
+    argsComplete: false,
+    isPartial: true,
+  };
 }
 
 class RecordingTerminal implements Terminal {
@@ -391,6 +408,12 @@ describe("AgentSessionViewer", () => {
     tui.requestRender.mockClear();
     viewer.handleInput("up");
     expect(tui.requestRender).not.toHaveBeenCalled();
+    viewer.handleInput("\u001b[5~");
+    const pageUp = viewer.render(80).join("\n");
+    expect(pageUp).toContain("message-8");
+    expect(pageUp).not.toContain("message-11");
+    viewer.handleInput("\u001b[6~");
+    expect(viewer.render(80).join("\n")).toContain("message-11");
     viewer.handleInput("home");
     expect(viewer.render(80).join("\n")).toContain("message-0");
     viewer.handleInput("end");
@@ -538,7 +561,7 @@ describe("AgentSessionViewer", () => {
 
     expect(write).not.toHaveBeenCalled();
     const footer = viewer.render(80).at(-1) ?? "";
-    expect(footer).toContain("pgup/pgdn history · enter send");
+    expect(footer).toContain(`${PAGE_HISTORY_HINT} · enter send`);
     expect(footer).not.toContain("wheel");
 
     viewer.dispose();
@@ -920,6 +943,113 @@ describe("AgentSessionViewer", () => {
     unregister();
     viewer.dispose();
     tui.stop();
+  });
+
+  it("renders workflow_return Markdown leaves under their exact keys and indices while retaining raw args", async () => {
+    const { initTheme } = await import("@earendil-works/pi-coding-agent");
+    initTheme(undefined, false);
+    const loaded = await loadAgentViewerCapability();
+    if (!loaded.ok) throw new Error(loaded.reason);
+    const tui = { requestRender: vi.fn() };
+    const args = {
+      value: [
+        "# Summary\n\n- exact line",
+        { section: "**Nested result**\n\n`code`", count: 2 },
+        false,
+        "literal\\nsequence",
+        "unsafe:\u001b]52;c;payload\u0007",
+      ],
+    };
+    const retained = structuredClone(args);
+    const block = workflowReturnBlock(args);
+
+    const compact = loaded.capability.render([block], tui, 80, false).join("\n");
+    expect(compact).toContain("workflow_return");
+    expect(compact).toContain('"value":');
+    expect(compact).toContain("[0]:");
+    expect(compact).toContain("[1]:");
+    expect(compact).toContain('"section":');
+    expect(compact).toContain("Summary");
+    expect(compact).toContain("Nested result");
+    expect(compact).toContain('"count":');
+    expect(compact).toContain("2");
+    expect(compact).toContain("literal\\nsequence");
+    expect(compact).toContain("unsafe:�]52;c;payload�");
+    expect(compact).not.toContain("\u001b]52");
+    expect(compact).not.toContain("# Summary\\n\\n- exact line");
+    expect(args).toEqual(retained);
+
+    const expanded = loaded.capability.render([block], tui, 120, true).join("\n");
+    expect(expanded).toContain('"value": [');
+    expect(expanded).toContain("# Summary\\n\\n- exact line");
+    expect(expanded).toContain("unsafe:\\u001b]52;c;payload\\u0007");
+    expect(args).toEqual(retained);
+  });
+
+  it("keeps native workflow_return result and error transitions around the readable call", async () => {
+    const { initTheme } = await import("@earendil-works/pi-coding-agent");
+    initTheme(undefined, false);
+    const loaded = await loadAgentViewerCapability();
+    if (!loaded.ok) throw new Error(loaded.reason);
+    const tui = { requestRender: vi.fn() };
+    const pending = workflowReturnBlock({ value: "## Result\n\nReadable while pending." });
+    const started = { ...pending, executionStarted: true, argsComplete: true };
+    const complete: AgentTranscriptToolBlock = {
+      ...started,
+      result: { content: [{ type: "text", text: "workflow accepted" }], isError: false },
+      isPartial: false,
+    };
+    const failed: AgentTranscriptToolBlock = {
+      ...complete,
+      result: { content: [{ type: "text", text: "workflow rejected" }], isError: true },
+    };
+
+    expect(loaded.capability.render([pending], tui, 80, false).join("\n")).toContain("Readable while pending.");
+    expect(loaded.capability.render([started], tui, 80, false).join("\n")).toContain("Readable while pending.");
+    expect(loaded.capability.render([complete], tui, 80, false).join("\n")).toContain("workflow accepted");
+    const error = loaded.capability.render([failed], tui, 80, false).join("\n");
+    expect(error).toContain("Readable while pending.");
+    expect(error).toContain("workflow rejected");
+  });
+
+  it("falls back to raw malformed workflow_return args without a title-only card and stays within width", async () => {
+    const { initTheme } = await import("@earendil-works/pi-coding-agent");
+    initTheme(undefined, false);
+    const loaded = await loadAgentViewerCapability();
+    if (!loaded.ok) throw new Error(loaded.reason);
+    const tui = { requestRender: vi.fn() };
+    const malformed = workflowReturnBlock({ unexpected: "line one\nline two" });
+
+    const rendered = loaded.capability.render([malformed], tui, 80, false).join("\n");
+    expect(rendered).toContain("workflow_return");
+    expect(rendered).toContain('"unexpected": "line one\\nline two"');
+
+    const row = agentLiveStore.begin({ id: "malformed-workflow-return", agentName: "reviewer", label: "Review" });
+    agentLiveStore.feedSessionEvent(row.id, {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: malformed.toolCallId,
+            name: malformed.toolName,
+            arguments: malformed.args,
+          },
+        ],
+        stopReason: "toolUse",
+      },
+    });
+    const viewer = new AgentSessionViewer(
+      executionFor(row.id),
+      { terminal: { rows: 20, columns: 80 }, requestRender: vi.fn() },
+      vi.fn(),
+      loaded.capability,
+    );
+    for (const width of [1, 2, 8, 24]) {
+      expect(viewer.render(width).every((line) => visibleWidth(line) === width)).toBe(true);
+    }
+    viewer.dispose();
   });
 
   it("keeps Escape ownership without treating bare arrow keys as transcript scrolling", async () => {
@@ -1432,7 +1562,7 @@ describe("AgentSessionViewer", () => {
       undefined,
       { matches: () => false },
     );
-    expect(regular.render(80).at(-1) ?? "").toContain("pgup/pgdn history");
+    expect(regular.render(80).at(-1) ?? "").toContain(PAGE_HISTORY_HINT);
     regular.dispose();
     unregister();
   });
@@ -1451,7 +1581,7 @@ describe("AgentSessionViewer", () => {
     const footer = viewer.render(80).at(-1) ?? "";
     // No editor is mounted on a settled row, but the wheel is still captured.
     expect(footer).not.toContain("enter send");
-    expect(footer).toContain("wheel/pgup/pgdn history");
+    expect(footer).toContain(`wheel/${PAGE_HISTORY_HINT}`);
     viewer.dispose();
   });
 
@@ -1483,7 +1613,7 @@ describe("AgentSessionViewer", () => {
     const settled = viewer.render(80).at(-1) ?? "";
     expect(settled).not.toContain("message queued");
     expect(settled).not.toContain("enter send");
-    expect(settled).toMatch(/^╰─ esc close · pgup\/pgdn history/u);
+    expect(settled).toContain(`esc close · ${PAGE_HISTORY_HINT}`);
 
     unregister();
     viewer.dispose();
