@@ -66,6 +66,40 @@ describe("AgentLiveTranscript", () => {
     expect(latestVisibleAssistantText(completed.blocks)).toBe("Final answer");
   });
 
+  it("keeps the newest streaming output visible and restores the final report opening", () => {
+    const transcript = new AgentLiveTranscript();
+    const text = `Report opening\n${"Earlier session text. ".repeat(400)}\n[Claude Code progress] Reading src/provider.ts`;
+    const message = {
+      role: "assistant",
+      provider: "claude-code",
+      api: "claude-code-cli",
+      content: [{ type: "text", text }],
+    };
+    const streaming = transcript.ingest({ type: "message_update", message });
+    const block = streaming.blocks[0];
+    expect(block?.kind).toBe("assistant");
+    if (block?.kind === "assistant") {
+      expect(block.message.content[0]?.text).toHaveLength(4000);
+      expect(block.message.content[0]?.text).toMatch(/Reading src\/provider\.ts$/u);
+    }
+    expect(streaming.latestMessage).toHaveLength(300);
+    expect(streaming.latestMessage).toMatch(/Reading src\/provider\.ts$/u);
+
+    const newer = transcript.ingest({
+      type: "message_update",
+      message: { ...message, content: [{ type: "text", text: `${text}\nRead finished` }] },
+    });
+    expect(newer.blocks).toHaveLength(1);
+    expect(newer.latestMessage).toMatch(/Read finished$/u);
+    // Previously returned snapshots remain independent of later updates.
+    expect(streaming.latestMessage).not.toContain("Read finished");
+
+    const completed = transcript.ingest({ type: "message_end", message });
+    expect(completed.latestMessage).toMatch(/^Report opening/u);
+    expect(completed.latestMessage).not.toContain("Reading src/provider.ts");
+    expect(transcript.replaceMessages([message]).latestMessage).toBe(completed.latestMessage);
+  });
+
   it("reconciles canonical tool calls and results by toolCallId", () => {
     const snapshot = new AgentLiveTranscript("/repo").replaceMessages([
       {
