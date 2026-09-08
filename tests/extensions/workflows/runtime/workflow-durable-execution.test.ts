@@ -2806,6 +2806,19 @@ describe("fenced output leases and atomic checkpoints", () => {
     const readme = readFileSync(path.join(groupDir, "README.md"), "utf8");
     const backlinkFile = path.join(output.absolutePath, ".workflow-runs.md");
     const backlink = readFileSync(backlinkFile, "utf8");
+    expect(readme).toContain("# Workflow run group");
+    expect(backlink).toContain("# Linked workflow runs");
+    const legacyBacklink = backlink
+      .replace("# Linked workflow runs", "# Связанные запуски workflow")
+      .replace(
+        "Status and history are stored in group directories; this file contains links only.",
+        "Статусы и история находятся в папках групп; этот файл содержит только ссылки.",
+      )
+      .replace("[Group root-one]", "[Группа root-one]");
+    writeFileSync(backlinkFile, legacyBacklink);
+    writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one");
+    expect(readFileSync(backlinkFile, "utf8")).toBe(backlink);
+
     writeFileSync(path.join(groupDir, "README.md"), "<!-- locus-pi:workflow-run-group:v1 -->\npartial");
     writeWorkflowRunGroupReport(input, lease);
     expect(readFileSync(path.join(groupDir, "README.md"), "utf8")).toBe(readme);
@@ -2815,7 +2828,7 @@ describe("fenced output leases and atomic checkpoints", () => {
     );
     expect(readFileSync(backlinkFile, "utf8")).toBe("<!-- locus-pi:workflow-workspace-runs:v1 -->\npartial");
     writeFileSync(backlinkFile, backlink);
-    writeFileSync(backlinkFile, backlink.replace("[Группа root-one]", "[Группа root-two]"));
+    writeFileSync(backlinkFile, backlink.replace("[Group root-one]", "[Group root-two]"));
     expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow(
       expect.objectContaining({ code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED" }),
     );

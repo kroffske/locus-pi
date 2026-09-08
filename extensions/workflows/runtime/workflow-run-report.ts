@@ -68,19 +68,19 @@ export function writeWorkflowRunGroupReport(
   const workspaceHref = path.relative(groupDir, input.workspaceDir).split(path.sep).map(encodeURIComponent).join("/");
   const body = [
     marker,
-    "# Группа запуска workflow",
+    "# Workflow run group",
     "",
     `Workflow: ${JSON.stringify(input.workflow)}`,
-    `Группа: ${input.storageRootRunId}`,
+    `Group: ${input.storageRootRunId}`,
     "",
-    `- [Workspace с рабочими файлами](${workspaceHref}/).`,
-    "- [Результаты первого запуска](outputs/).",
-    "- [Статус первого запуска](runtime/result.json) и [журнал](runtime/journal.ndjson).",
-    "- [Дочерние запуски](children/).",
-    "- [Попытки resume](attempts/).",
+    `- [Workspace working files](${workspaceHref}/).`,
+    "- [First run outputs](outputs/).",
+    "- [First run status](runtime/result.json) and [journal](runtime/journal.ndjson).",
+    "- [Child runs](children/).",
+    "- [Resume attempts](attempts/).",
     "",
-    "У каждого выполнения свой runId, outputs/ и runtime/. Актуальный статус находится в его runtime/result.json; незавершённое выполнение видно по journal.ndjson.",
-    "Эта страница содержит постоянные ссылки, не сводку последнего статуса. Не удаляйте runtime/: он нужен для истории и resume.",
+    "Each execution has its own runId, outputs/, and runtime/. Its runtime/result.json holds the current status; journal.ndjson shows unfinished execution.",
+    "This page contains stable links, not a latest-status summary. Keep runtime/: history and resume depend on it.",
     "",
   ].join("\n");
   if (workflowRunFileExists(groupDir, readme)) {

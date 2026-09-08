@@ -9,7 +9,7 @@ This skill owns authoring only. Do not use merely to run an existing workflow; u
 
 ## Product goal and repair requests
 
-Build useful graphs of LLM agents. Do not optimize for deterministic re-execution of the whole JavaScript program. A deliberate graph may contain hundreds or thousands of small calls; count alone is not a defect and is not a reason to redesign it or invent a smaller cap. Do not assign model, effort or budget choices the user did not request.
+Build useful graphs of LLM agents. Do not optimize for deterministic re-execution of the whole JavaScript program. A deliberate graph may contain hundreds or thousands of small calls; count alone is not a defect and is not a reason to redesign it or invent a smaller cap. Do not assign model, effort or budget choices the user did not request. A role name does not establish its provider or billing route. If subscription transport is required, verify each role's provider, adapter and authentication mode before accepting the design; do not substitute a paid API route.
 
 When the request is to fix a stopped workflow, read [Repair + Continue](references/repair-and-continue.md) first. Repair the same source and preserve the unaffected completed prefix, including literal labels, prompts, order and workspace assumptions. Do not rebuild the graph from scratch merely because execution stopped. Validate the exact repaired source, then hand the result to the run skill; authoring still does not launch it.
 
@@ -37,7 +37,7 @@ condition. These are ingredients, not mandatory headings. State each fact once;
 do not restate the task under a second "definition of done" section.
 Let the agent choose how to inspect, implement and verify.
 Add procedural instructions only for a concrete repository constraint or known
-failure; do not script tool sequences or repeat a general policy in every node.
+failure; do not script tool sequences or repeat a general policy in every node. For read-only review, make the existing complete diff, baseline identity and changed-file inventory directly readable in the handoff; require coverage before a favorable verdict. Read [review evidence](references/repair-and-continue.md#read-only-review-evidence) when reviewer tools cannot inspect the supplied format.
 
 Implementation briefs and templates must distinguish completion from preparation:
 after an authorized environment repair, continue the accepted implementation and

@@ -338,14 +338,14 @@ file under that root and returns its path, byte count, and SHA-256 digest withou
 copying or interpreting the content. Failed runs leave workspace files intact for
 inspection and retry.
 
-Runtime связывает workspace с группой в `.locus-pi/runs/<storageRootRunId>/README.md`.
-Saved children сохраняют отдельные IDs в `children/<runId>/`, root resume — в
-`attempts/<runId>/`. Не вычисляйте путь evidence из одного runId: используйте
-возвращённый `runDir` или команды status/result. Автоматические файлы группы и
-workspace `.workflow-runs.md` принадлежат runtime; не поручайте agents их переписывать.
-Resume сохраняет workspace и физическую группу, но создаёт новый execution root;
-`lineage.rootRunId` не означает первый запуск группы. Checkpoint/replay правила от
-группировки не меняются, старые flat runs и workspace не мигрируют.
+Runtime links the workspace to the group at `.locus-pi/runs/<storageRootRunId>/README.md`.
+Saved children keep separate IDs in `children/<runId>/`, and root resume in
+`attempts/<runId>/`. Do not compute the evidence path from a single runId: use the
+returned `runDir` or the status/result commands. The group's automatic files and
+workspace `.workflow-runs.md` belong to the runtime; do not ask agents to rewrite them.
+Resume preserves the workspace and physical group but creates a new execution root;
+`lineage.rootRunId` does not mean the group's first launch. Grouping does not change
+checkpoint or replay rules, and old flat runs and workspaces are not migrated.
 
 Completed-item checkpoints are keyed by parent source hash, child source hash,
 workflow workspace, and exact item key. A matching checkpoint skips that

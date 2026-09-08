@@ -486,11 +486,11 @@ mounting. Pi exposes no global custom-UI lock for unrelated third-party
 extensions, so `/workflows` opens the recovery menu if another extension
 displaces the question.
 
-Группа запуска хранится в `.locus-pi/runs/<storageRootRunId>/`. Первый root сохраняет
-`outputs/` и `runtime/` в корне группы; saved children — в `children/<runId>/`,
-root resume — в `attempts/<runId>/`. `lineage.rootRunId` по-прежнему означает root
-текущей попытки, а `storageRootRunId` — физическую группу первого запуска.
-Два независимых запуска одной Pi session получают разные группы.
+The run group is stored in `.locus-pi/runs/<storageRootRunId>/`. The first root keeps
+`outputs/` and `runtime/` at the group root; saved children live in `children/<runId>/`,
+and root resume in `attempts/<runId>/`. `lineage.rootRunId` still means the root
+of the current attempt, while `storageRootRunId` identifies the physical group of
+the first launch. Two independent launches in one Pi session receive different groups.
 
 The runner creates the non-symlink `outputs/` and `runtime/` evidence directories and writes
 the first `runtime/journal.ndjson` line before it
@@ -502,22 +502,27 @@ start surface reports the resolved run directory, which matters when
 the terminal is viewing another checkout or worktree. `runtime/result.json` appears when
 the run finishes, so `status` works across sessions and after the fact.
 
-В корне группы `README.md` связывает workspace, дочерние executions и попытки.
-Workspace содержит runtime-owned `.workflow-runs.md` с обратными ссылками.
-Их пишет только root с действующим workspace lease; после release и при раннем
-отказе без lease общие страницы не обновляются. Они не показывают «последний статус»:
-смотрите `runtime/result.json` нужного выполнения. Конфликт reserved `.workflow-runs.md`
-с пользовательским файлом завершает запуск отказом и сохраняет исходный файл.
-Обе навигационные проекции пишутся как полное durable content через temp+rename и parent-directory sync. Marker, version и весь body проверяются до reuse: неполный README восстанавливается под lease, а неполный backlink отказывает с recovery-required error, чтобы не потерять ранее записанные ссылки.
+At the group root, `README.md` links the workspace, child executions, and attempts.
+The workspace contains the runtime-owned `.workflow-runs.md` with backlinks.
+Only the root with an active workspace lease writes them; after release, and on an
+early rejection without a lease, the shared pages are not updated. They do not show
+the “latest status”: see the relevant execution's `runtime/result.json`. A conflict
+between the reserved `.workflow-runs.md` and a user file rejects the run and
+preserves the original file. Both navigation projections are written as complete
+durable content through temp+rename and parent-directory sync. The marker, version,
+and full body are checked before reuse: an incomplete README is restored under the
+lease, while an incomplete backlink fails with a recovery-required error so
+previously written links are not lost.
 
-История прежних flat `.locus-pi/runs/<legacyRunId>/` остаётся readable/resumable без переноса.
-Lookup ограничен корнями групп и двумя вложенными каталогами; неоднозначный ID
-или выбранный symlink отклоняется. Ранний unsafe/unresolvable resume сохраняет
-отдельный rejected receipt; после безопасного определения группы даже semantic
-rejection лежит в её `attempts/`. Старое `.pi/locus-pi` не возвращается в lookup.
-Глобальный claim ID сериализуется коротким `.locus-pi/runs/.run-claim.lock`.
-Если claim прерван, новый запуск явно откажет; прежде чем вручную удалить lock,
-проверьте, что его процесс-владелец действительно остановлен. История не удаляется.
+The history of previous flat `.locus-pi/runs/<legacyRunId>/` remains readable and
+resumable in place. Lookup is limited to group roots and two nested directories;
+ambiguous IDs and selected symlinks are rejected. An early unsafe or unresolvable
+resume saves a separate rejected receipt; after the group is identified safely,
+even a semantic rejection is stored in its `attempts/`. The old `.pi/locus-pi` path
+is not returned by lookup. Global claim IDs are serialized by the short-lived
+`.locus-pi/runs/.run-claim.lock` lock. If a claim is interrupted, the next launch
+explicitly rejects; before manually removing the lock, verify that its owning
+process has actually stopped. History is not deleted.
 
 ### Persisted run artifacts and viewer
 
@@ -674,7 +679,7 @@ code cannot match to a mode is an enable it cannot promise to undo. What text
 selection then looks like in any particular terminal, multiplexer, or remote session
 is not claimed here; only what the extension writes is.
 
-The detached run adapter and transcript callbacks carry the originating Pi session generation; late completion therefore cannot write through them into a new session. The progress component's live-store listener and spinner timer are instead session-owned resources: the extension disposes them synchronously on session start/shutdown and idempotently on terminal, error, and `finally` paths, even when a runner ignores abort and settles later. `session_shutdown` (including reload) also aborts active work. This lifecycle uses Pi's documented [`session_shutdown`](https://pi.dev/docs/latest/extensions#events), [`input`/`turn_end`](https://pi.dev/docs/latest/extensions#events), and [`setWidget(key, undefined)` cleanup](https://pi.dev/docs/latest/extensions#widgets-status-and-footer) seams, plus the one shared agent-row formatter.
+The detached run adapter and transcript callbacks carry the originating Pi session generation; late completion therefore cannot write through them into a new session. The progress component's live-store listener and spinner timer are instead session-owned resources: the extension disposes them synchronously on session start/shutdown and idempotently on terminal, error, and `finally` paths, even when a runner ignores abort and settles later. `session_shutdown` (including reload) also aborts active work and awaits all owned run settlements so the runner can persist terminal results before normal Pi exit. Revoked UI callbacks remain suppressed; forced process termination still cannot guarantee persistence. This lifecycle uses Pi's documented [`session_shutdown`](https://pi.dev/docs/latest/extensions#events), [`input`/`turn_end`](https://pi.dev/docs/latest/extensions#events), and [`setWidget(key, undefined)` cleanup](https://pi.dev/docs/latest/extensions#widgets-status-and-footer) seams, plus the one shared agent-row formatter.
 
 Transcript persistence follows the Pi surface that started the run. The slash-command path publishes a run-boundary banner at launch and a bounded digest at settlement, both with `customType: "locus-workflow-run"`. When the workflow returns prose, it publishes that exact text separately with `customType: "locus-workflow-result"`; this result message is intentionally untruncated so the operator can read and copy it directly from scrollback. Structured, non-text results do not fabricate a prose message and remain available through persisted evidence. The banner is what separates one run from the next in scrollback — it names the workflow, the run, and the wall-clock time, so two runs of the same workflow are never read as one stream. It is sent from `onRunStart` and only after a synchronous `ctx.isIdle()` recheck, because the operator can submit a prompt between the launch gate and the first journal event and `sendMessage` routes to `agent.steer()` while Pi streams, despite `triggerTurn:false`; a busy session simply gets no banner and the live widget still shows the run. No further `sendMessage` call happens while the run is active, because a long workflow can outlive the launch-time idle check. The lifecycle stays in memory while widget/status surfaces show live progress. After the workflow finishes and the completion UI is updated, the command awaits the real `ctx.waitForIdle()`, rechecks `ctx.isIdle()`, and invokes every final `sendMessage` synchronously before awaiting either promise. Interactive TUI appends the bounded terminal digest and then the optional exact result, leaving the useful result last; non-interactive modes keep the exact result before the authoritative `workflow_end`, so an attached CLI can close on terminal truth without racing prose. There is no await between the final idle check and either send call, so Pi's synchronous routing appends instead of steering. The calls omit `deliverAs` and do not start or queue a model turn. Every published record is stored and participates in later LLM context.
 
@@ -1764,6 +1769,8 @@ An explicit per-call value always wins: below the default it applies silently,
 above it the runtime writes a journal line naming the axis, the default and the
 requested value. There is no small authoring ceiling such as the former 100-call cap.
 See "Run budget" for the run-level axes and for what the report shows.
+
+**CLI provider request timeout.** For a resolved model whose `baseUrl` uses `cli://`, the SDK child receives the declared `timeoutMs` as its provider request timeout through an in-memory child settings overlay. This prevents Pi's implicit 300,000 ms HTTP idle default from limiting a whole nested CLI agent run. An explicit smaller provider setting, HTTP idle setting (when no provider setting overrides it), or per-request timeout remains effective. Zero HTTP idle timeout means disabled, as in Pi. The adapter may enforce its own smaller process limit. Native HTTP providers, retries, abort propagation, saved settings, and replay inputs keep their existing behavior.
 
 **Replay policy for the bounds.** `timeoutMs` and `maxTurns` are part of the
 canonical request, exactly like `maxToolCalls`: they shape execution, so changing

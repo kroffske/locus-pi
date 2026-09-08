@@ -54,9 +54,14 @@ const LEASE_OWNER_READ_ATTEMPTS = 20;
 const LEASE_OWNER_READ_RETRY_MS = 5;
 const LEASE_OWNER_READ_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 const WORKFLOW_WORKSPACE_RUNS_MARKER = "<!-- locus-pi:workflow-workspace-runs:v1 -->";
-const WORKFLOW_WORKSPACE_RUNS_HEADER =
+// Retained only to read and upgrade navigation written by earlier versions.
+const LEGACY_WORKFLOW_WORKSPACE_RUNS_HEADER =
   `${WORKFLOW_WORKSPACE_RUNS_MARKER}\n# Связанные запуски workflow\n\n` +
   `Статусы и история находятся в папках групп; этот файл содержит только ссылки.\n\n`;
+
+const WORKFLOW_WORKSPACE_RUNS_HEADER =
+  `${WORKFLOW_WORKSPACE_RUNS_MARKER}\n# Linked workflow runs\n\n` +
+  `Status and history are stored in group directories; this file contains links only.\n\n`;
 
 class InvalidJsonContentError extends Error {}
 class UnstableJsonReadError extends Error {}
@@ -507,9 +512,13 @@ export function writeWorkflowWorkspaceRunLink(
   assertWorkflowRootLease(lease);
   const file = path.join(lease.workspaceDir, ".workflow-runs.md");
   const href = path.relative(lease.workspaceDir, groupDir).split(path.sep).map(encodeURIComponent).join("/");
-  const line = `- [Группа ${assertWorkflowRunId(storageRootRunId)}](${href}/README.md).\n`;
+  const line = `- [Group ${assertWorkflowRunId(storageRootRunId)}](${href}/README.md).\n`;
   const exists = assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, file, "file", false);
-  const previous = exists ? readFileSync(file, "utf8") : WORKFLOW_WORKSPACE_RUNS_HEADER;
+  const original = exists ? readFileSync(file, "utf8") : WORKFLOW_WORKSPACE_RUNS_HEADER;
+  const previous = original.startsWith(LEGACY_WORKFLOW_WORKSPACE_RUNS_HEADER)
+    ? WORKFLOW_WORKSPACE_RUNS_HEADER +
+      original.slice(LEGACY_WORKFLOW_WORKSPACE_RUNS_HEADER.length).replace(/^- \[Группа /gmu, "- [Group ")
+    : original;
   if (exists && !previous.startsWith(WORKFLOW_WORKSPACE_RUNS_MARKER + "\n")) {
     throw new Error(`Reserved workflow workspace file already exists: ${file}`);
   }
@@ -518,9 +527,10 @@ export function writeWorkflowWorkspaceRunLink(
       code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED",
     });
   }
-  if (previous.split("\n").includes(line.trimEnd())) return;
+  const updated = previous.split("\n").includes(line.trimEnd()) ? previous : previous + line;
+  if (updated === original) return;
   assertWorkflowRootLease(lease);
-  replaceWorkflowWorkspaceTextFile(lease, file, previous + line);
+  replaceWorkflowWorkspaceTextFile(lease, file, updated);
 }
 
 function validWorkflowWorkspaceRunLinks(text: string, projectRoot: string, workspaceDir: string): boolean {
@@ -528,7 +538,7 @@ function validWorkflowWorkspaceRunLinks(text: string, projectRoot: string, works
   const links = text.slice(WORKFLOW_WORKSPACE_RUNS_HEADER.length).split("\n").filter(Boolean);
   const groups = new Set<string>();
   for (const link of links) {
-    const match = /^- \[Группа ([A-Za-z0-9][A-Za-z0-9._-]{0,127})\]\(([^\r\n()]+)\/README\.md\)\.$/u.exec(link);
+    const match = /^- \[Group ([A-Za-z0-9][A-Za-z0-9._-]{0,127})\]\(([^\r\n()]+)\/README\.md\)\.$/u.exec(link);
     if (match === null || groups.has(match[1]!)) return false;
     const groupId = match[1]!;
     const expectedHref = path

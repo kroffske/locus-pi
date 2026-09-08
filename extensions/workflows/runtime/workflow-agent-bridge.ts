@@ -121,6 +121,7 @@ export interface WorkflowAgentBridgeOptions {
     /** SDK turn budget derived from the call's declared `timeoutMs` (D4), so the
      *  host's own child deadline can only ever fire after the workflow fuse. */
     turnTimeoutMs?: number;
+    cliRequestTimeoutMs?: number;
     reportsDir?: string;
     onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
   }) => AgentExecutor;
@@ -554,6 +555,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         live?: AgentSdkSessionExecutorOptions["live"];
         maxToolCalls?: number;
         turnTimeoutMs?: number;
+        cliRequestTimeoutMs?: number;
         reportsDir?: string;
         onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
       }) =>
@@ -563,6 +565,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           ...(o.live !== undefined ? { live: o.live } : {}),
           ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
           ...(o.turnTimeoutMs !== undefined ? { turnTimeoutMs: o.turnTimeoutMs } : {}),
+          ...(o.cliRequestTimeoutMs !== undefined ? { cliRequestTimeoutMs: o.cliRequestTimeoutMs } : {}),
           ...(o.reportsDir !== undefined ? { reportsDir: o.reportsDir } : {}),
           ...(o.onLiveExecution !== undefined ? { onLiveExecution: o.onLiveExecution } : {}),
         }));
@@ -633,6 +636,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       },
       ...(req.maxToolCalls !== undefined ? { maxToolCalls: req.maxToolCalls } : {}),
       ...(turnTimeoutMs !== undefined ? { turnTimeoutMs } : {}),
+      ...(req.timeoutMs !== undefined ? { cliRequestTimeoutMs: req.timeoutMs } : {}),
       ...(evidenceDestinations !== undefined ? { reportsDir: evidenceDestinations.transcriptDir } : {}),
     });
 
