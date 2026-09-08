@@ -37,7 +37,7 @@ condition. These are ingredients, not mandatory headings. State each fact once;
 do not restate the task under a second "definition of done" section.
 Let the agent choose how to inspect, implement and verify.
 Add procedural instructions only for a concrete repository constraint or known
-failure; do not script tool sequences or repeat a general policy in every node. For read-only review, make the existing complete diff, baseline identity and changed-file inventory directly readable in the handoff; require coverage before a favorable verdict. Read [review evidence](references/repair-and-continue.md#read-only-review-evidence) when reviewer tools cannot inspect the supplied format.
+failure; do not script tool sequences or repeat a general policy in every node. A stage ends with a commit, so a reviewer reads `git diff <stage-base>..HEAD` with its own tools instead of receiving a rebuilt copy of the change; require coverage of that diff before a favorable verdict.
 
 Implementation briefs and templates must distinguish completion from preparation:
 after an authorized environment repair, continue the accepted implementation and
@@ -51,6 +51,7 @@ narrative use plain `agent()` text, without `output`, `schema`, `handoffs` or an
 author-guessed length target. Use `choice` when code branches on a decision and
 `handoffs` when it schedules independent discovered work units. A singleton
 array must not become a report envelope or a success signal.
+Two mistakes from a real run. The 32,000 in [output acceptance](../../extensions/workflows/references/output-acceptance.md) is a runtime allowance threshold, not a node contract: never write `maxItemChars: 32000` or "exactly one item" into a call because that number exists somewhere. And `[]` is not a blocked signal: a refusing stage returns a `choice` identity plus `{ ok: false, status }` — see [stage refusal](../../extensions/workflows/AUTHORING.md#stage-refusal-and-fix-loops-without-throw).
 
 Add an output bound or per-call budget only for an explicit user requirement,
 an actual consumer contract or a measured failure at that boundary. Name that
@@ -80,7 +81,7 @@ well as the final answer: work may have finished before answer validation failed
 
 ## Source and evidence boundary
 
-Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [AUTHORING.md](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe. When agents write files, keep durable handoffs, final results, review evidence, and explicit resume inputs in the runtime-assigned workflow workspace; use ordinary OS or tool temporary and cache locations for disposable environments, dependency caches, test basetemp, transient renderer output, and staging. A final rendered asset belongs in the workflow workspace, and explicit authored placement remains authoritative.
+Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [AUTHORING.md](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe. Where files belong is owned by [AUTHORING.md](../../extensions/workflows/AUTHORING.md#target-source-shape): durable handoffs, final results, review evidence and explicit resume inputs in the workflow workspace — or in `.tasks/<task>/artifacts/<stage>/` when the workflow carries one task; disposable environments, dependency caches, test basetemp, transient renderer output and staging in ordinary OS or tool temporary and cache locations. Explicit authored placement remains authoritative.
 
 Give every agent a concise human `title` describing its current work. In a
 `.map()`/`parallel()` list, derive it from the item and question so siblings are
@@ -93,6 +94,4 @@ Run `workflow_check_source` with `mode: "orchestration-only"` on every exact bui
 
 ## Trust and further references
 
-Reviewed JavaScript runs in the Pi host process; approval and worktrees are not a sandbox. Runtime/API authority is [REFERENCE.md](../../extensions/workflows/REFERENCE.md). Follow only the section needed by the selected graph. Do not load the entire runtime manual just to author a fixed chain.
-
-Read [large agent runs](references/large-agent-runs.md) for substantial fan-out. Existing monitoring and explicit operator stop are the control; do not inject a call-count cap, token floor or automatic budget change.
+Reviewed JavaScript runs in the Pi host process; approval and worktrees are not a sandbox. Runtime/API authority is [REFERENCE.md](../../extensions/workflows/REFERENCE.md). Follow only the section needed by the selected graph. Do not load the entire runtime manual just to author a fixed chain. Substantial fan-out is owned by [locus-pi-workflow-run](../locus-pi-workflow-run/SKILL.md#large-runs-observe-and-let-the-operator-decide): do not inject a call-count cap, token floor or automatic budget change here.

@@ -13,10 +13,8 @@ Crash replay is a runtime capability, not another graph pattern. Generated sourc
 
 [Structured results](structured-results.md) covers a same-agent shaped answer — choice, closed string, handoffs or compatibility schema through `returnVia: "tool"`. It is an output contract inside a card's graph, not a fifth graph form.
 
-The legacy card filenames below remain redirects so old links still work. They do not define a second catalog or their own API.
-
 ## Start from the user's current problem
 
 [Repair + Continue](repair-and-continue.md) is the first card for a failed or stopped graph that needs a source fix. Keep the matching completed prefix instead of recreating the workflow.
 
-[Large agent runs](large-agent-runs.md) covers deliberate fine-grained work and manual control, without adding a total-call cap or a token budget API.
+Large fan-out runs are owned by [locus-pi-workflow-run](../../locus-pi-workflow-run/SKILL.md#large-runs-observe-and-let-the-operator-decide). Authoring adds no total-call cap and no token budget API.
