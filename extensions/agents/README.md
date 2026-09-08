@@ -42,3 +42,86 @@ The catalog follows project -> user precedence: project `.agents/agents/`, then 
 - Catalog: `extensions/agents/catalog/catalog.ts`
 - SDK adapter: `extensions/_shared/agent-runtime/agent-sdk-host.ts`
 - Manifest: `extensions/agents/manifest.json`
+
+## Claude Code progress and model execution
+
+Claude Code progress comes from the separately installed
+[locus-pi-claude-code-adapter](https://github.com/kroffske/locus-pi-claude-code-adapter).
+Select its `claude-code/...` model for the child session. The adapter starts the
+Claude Code CLI and translates its output into Pi assistant-message snapshots.
+
+### What the user sees
+
+The adapter requests `stream-json` with partial messages. It shows session text,
+available reasoning text, initialization, tool activity, and capacity waits.
+`thinking_tokens` records do not become progress messages. Nested Claude tools
+appear as text; Pi does not execute those reported tools again.
+
+Locus follows the newest text while a message is streaming. The live transcript
+keeps at most 4,000 characters per text block, and the roster preview keeps 300.
+Both bounds retain the tail during streaming. The panel also keeps the tail when
+the terminal width is smaller, while preserving tree rails. Completed messages and replay keep
+the report opening. The canonical final response replaces temporary progress.
+The full provider/session output is not expanded by this bounded viewer.
+
+For example, the live CLI check produced this shortened sequence:
+
+```text
+[Claude Code progress] Session initialized
+[Claude Code progress] Read: .../package.json
+[Claude Code progress] Tool finished
+The package name is `locus-pi-claude-code-adapter`.
+```
+
+### Why display does not invoke the main model
+
+The execution boundary has three owners:
+
+1. The adapter's `createClaudeCodeProvider` registers `stream` and `streamSimple`
+   for the CLI provider. `streamClaudeCode` calls `runClaudeCode` once. Its output
+   callback only constructs assistant text snapshots. `runClaudeCode` invokes
+   the configured executable with `spawn`, sends the prompt on stdin, and parses
+   stdout. There is no model call in the progress parser or callback.
+2. Pi's pinned agent runtime calls the stream function for the selected model.
+   In `@earendil-works/pi-agent-core` 0.84.1, `streamAssistantResponse` consumes
+   `event.partial` and emits `message_update`. A status-only update may carry an
+   empty delta; the replacement snapshot still contains the new status.
+   A final text response has no Pi tool calls, so this response does not cause
+   another model turn. This contract is tested with the real Pi loop.
+3. Locus's [child-session host](../_shared/agent-runtime/agent-sdk-host.ts)
+   subscribes in `driveChildTurn` and passes events to the live store. The
+   [transcript projection](../_shared/agent-runtime/agent-live-transcript.ts)
+   and [panel](../_shared/agent-runtime/agent-live-panel.ts) transform
+   data synchronously. They have no model client or inference callback.
+
+This proves that **rendering Claude Code progress adds no main-model inference**.
+It does not mean that Claude Code itself is free: its internal model loop and
+aggregate usage belong to Claude Code. A main-model turn that launches a tool,
+a later turn that reads its result, explicitly parallel workflow stages, and
+user steering are separate actions. Displaying progress neither launches nor
+cancels those actions. Workflow command receipts use `triggerTurn: false`;
+the model-callable workflow tool awaits completion and returns its native tool
+result instead of triggering a turn for each update.
+
+### Verification and limits
+
+The companion adapter test starts a controlled CLI process through the real
+runner. It checks streamed text, tool activity, deduplication, ignored counters,
+final-result replacement, one runner invocation, and no parent `fetch` calls.
+The [Pi runtime contract test](https://github.com/kroffske/locus-pi/blob/codex/claude-readable-progress/tests/shared/agent-runtime/agent-progress-runtime.test.ts)
+uses the installed Pi loop with controlled provider output. Several progress
+updates produce one selected-provider invocation and one turn; reported nested
+tools never become Pi tool execution events. The
+[retention regression test](https://github.com/kroffske/locus-pi/blob/codex/claude-readable-progress/tests/shared/agent-runtime/agent-live-transcript.test.ts)
+first failed on the previous implementation because the latest status was lost.
+
+A live smoke check also ran Claude Code 2.1.257 through the companion provider
+and Pi 0.84.1. Claude read `package.json` and returned the correct package name.
+It produced six distinct visible snapshots, one adapter invocation, and zero
+parent-process `fetch` calls. The child's network access was allowed; the
+parent's `fetch` was replaced with a throwing counter. This is a bounded
+execution check, not an account-wide billing audit or proof that unrelated
+sessions are idle. The local smoke harness and raw result remain runtime data.
+
+Updating Locus alone does not install or update the separate adapter. Both
+changes must be present to get readable CLI events and tail-following previews.

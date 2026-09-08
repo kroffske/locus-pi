@@ -137,7 +137,7 @@ export class AgentLiveTranscript {
       return;
     }
     if (value.role !== "assistant") return;
-    const message = assistantMessage(value);
+    const message = assistantMessage(value, complete);
     const id = this.#activeAssistantId ?? `assistant:${++this.#nextAssistantId}`;
     const existing = this.#blocks.findIndex((block) => block.id === id);
     const block: AgentTranscriptAssistantBlock = { id, kind: "assistant", message, complete };
@@ -299,16 +299,16 @@ export function latestVisibleAssistantText(blocks: readonly AgentTranscriptBlock
     for (let contentIndex = block.message.content.length - 1; contentIndex >= 0; contentIndex -= 1) {
       const content = block.message.content[contentIndex];
       if (content?.type !== "text") continue;
-      const text = compactVisibleText(content.text);
+      const text = compactVisibleText(content.text, !block.complete);
       if (text !== undefined) return text;
     }
   }
   return undefined;
 }
 
-function assistantMessage(value: Record<string, unknown>): AgentTranscriptAssistantMessage {
+function assistantMessage(value: Record<string, unknown>, complete: boolean): AgentTranscriptAssistantMessage {
   const content = Array.isArray(value.content)
-    ? value.content.flatMap(assistantContent).slice(0, MAX_ASSISTANT_CONTENT_ITEMS)
+    ? value.content.flatMap((item) => assistantContent(item, !complete)).slice(0, MAX_ASSISTANT_CONTENT_ITEMS)
     : [];
   const errorMessage = fieldMessage(value.errorMessage);
   return {
@@ -324,10 +324,12 @@ function assistantMessage(value: Record<string, unknown>): AgentTranscriptAssist
   };
 }
 
-function assistantContent(value: unknown): AgentTranscriptContent[] {
+function assistantContent(value: unknown, streaming: boolean): AgentTranscriptContent[] {
   if (!isRecord(value)) return [];
   if (value.type === "text")
-    return [{ type: "text", text: boundedString(fieldMessage(value.text) ?? "", MAX_ASSISTANT_TEXT_LENGTH) }];
+    return [
+      { type: "text", text: boundedString(fieldMessage(value.text) ?? "", MAX_ASSISTANT_TEXT_LENGTH, streaming) },
+    ];
   if (value.type === "thinking")
     return [
       { type: "thinking", thinking: boundedString(fieldMessage(value.thinking) ?? "", MAX_ASSISTANT_TEXT_LENGTH) },
@@ -461,13 +463,15 @@ function eventArgsComplete(event: unknown): boolean {
   return isRecord(event) && (event.argsComplete === true || event.argumentsComplete === true);
 }
 
-function compactVisibleText(value: string | undefined): string | undefined {
+function compactVisibleText(value: string | undefined, streaming: boolean): string | undefined {
   const text = value?.replace(/\s+/gu, " ").trim();
-  return text === undefined || text === "" ? undefined : boundedString(text, 300);
+  return text === undefined || text === "" ? undefined : boundedString(text, 300, streaming);
 }
 
-function boundedString(value: string, max: number): string {
-  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+function boundedString(value: string, max: number, keepTail = false): string {
+  if (value.length <= max) return value;
+  // Live snapshots follow new output; completed reports keep their opening.
+  return keepTail ? `…${value.slice(-(max - 1))}` : `${value.slice(0, max - 1)}…`;
 }
 
 function stringify(value: unknown): string {

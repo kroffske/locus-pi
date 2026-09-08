@@ -71,6 +71,8 @@ User-visible changes to the public package.
 
 ### Fixed
 
+- Keep the newest streamed assistant text and external CLI progress visible in agent previews instead of truncating away fresh activity. Completed reports retain their opening.
+
 - A fan-out's group heading now counts up while the run is still going. The heading read its `k/n done · f failed` from fields the journal writes only when the group ends, so a nine-member fan-out sat at `0/9 done` until it settled, next to a panel header that was counting correctly. Both surfaces now fold the members' own states into the heading, and a group that reported its own final numbers still wins.
 - The group heading no longer disappears from `/ps` once a fan-out is taller than the list's window. The window was anchored on the cursor, and only members take the cursor, so the heading fell out with no key able to bring it back. The nearest heading is now pinned above the window without costing a member row.
 - Home and End work on the agent screen in every terminal. The screen matched only the bare key names and one of the three encodings a terminal may send, so in a multiplexer pane both keys did nothing while the manual promised them.

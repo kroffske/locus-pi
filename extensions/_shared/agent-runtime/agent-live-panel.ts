@@ -55,6 +55,7 @@ export class AgentLivePanel {
     return orderedRows.flatMap((row) => {
       const rowLine = this.renderRow(row, width);
       const latest = latestMessagePreview(row);
+      const assistant = row.transcript?.blocks.filter((block) => block.kind === "assistant").at(-1);
       const activity = formatToolActivity(row, Date.now(), { showElapsed: this.options.calm !== true });
       const layout = AGENT_LIVE_TREE_LAYOUT.get(row);
       const detailLines: string[] = [];
@@ -66,6 +67,7 @@ export class AgentLivePanel {
             "muted",
             layout,
             treeDetailHook(layout, activity !== undefined || layout?.hasChildren === true),
+            assistant?.kind === "assistant" && !assistant.complete,
           ),
         );
       }
@@ -97,9 +99,14 @@ export class AgentLivePanel {
     color: string,
     layout: AgentLiveTreeLayout | undefined,
     hook: string,
+    keepTail = false,
   ): string {
-    const prefix = layout?.childPrefix ?? TOOL_ACTIVITY_INDENT;
-    return this.#fg(color, clampLine(`${prefix}${hook} ${text}`, width));
+    const prefix = `${layout?.childPrefix ?? TOOL_ACTIVITY_INDENT}${hook} `;
+    const available = Math.max(0, width - visibleWidth(prefix));
+    if (keepTail && available > 0 && visibleWidth(text) > available) {
+      text = `…${sliceByColumn(text, visibleWidth(text) - available + 1, available - 1)}`;
+    }
+    return this.#fg(color, clampLine(`${prefix}${text}`, width));
   }
 
   #fg(color: string, text: string): string {
