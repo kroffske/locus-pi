@@ -78,6 +78,12 @@ really decomposes into more coherent subtasks.
 Review whether each brief gives the agent enough to complete its task. Remove
 mechanical headings, repeated completion criteria, tool choreography and
 general policy that add no task-specific information.
+For a read-only review edge, name the producer-owned readable evidence entrypoint
+and full changed-file inventory, and verify the consumer can use them with its
+actual tools. Prefer an existing complete diff; an archive locator alone is not
+a usable review handoff. Bind baseline/current content and require complete
+coverage before a favorable review, as described in
+[review evidence](repair-and-continue.md#read-only-review-evidence).
 For each shaped result or author-selected limit, identify the consuming edge
 and why it needs that contract. Plain narrative is passed whole without an
 invented length cap; structured controls belong only at real routing or

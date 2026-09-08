@@ -232,7 +232,7 @@ describe("contract-defaulted per-child bounds", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turn-budget" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number }> = [];
+    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
     const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
@@ -269,6 +269,7 @@ describe("contract-defaulted per-child bounds", () => {
     // ORDERING, not only the value: the host kills a child at turnTimeoutMs * maxTurns
     // (`agent-sdk-host.ts`), and that moment must come strictly after the workflow fuse.
     expect(turnTimeoutMs! * DEFAULT_WORKFLOW_BUDGET.turns).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    expect(factoryOptions[0]?.cliRequestTimeoutMs).toBe(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -281,7 +282,7 @@ describe("contract-defaulted per-child bounds", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turn-budget-absent" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number }> = [];
+    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
     const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
@@ -386,7 +387,7 @@ describe("maxTurns as a budget axis", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turns-sdk" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number }> = [];
+    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
     const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {

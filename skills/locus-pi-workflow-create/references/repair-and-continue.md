@@ -16,6 +16,23 @@ For example, A completed, B failed, and C was never reached. Repair B: A is serv
 
 ## Current limitations, by name
 
+### Provider admission failures
+
+Read the provider error and actual executed route before changing the workflow.
+HTTP 402 with `limit_source: openrouter_key_limit` is a provider key allowance
+failure, not a handoff-length error, an implementation verdict or missing repeat
+owner approval. Raising `maxItemChars` or `maxTurns` cannot repair it. A requested
+`max_tokens` may come from SDK model metadata rather than the workflow prompt.
+
+First check whether that provider/transport was intended. Apply an already
+authorized route correction only to the required unfinished work and verify the
+completed prefix remains reusable. If the API route is still intended, report
+the real key-limit/reset prerequisite; do not automatically change financial
+limits, switch keys, invent a token cap or retry the same rejected request.
+Neither a valid return shape nor a zero process exit converts admission failure
+into acceptance. Preserve the failed result and require fresh terminal evidence
+after the cause is resolved.
+
 ### Unconfirmed call after process loss
 
 An absent process with no child completion or terminal result is an unconfirmed
@@ -36,6 +53,39 @@ blindly rerun an effect, reset the tree to the ancestor, or accept a previous
 child's self-report. Changed prerequisites may require an earlier fresh stage.
 Use [external-locus-pi](../../external-locus-pi/SKILL.md) for an inspectable, retained Pi session
 for long execution; creating a workflow still does not launch it.
+
+### Read-only review evidence
+
+Match the handoff to the reviewer's actual tools. An implementation report may
+already name a readable diff even when its original baseline is a tar archive.
+Open the report's evidence entrypoint and locators before declaring an archive
+or tool blocker. Reuse an existing complete, current text representation;
+materialize a missing or stale one with the tool-capable producer, not by
+granting shell access to a read-only reviewer.
+
+The producer's handoff identifies the evidence root, exact baseline and current
+content identities, complete plain-text diff/baseline locators, and an inventory
+of every changed path. Include additions, deletions, renames, relevant untracked
+files, tests, docs and diagrams; name exclusions and non-text representations
+explicitly. Preserve the original step baseline across checkpoints. Keep these
+derived files inside the declared evidence workspace, outside product source.
+When the reader's actual line/result limits truncate evidence, provide a
+losslessly readable view or parts bound to the original bytes. Summaries and
+silently shortened long lines do not satisfy full-diff coverage.
+Record hashes and have the native gate verify the binding against the current
+tree; a Read/Glob/Grep reviewer must not claim it executed hash or test commands.
+
+The reviewer follows those locators and accounts for every in-scope inventory
+entry. It reports what was read and any missing, stale or unsupported evidence;
+current-source sampling is not complete change review. No favorable verdict is
+valid while required coverage is missing. After the producer repairs the
+handoff, rerun the incomplete review and its dependent suffix through ordinary
+resume, preserving the unaffected completed prefix and completeness gates.
+
+Observed failure: the reviewer cited an unreadable baseline tar while ignoring
+the diff locator in the implementation report, then reviewed docs and diagrams
+selectively. The repair is explicit evidence discovery and coverage, not a new
+response cap, repeated archive generation or weaker acceptance.
 
 ### Unfinished implementation
 

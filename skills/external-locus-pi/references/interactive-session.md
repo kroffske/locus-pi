@@ -86,6 +86,22 @@ Ordinary commands can be typed inside Pi. For external input into an existing
 idle pane, use literal text or a tmux paste buffer, then Enter separately; check
 the current prompt first and avoid key-by-key interpolation of task text.
 
+To stop a running workflow, enter `/workflows stop <runId>` in this same Pi.
+Read back the editor before submitting. If autocomplete shows the run id, press
+Escape to dismiss that completion, read back the unchanged command, then Enter.
+An Enter that accepts a completion has not sent the command: if the exact stop
+text remains in the editor, submit it without clearing and retyping it. Check
+for the stop acknowledgement and then the matching terminal result with
+`disposition.status: "cancelled"`; typed text alone proves neither. Stop is
+idempotent. Never reuse this retry rule to launch a workflow again.
+
+Interactive slash launches return control while their child agents work; the
+initial CLI argument uses the same command launcher. Keep the Pi session alive
+after stopping. Normal Pi shutdown aborts and drains owned workflow runs before
+exit, but forced termination or lost terminals can still leave an interrupted
+run without a result. Use the workflow's saved result, not Pi's exit code, to
+distinguish those outcomes.
+
 Pi keeps the UI alive after the initial extension command. Session saving stays
 enabled, but command-only sessions in Pi 0.84.1 may not create their JSONL file
 until a real parent assistant message exists. Verify the actual file before

@@ -83,6 +83,13 @@ provider, model, thinking level, or workflow role merely because a workflow is
 being launched. When the request does not name a model, preserve the current Pi
 session and its configured defaults.
 
+When the owner requires subscription-backed execution, verify each child role's
+resolved provider, adapter and authentication mode. Neither the alias name nor
+the parent Pi model proves the child's transport. Correct a mismatch within the
+owner's existing authorization or report the concrete prerequisite; do not silently
+fall back to an API key, another provider or another model. Keep executed-route
+evidence separate from the requested route.
+
 List the models Pi can currently resolve before using an explicit selector:
 
 ```bash

@@ -269,7 +269,7 @@ describe("workflow slash background lifecycle", () => {
 
       expect(sessionRecords()).toEqual([expect.objectContaining({ state: "running" })]);
 
-      await emit(first, "session_shutdown", { reason: "reload" });
+      const predecessorShutdown = emit(first, "session_shutdown", { reason: "reload" });
       expect(requests[0]?.signal.aborted).toBe(true);
 
       replacement = createHarness(root, { sessionId });
@@ -298,6 +298,7 @@ describe("workflow slash background lifecycle", () => {
         status: "fulfilled",
         value: { runId: "runtime-shaped-pending" },
       });
+      await predecessorShutdown;
       expect(predecessorRecord.state).toBe("settled");
 
       await replacement.commands.get("workflows")!.handler("run live-smoke", replacement.ctx);
@@ -460,7 +461,7 @@ describe("workflow slash background lifecycle", () => {
       const notifySpy = vi.spyOn(harness.ctx.ui, "notify");
       const sendSpy = vi.fn();
       harness.pi.sendMessage = sendSpy;
-      await emit(harness, "session_shutdown", { reason: "reload" });
+      const shutdown = emit(harness, "session_shutdown", { reason: "reload" });
       expect(request?.signal.aborted).toBe(true);
       widgetSpy.mockClear();
       statusSpy.mockClear();
@@ -476,6 +477,7 @@ describe("workflow slash background lifecycle", () => {
         journal: [],
         resultPersistence: { ok: true, path: "/tmp/run-delayed/result.json" },
       });
+      await shutdown;
       await waitFor(() => spy.mock.results[0]?.type === "return");
       for (let attempt = 0; attempt < 10; attempt += 1) await Promise.resolve();
 
@@ -520,7 +522,7 @@ describe("workflow slash background lifecycle", () => {
       });
       requestRender.mockClear();
 
-      await emit(harness, "session_shutdown", { reason: "reload" });
+      const shutdown = emit(harness, "session_shutdown", { reason: "reload" });
       expect(request?.signal.aborted).toBe(true);
       expect(agentLiveStore.emitter.listenerCount("change")).toBe(before);
 
@@ -538,6 +540,7 @@ describe("workflow slash background lifecycle", () => {
         journal: [],
         resultPersistence: { ok: true, path: "/tmp/run-panel-shutdown/result.json" },
       });
+      await shutdown;
       await waitFor(() => spy.mock.results[0]?.type === "return");
       expect(agentLiveStore.emitter.listenerCount("change")).toBe(before);
     } finally {

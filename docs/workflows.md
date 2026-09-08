@@ -6,7 +6,7 @@ updated: "2026-09-03T14:45:28Z"
 source_commit: "4e0ee253fa0b"
 update_event: "sync"
 context: "changes=L files=24 task=T-194"
-description: "Объясняет общую папку workflow, связи workspace и чтение истории без миграции."
+description: "Explains the shared workflow folder, workspace links, and history lookup without migration."
 owner: locus-pi maintainers
 tags: [workflows, guide]
 ---
@@ -64,11 +64,11 @@ The model-callable `workflow` tool accepts a package name or trusted script path
 
 ## Run evidence
 
-Откройте README группы: он связывает исходный запуск, workspace, saved children и попытки resume.
+Open the group README: it links the original launch, workspace, saved children, and resume attempts.
 
 ```text
 .locus-pi/runs/<storageRootRunId>/
-  README.md   ссылки на workspace и все виды executions
+  README.md   links to the workspace and all execution types
   outputs/    human-readable host projection
   runtime/    machine evidence and continuation authority
     journal.ndjson         append-only lifecycle evidence
@@ -76,15 +76,15 @@ The model-callable `workflow` tool accepts a package name or trusted script path
     replay.ndjson          replay records when the source is eligible
     script-<sha256>.workflow.mjs
     artifacts/             answers, transcripts, result envelopes, inputs, and publications
-  children/<runId>/         отдельные outputs/ и runtime/ каждого saved child
-  attempts/<runId>/         отдельные outputs/ и runtime/ каждой попытки resume
+  children/<runId>/         separate outputs/ and runtime/ for each saved child
+  attempts/<runId>/         separate outputs/ and runtime/ for each resume attempt
 ```
 
-Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Независимые root launches получают разные группы даже в одной session; resume использует исходный workspace, но пишет собственный receipt. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
+Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent root launches receive different groups even in one session; resume uses the original workspace but writes its own receipt. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
 
-Workspace `.workflow-runs.md` содержит обратные ссылки. Это reserved файл runtime: пользовательский файл с таким именем не перезаписывается, запуск явно отказывает. README группы и backlink заменяются полным durable content через temp+rename и синхронизацию родительского каталога. Неполный runtime-owned README восстанавливается из метаданных root; неполный backlink получает явный recovery error, чтобы не потерять прежние ссылки. Общие страницы содержат постоянные ссылки, не «последний статус»; актуальное состояние каждого выполнения смотрите в его `runtime/result.json` и журнале. Они записываются только root под workspace lease, не после его освобождения.
+Workspace `.workflow-runs.md` contains backlinks. It is a reserved runtime file: a user file with this name is never overwritten, and the launch explicitly rejects. The group README and backlink are replaced with complete durable content through temp+rename and parent-directory sync. An incomplete runtime-owned README is restored from root metadata; an incomplete backlink returns an explicit recovery error so earlier links are not lost. The shared pages contain permanent links, not the “latest status”; see each execution's current state in its `runtime/result.json` and journal. They are written only by the root under the workspace lease, never after it is released.
 
-Старые flat runs читаются и возобновляются на месте. Каждый runId разрешается через общий confined lookup; пути с symlink и неоднозначные IDs не выбираются наугад. Безопасно найденный resume добавляет `attempts/<newRunId>/`; при раннем unsafe или отсутствующем source сохраняется отдельный rejected receipt. Никакой автоматической миграции или удаления runs/workspaces нет.
+Old flat runs remain readable and resumable in place. Each runId is resolved through the shared confined lookup; symlink paths and ambiguous IDs are never selected arbitrarily. A safely located resume adds `attempts/<newRunId>/`; an early unsafe or missing source stores a separate rejected receipt. Runs and workspaces are never migrated or deleted automatically.
 
 `runtime/journal.ndjson` is the chronological event authority. New `runtime/result.json` envelopes do not repeat the full journal. They retain only typed bounded finalization errors that must survive an independent best-effort journal write failure. Older envelopes with an embedded journal remain readable.
 
