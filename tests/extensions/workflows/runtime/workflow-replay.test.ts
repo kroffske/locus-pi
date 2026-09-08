@@ -32,6 +32,7 @@ import {
   WorkflowGroupFailureError,
   WorkflowInvocationCapError,
   createWorkflowRuntime,
+  type WorkflowAgentRequest,
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflowsExt from "../../../../extensions/workflows/index.js";
@@ -1951,5 +1952,34 @@ describe("maxTurns is part of the replay key", () => {
     await expect(resumed.dsl.agent("stage-1")).resolves.toBe("answer(stage-1)");
     expect(resumed.prompts).toEqual([]);
     expect(controller.counts()).toEqual({ replayedCalls: 1, freshCalls: 0 });
+  });
+
+  it("reuses a four-call legacy prefix under the new default and runs only the larger-budget suffix", async () => {
+    const runDir = recordDir();
+    const prefix = ["preflight", "placement", "placement-gate", "implement"];
+    const original = answeringTurns("legacy-prefix", 20, createWorkflowReplayController({ runDir }));
+    for (const label of prefix) await original.dsl.agent(label, { label });
+    const recorded = readFileSync(workflowReplayFile(runDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as WorkflowReplayEntry);
+    const controller = createWorkflowReplayController({ runDir: recordDir(), recorded });
+    const dispatched: WorkflowAgentRequest[] = [];
+    const resumed = createWorkflowRuntime({
+      runId: "larger-turns-suffix",
+      replay: controller,
+      defaultMaxTurns: 1000,
+      agentRunner: async (request) => {
+        dispatched.push(request);
+        return { ok: true, status: "completed", summary: "done", text: "review complete", diagnostics: [] };
+      },
+    });
+    for (const label of prefix) {
+      await expect(resumed.dsl.agent(label, { label, maxTurns: 20 })).resolves.toBe(`answer(${label})`);
+    }
+    await expect(resumed.dsl.agent("review", { label: "review", maxTurns: 1000 })).resolves.toBe("review complete");
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]?.maxTurns).toBe(1000);
+    expect(controller.counts()).toMatchObject({ replayedCalls: 4, freshCalls: 1, divergedAtCall: 4 });
   });
 });

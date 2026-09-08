@@ -22,6 +22,15 @@ function scriptedRuntime(runId: string, answers: string[]) {
 }
 
 describe("agent({ handoffs }) dynamic decomposition", () => {
+  it("passes a complete narrative report without a shaped return or format retry", async () => {
+    const report = "r".repeat(37_000);
+    const { dsl, requests } = scriptedRuntime("agent-plain-report", [report]);
+    await expect(dsl.agent("Review the accepted change.", { label: "review" })).resolves.toBe(report);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.prompt).toBe("Review the accepted change.");
+    expect(requests[0]?.returnContract).toBeUndefined();
+  });
+
   it("returns bounded complete text handoffs through the existing schema journal path", async () => {
     const { dsl, getJournal, requests } = scriptedRuntime("agent-handoffs-happy", [
       '["DAG ID: daily-sales\\nSource: dags/daily.py", "DAG ID: weekly-sales\\nSource: dags/weekly.py"]',
@@ -93,7 +102,17 @@ describe("agent({ handoffs }) dynamic decomposition", () => {
     [{ handoffs: { minItems: 9, maxItems: 8 } }, /minItems cannot exceed maxItems/u],
     [{ handoffs: { maxItems: 0 } }, /maxItems must be a safe integer between 1 and 100/u],
     [{ handoffs: { maxItems: 101 } }, /maxItems must be a safe integer between 1 and 100/u],
-    [{ handoffs: { maxItems: 8, maxItemChars: 0 } }, /maxItemChars must be a safe integer between 1 and 32000/u],
+    [{ handoffs: { maxItems: 8, maxItemChars: 0 } }, /maxItemChars must be a positive safe integer/u],
+    [{ handoffs: { maxItems: 1, maxItemChars: 1.5 } }, /maxItemChars must be a positive safe integer/u],
+    [{ handoffs: { maxItems: 1, maxItemChars: Infinity } }, /maxItemChars must be a positive safe integer/u],
+    [
+      { handoffs: { maxItems: 1, maxItemChars: Number.MAX_SAFE_INTEGER } },
+      /canonical JSON allowance must be a safe integer/u,
+    ],
+    [
+      { handoffs: { maxItems: 100, maxItemChars: Math.floor(Number.MAX_SAFE_INTEGER / 6) } },
+      /canonical JSON allowance must be a safe integer/u,
+    ],
     [{ handoffs: { maxItems: 8 }, schema: { type: "array" } }, /cannot be combined with schema/u],
     [{ handoffs: { maxItems: 8 }, validate: () => [] }, /cannot be combined with validate/u],
     [{ handoffs: { maxItems: 8 }, choice: ["a", "b"] }, /choice cannot be combined with handoffs/u],
@@ -154,6 +173,7 @@ describe('agent({ handoffs, returnVia: "tool" })', () => {
 
     expect(list).toEqual(["DAG A", "DAG B"]);
     expect(requests).toHaveLength(1);
+    expect(requests[0]?.returnContract?.maxLength).toBe(100_000);
     expect(requests[0]?.returnContract?.schema).toEqual({
       type: "array",
       items: { type: "string", minLength: 1, maxLength: 2_000, nonBlank: true },
@@ -161,6 +181,23 @@ describe('agent({ handoffs, returnVia: "tool" })', () => {
       maxItems: 8,
       uniqueTrimmedItems: true,
     });
+  });
+
+  it("accepts a discovered work unit beyond 500k with its declared answer budget", async () => {
+    const workUnit = "Migrate this source section\n".repeat(20_000);
+    const serialized = JSON.stringify([workUnit]);
+    const { dsl, requests } = toolRuntime("agent-handoffs-large-unit", [serialized]);
+    await expect(
+      dsl.agent("Discover the independent migration work units with their source context.", {
+        label: "discover",
+        handoffs: { minItems: 0, maxItems: 1, maxItemChars: workUnit.length },
+        maxAnswerChars: serialized.length,
+        returnVia: "tool",
+      }),
+    ).resolves.toEqual([workUnit]);
+    expect(requests).toHaveLength(1);
+    expect(workUnit.length).toBeGreaterThan(500_000);
+    expect(requests[0]?.returnContract?.maxLength).toBeGreaterThan(serialized.length);
   });
 
   it("refuses bounds violations before any child and off-shape lists at the boundary", async () => {
@@ -176,10 +213,33 @@ describe('agent({ handoffs, returnVia: "tool" })', () => {
     }
     expect(bounded.requests).toHaveLength(0);
 
+    await expect(
+      bounded.dsl.agent("Discover.", {
+        label: "discover",
+        handoffs: { maxItems: 100, maxItemChars: Number.MAX_SAFE_INTEGER },
+        returnVia: "tool",
+      }),
+    ).rejects.toThrow(/canonical JSON allowance must be a safe integer/u);
+    expect(bounded.requests).toHaveLength(0);
+
     const offShape = toolRuntime("agent-handoffs-tool-off-shape", ['["a","b","c"]']);
     await expect(
       offShape.dsl.agent("Discover.", { label: "discover", handoffs: { maxItems: 2 }, returnVia: "tool" }),
     ).rejects.toThrow(SchemaValidationError);
+  });
+
+  it("does not raise an explicit outer answer budget to accommodate handoffs", async () => {
+    const workUnit = "Migrate the discovered owner.";
+    const { dsl, requests } = toolRuntime("agent-handoffs-answer-budget", [JSON.stringify([workUnit])]);
+    await expect(
+      dsl.agent("Discover migration units.", {
+        label: "discover",
+        handoffs: { maxItems: 1, maxItemChars: 600_000 },
+        maxAnswerChars: 10,
+        returnVia: "tool",
+      }),
+    ).rejects.toThrow(/Agent answer is .* characters/u);
+    expect(requests).toHaveLength(1);
   });
 
   it("keeps a string output contract out of the shaped handoff options", () => {

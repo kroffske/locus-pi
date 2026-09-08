@@ -1041,6 +1041,15 @@ async function runChildSession(
     return cancelledResult(request, reason);
   }
 
+  // Validate the actual timer before constructing a session. Node turns an
+  // overflowing delay into 1 ms, which would abort a legitimate long child.
+  const turnBudgetMs = turnTimeoutMs * request.maxTurns;
+  if (!Number.isSafeInteger(turnBudgetMs) || turnBudgetMs < 1 || turnBudgetMs > 2_147_483_647) {
+    const reason = "Child timer budget cannot be represented by Node timers; lower maxTurns or turnTimeoutMs.";
+    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", finalAnswer: reason, errors: [reason] });
+    return failedResult(request, reason, "run-policy-blocked", [reason]);
+  }
+
   const diagnostics: string[] = [];
   const capsule = createAgentExecutionPromptCapsule(request, diagnostics, promptEnv);
   const kickoff = formatAgentKickoffPrompt(capsule);
@@ -1299,9 +1308,6 @@ async function runChildSession(
       acceptance.bindToolRestriction(restrictAcceptanceTools);
     }
 
-    // Budget scales with maxTurns so a legitimately long multi-turn child is not
-    // killed prematurely, while a stuck child still has a hard ceiling.
-    const turnBudgetMs = turnTimeoutMs * Math.max(1, request.maxTurns);
     const ledger: ChildTurnLedger = { toolCalls: 0, assistantTurns: 0, toolNames: new Set() };
     const deadline = Date.now() + turnBudgetMs;
     let acceptedOutput:
@@ -1316,7 +1322,7 @@ async function runChildSession(
       maxToolCalls,
       execution,
       ledger,
-      acceptance === undefined ? undefined : request.maxTurns,
+      request.maxTurns,
     );
     if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
     while (

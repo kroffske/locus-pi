@@ -197,6 +197,15 @@ Keep stable stage option groups together near the top. Keep prompts, calls,
 branches, and handoffs visible at their execution edges. Stage prompts own their
 roles; package agent names are never required.
 
+Give an agent its task, relevant context and completion condition, each stated
+once in a coherent brief rather than a mandatory set of headings. Let it choose
+the work steps; prescribe a procedure only for a real repository constraint or
+known failure. Reports and narrative handoffs use ordinary `agent()` text.
+Reserve `choice` for routing and `handoffs` for independently scheduled work
+units. Do not wrap a report in a singleton list or guess a response-length cap.
+An author-selected bound must come from an explicit user requirement, actual
+consumer contract or measured failure. Runtime safety budgets remain in force.
+
 ```js
 export const meta = {
   name: "review-task",
@@ -643,7 +652,7 @@ Failure statuses remain domain detail; the durable run disposition is
 Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
-budget allows 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer
+budget allows 1,000 tool calls, a 24-hour timeout, 1,000 turns, and 500,000 answer
 characters per child attempt. One run admits at most 10,000 physical attempts,
 starts no new child after its 24-hour gate, and executes at most four attempts
 concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
@@ -652,6 +661,14 @@ Same-session tool-output corrections consume the existing child budgets instead
 of creating a new physical invocation. Structured launchers may explicitly set
 the shared budget; see [execution controls](references/execution-controls.md).
 The SDK timeout is a later transport backstop, not authored workflow policy.
+
+Turns count SDK model cycles, including ordinary tool use and output
+clarification within the same child. They are not workflow retries or return
+submissions. The default is an emergency allowance, not a prompt instruction to
+consume it. Explicit `maxTurns` values must be positive safe integers whose
+combined SDK timer is representable. When resuming work recorded under an older
+default, pin completed calls to their recorded effective value before changing
+the unfinished suffix, then verify prefix reuse.
 
 `meta.profile` makes authoring intent explicit. New generated source uses
 `"standard"`; existing compatibility-heavy entries use `"legacy"`, end-to-end

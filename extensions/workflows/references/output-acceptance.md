@@ -40,7 +40,7 @@ const units = await agent("Return complete independent work instructions", {
 
 `returnVia: "tool"` accepts exactly one of `choice`, `output`, `schema` or `handoffs`. String output is nonblank; `singleLine` rejects line breaks, not every possible Markdown token. `maxLength` is a positive safe integer up to 500,000; the default is 100,000. The outer existing answer/tool/time bounds also apply. No model-specific fence-stripping parser is added.
 
-`schema` uses the same supported keyword subset and the same validator as the text path; `handoffs` desugars to the same bounded unique string array as the text path (`minItems` default 0, `maxItems` 1..100, `maxItemChars` default 8,000, ceiling 32,000). For both, the contract's `maxLength` bounds the canonical JSON of the accepted value; it is fixed at 100,000 because `output` cannot be combined with a shaped contract, so declare handoff bounds whose total fits. An oversized record is corrected in the same session rather than after the child ends. The value is the JSON value itself: a string that contains JSON is a shape mismatch and is repaired in the same session, not parsed. No fence stripping or prose parsing is added.
+`schema` uses the same supported keyword subset and the same validator as the text path; `handoffs` desugars to the same bounded unique string array as the text path (`minItems` default 0, `maxItems` 1..100, `maxItemChars` default 8,000, positive safe integer). The contract's `maxLength` bounds the canonical JSON of the accepted value. Raw schemas and handoffs up to 32,000 characters retain their existing 100,000-character canonical allowance and unchanged replay identity. Explicit handoffs above 32,000 receive an allowance derived from their item bounds, including worst-case JSON escaping. Unsafe derived arithmetic is rejected before any child starts; the outer answer/tool/time budgets still apply. The default item limit stays 8,000. An oversized record is corrected in the same session rather than after the child ends. The value is the JSON value itself: a string that contains JSON is a shape mismatch and is repaired in the same session, not parsed. No fence stripping or prose parsing is added.
 
 `repair.maxAttempts` includes the first proposal or a turn with no proposal, defaults to 2 and is limited to 1..3. Optional clarification is nonblank text up to 4,000 characters. Both option objects are closed. `output` and `repair` without tool return are refused. Tool return does not combine with `validate` or transport `attempts` greater than one; choice fallback exists only for `choice`.
 
@@ -54,7 +54,19 @@ After submission, and before a clarification prompt, the host narrows active too
 
 Tools, assistant turns and the wall-clock deadline accumulate across clarification. The original outer workflow timeout remains armed. A candidate is committed only when the child finishes successfully; a provider error, cancellation, timeout or budget failure after a proposal still fails. The session is disposed once.
 
+Assistant turns are SDK model cycles (`turn_start`), including normal tool use
+before the first proposal. The same cumulative `maxTurns` limit applies to plain
+text and tool-return children; `repair.maxAttempts` separately limits output
+submissions. A long review can exhaust turns without ever calling
+`workflow_return`. Inspect its transcript before diagnosing a format-repair loop.
+
 Format repair is not semantic retry: a record with the right shape is not evidence that its facts are right. A required verifier stays required, and content review is a separate agent call with the original goal and exact feedback, never a hidden continuation of shape clarification.
+
+When an array or object container has the wrong type, correction feedback shows
+the raw `value` container syntax.
+The agent must fill that container with its existing schema-matching content;
+the host never parses a JSON string into an accepted array or object. Correction
+examples do not change the initial prompt or the completed-call replay key.
 
 Legacy `choice`, `schema` and `schema + validate` keep their current fresh-session shape repair; ordinary text calls are unchanged. Tool return is opt-in. A semantic `continue` still requires a new worker call and a new conversation.
 

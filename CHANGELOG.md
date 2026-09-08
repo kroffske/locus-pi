@@ -6,6 +6,24 @@ User-visible changes to the public package.
 
 ### Changed
 
+- Added the `external-locus-pi` skill for Codex and Claude Code. External launches default to an interactive Pi session retained by a terminal supervisor, with a manual attachment command and native workflow evidence. The workflow skill installer manages all three skills; JSON print mode remains an explicit non-interactive option.
+
+- External workflow guidance now uses supervised long-running Pi processes with retained exit/signal evidence. An orphaned child requires current-state reconciliation; a verified terminal ancestor can then supply a reusable prefix for a fresh recovery branch. Missing terminal records remain missing, and interrupted-recovery admission is unchanged.
+
+- Recovery after an authorized checkpoint distinguishes content from HEAD/index changes and retains the original step baseline archive for full-step review. A clean post-checkpoint Git diff is not proof that the implementation made no changes, and the checkpoint is not acceptance.
+
+- Workflow authoring distinguishes environment preparation from implementation. After a scoped environment repair, implementation continues; baseline tests do not prove the feature is done. Recovery requires a concrete unresolved blocker or the actual resource-stop reason, without weakening acceptance or adding automatic retries.
+
+- Repair guidance now audits the entire unfinished workflow suffix for repeated narrative-wrapper mistakes while preserving completed-call identity and existing semantic gates. An array example is a correction aid, not proof that a model will submit the required shape.
+
+- Workflow failure diagnostics now link to the failed child's persisted result or transcript instead of borrowing the previous successful answer. Missing or ambiguous child evidence leaves the journal as the diagnostic entry point; rendered pointers use `evidence:`.
+
+- Workflow tool-return corrections now show raw array/object argument syntax, so a JSON-encoded string is not mistaken for the required value. The agent corrects its existing content in the same session; strict validation, attempt limits, and initial replay-key bytes remain unchanged.
+
+- Workflow children now default to 1,000 cumulative SDK model cycles, with explicit `maxTurns` overrides above the former 20-cycle ceiling. Normal tool use and output clarification share this limit on both text and tool-return paths. Computed timer overflow is rejected before a child starts; other budgets remain unchanged. Resuming an older run requires retaining each completed call's recorded turn allowance so its replay key remains valid.
+
+- Workflow authoring now starts from the agent's task, context and definition of done. Ordinary reports return plain text; shaped results and author-selected limits require an actual consumer or user requirement. Independent discovered work units may declare a larger `handoffs.maxItemChars` without another arbitrary ceiling. Runtime derives room for JSON escaping and rejects arithmetic overflow before starting a child. Existing small contracts keep their replay identity; same-session repair and outer execution budgets remain unchanged.
+
 - Text workflow choices now ask for one of the allowed JSON string values instead of showing an enum schema that agents can echo without choosing. Validation still rejects schema-only answers. Workflow authoring guidance selects same-session `returnVia: "tool"` after commands or file writes; simple narrative calls stay unchanged. The new text-choice prompt changes replay identity for those calls. The authoring skill also requires readable per-item agent titles, with mapped-row display covered through the runtime, SDK bridge, fleet renderer, and drill.
 
 - `agent({ returnVia: "tool" })` now also accepts `schema` (a validated object) and `handoffs` (a bounded list of complete strings) through the same `workflow_return` tool: an agent that did the work but returned the wrong shape corrects it in the same child session under the existing `repair.maxAttempts`, and the workflow receives the validated value instead of text. Choice and closed-string contracts, one session, commit-on-completion and replay identity are unchanged; `validate` and transport `attempts` still do not combine with tool return. A correctly shaped record is not evidence that its facts are right.

@@ -6,7 +6,6 @@ import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_sha
 import {
   DEFAULT_WORKFLOW_BUDGET,
   NODE_TIMER_MAX_DELAY_MS,
-  WORKFLOW_AGENT_MAX_TURNS,
   WORKFLOW_BUDGET_AXES,
   WORKFLOW_MAX_TIMEOUT_MS,
   formatWorkflowBudgetPrelude,
@@ -45,7 +44,7 @@ describe("DEFAULT_WORKFLOW_BUDGET", () => {
       runtimeMs: 86_400_000,
       timeoutMs: 86_400_000,
       toolCalls: 1_000,
-      turns: 20,
+      turns: 1000,
       answerChars: 500_000,
     });
   });
@@ -94,10 +93,10 @@ describe("resolveWorkflowBudget", () => {
     expect(resolved.raises).toEqual([{ axis: "runtimeMs", applied: 86_400_000, requested: 172_800_000 }]);
   });
 
-  it("refuses a run-level turns override outside the host clamp before calling it applied", () => {
-    expect(() => resolveWorkflowBudget({ turns: 25 })).toThrow(
-      /workflow budget turns must be an integer between 1 and 20/u,
-    );
+  it("accepts explicit long-work turn budgets and rejects non-integers", () => {
+    expect(resolveWorkflowBudget({ turns: 1000 }).budget.turns).toBe(1000);
+    expect(resolveWorkflowBudget({ turns: 2000 }).raises).toEqual([{ axis: "turns", applied: 1000, requested: 2000 }]);
+    expect(() => resolveWorkflowBudget({ turns: 1.5 })).toThrow(/positive safe integer/u);
   });
 
   it("refuses a timeout that Node would clamp to a one-millisecond timer", () => {
@@ -162,10 +161,14 @@ describe("budget journal text", () => {
 });
 
 describe("workflowSdkTurnTimeoutMs", () => {
+  it("rejects unsafe timeout/turn combinations instead of creating a one-ms timer", () => {
+    expect(() => workflowSdkTurnTimeoutMs(WORKFLOW_MAX_TIMEOUT_MS, 1000)).toThrow(/Node timers/u);
+    expect(() => workflowSdkTurnTimeoutMs(86_400_000, Number.MAX_SAFE_INTEGER)).toThrow(/Node timers/u);
+    expect(workflowSdkTurnTimeoutMs(86_400_000, 1000)).toBe(91_400);
+  });
   it("keeps the SDK budget strictly above the declared fuse at every legal turn count", () => {
-    // The host clamp is 1..20 (`agent-runner.ts`). A tie at ANY of those counts
-    // would make the operator's failure text a race, which is the defect D4 removes.
-    for (let maxTurns = 1; maxTurns <= 20; maxTurns += 1) {
+    // Sample both legacy limits and long-work overrides without changing the declared fuse.
+    for (const maxTurns of [1, 2, 20, 21, 1000, 10_000]) {
       for (const timeoutMs of [1, 999, 60_000, 600_000, 7_200_000]) {
         const turnTimeoutMs = workflowSdkTurnTimeoutMs(timeoutMs, maxTurns);
         const sdkBudgetMs = turnTimeoutMs * maxTurns;
@@ -175,7 +178,7 @@ describe("workflowSdkTurnTimeoutMs", () => {
   });
 
   it("keeps both real timers within Node's maximum delay at the largest accepted fuse", () => {
-    for (let maxTurns = 1; maxTurns <= WORKFLOW_AGENT_MAX_TURNS; maxTurns += 1) {
+    for (let maxTurns = 1; maxTurns <= 20; maxTurns += 1) {
       const turnTimeoutMs = workflowSdkTurnTimeoutMs(WORKFLOW_MAX_TIMEOUT_MS, maxTurns);
       expect(WORKFLOW_MAX_TIMEOUT_MS).toBeLessThanOrEqual(NODE_TIMER_MAX_DELAY_MS);
       expect(turnTimeoutMs * maxTurns).toBeLessThanOrEqual(NODE_TIMER_MAX_DELAY_MS);
@@ -188,7 +191,7 @@ describe("workflowSdkTurnTimeoutMs", () => {
     expect(turn * DEFAULT_WORKFLOW_BUDGET.turns).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
     expect(DEFAULT_WORKFLOW_BUDGET.runtimeMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000);
     expect(DEFAULT_WORKFLOW_BUDGET.timeoutMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000);
-    expect(DEFAULT_WORKFLOW_BUDGET.turns).toBe(WORKFLOW_AGENT_MAX_TURNS);
+    expect(DEFAULT_WORKFLOW_BUDGET.turns).toBe(1000);
   });
 });
 

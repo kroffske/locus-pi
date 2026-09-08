@@ -41,11 +41,18 @@ function bridgeHarness(
   root: string,
   id: string,
   submit: (prompt: number) => unknown,
-): { runtime: WorkflowRuntime; counters: { sessions: number; prompts: number; disposals: number } } {
+): {
+  runtime: WorkflowRuntime;
+  counters: { sessions: number; prompts: number; disposals: number };
+  feedback: string[];
+  promptTexts: string[];
+} {
   const h = createHarness(root);
   const runDir = tempRun(root, id);
   const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir });
   const counters = { sessions: 0, prompts: 0, disposals: 0 };
+  const feedback: string[] = [];
+  const promptTexts: string[] = [];
   const runner = createWorkflowAgentRunner({
     pi: h.pi,
     ctx: h.ctx,
@@ -76,18 +83,25 @@ function bridgeHarness(
                 emit = listener;
                 return () => {};
               },
-              async prompt() {
+              async prompt(promptText) {
                 counters.prompts += 1;
+                promptTexts.push(promptText);
                 emit({ type: "turn_start" });
                 emit({
                   type: "tool_execution_start",
                   toolName: "workflow_return",
                   toolCallId: `t${counters.prompts}`,
                 });
-                await tool.execute(
+                const response = await tool.execute(
                   `t${counters.prompts}`,
                   { value: submit(counters.prompts) },
                   new AbortController().signal,
+                );
+                feedback.push(
+                  response.content
+                    .filter((block) => block.type === "text")
+                    .map((block) => block.text)
+                    .join("\n"),
                 );
                 emit({ type: "agent_end", willRetry: false });
               },
@@ -117,7 +131,12 @@ function bridgeHarness(
         },
       }),
   });
-  return { runtime: createWorkflowRuntime({ runId: id, agentRunner: runner, artifactPorts: store }), counters };
+  return {
+    runtime: createWorkflowRuntime({ runId: id, agentRunner: runner, artifactPorts: store }),
+    counters,
+    feedback,
+    promptTexts,
+  };
 }
 
 test("runtime -> bridge -> SDK returns the validated tool value and preserves one session during repair", async () =>
@@ -152,6 +171,84 @@ const RESULT = {
     summary: { type: "string", minLength: 1, maxLength: 4000 },
   },
 };
+
+test("stringified arrays and objects receive raw-container examples and require an actual corrected value", async () =>
+  temporary(async (root) => {
+    const cases = [
+      { type: "array", schema: { type: "array", minItems: 1, items: { type: "string" } }, value: ["Existing report"] },
+      { type: "object", schema: RESULT, value: { decision: "complete", summary: "Existing evidence" } },
+    ];
+    for (const item of cases) {
+      const { runtime, counters, feedback, promptTexts } = bridgeHarness(root, `raw-${item.type}`, (prompt) =>
+        prompt === 1 ? JSON.stringify(item.value) : item.value,
+      );
+      const result = await runtime.dsl.agent("Return the existing evidence", {
+        label: `raw-${item.type}`,
+        returnVia: "tool",
+        schema: item.schema,
+      });
+      assert.deepEqual(result, item.value);
+      assert.equal(counters.sessions, 1);
+      assert.equal(counters.prompts, 2);
+      assert.equal(counters.disposals, 1);
+      const example = item.type === "array" ? '{"value":[]}' : '{"value":{}}';
+      assert.ok(feedback[0]?.includes(`expected ${item.type}, got string`));
+      assert.ok(feedback[0]?.includes(example));
+      assert.ok(feedback[0]?.includes("without JSON.stringify"));
+      assert.ok(promptTexts[1]?.includes(example));
+    }
+  }));
+
+test("repeating a stringified array still exhausts the contract instead of being coerced", async () =>
+  temporary(async (root) => {
+    const { runtime, counters } = bridgeHarness(root, "raw-array-exhausted", () => '["Existing report"]');
+    await assert.rejects(
+      runtime.dsl.agent("Return the existing evidence", {
+        label: "raw-array-exhausted",
+        returnVia: "tool",
+        schema: { type: "array", items: { type: "string" } },
+      }),
+      /Output contract exhausted after 2 attempts: root: expected array, got string/,
+    );
+    assert.equal(counters.sessions, 1);
+    assert.equal(counters.prompts, 2);
+    assert.equal(counters.disposals, 1);
+    assert.equal(
+      runtime.getJournal().find((line) => line.kind === "agent_end")?.failureCause,
+      "output-contract-exhausted",
+    );
+  }));
+
+test("an already-correct container receives only its actual content validation error", async () =>
+  temporary(async (root) => {
+    const { runtime, feedback, promptTexts } = bridgeHarness(root, "array-item-correction", (prompt) =>
+      prompt === 1 ? [7] : ["Existing item"],
+    );
+    const value = await runtime.dsl.agent("Return the existing item", {
+      label: "array-item-correction",
+      returnVia: "tool",
+      schema: { type: "array", items: { type: "string" } },
+    });
+    assert.deepEqual(value, ["Existing item"]);
+    assert.ok(feedback[0]?.includes("expected string, got number"));
+    assert.ok(!feedback[0]?.includes("tool-argument syntax"));
+    assert.ok(!promptTexts[1]?.includes("tool-argument syntax"));
+  }));
+
+test("a large discovered work unit passes runtime -> bridge -> SDK in one session and proposal", async () =>
+  temporary(async (root) => {
+    const workUnit = "Migrate this source section\n".repeat(20_000);
+    const { runtime, counters } = bridgeHarness(root, "bridge-large-handoff", () => [workUnit]);
+    const value = await runtime.dsl.agent("Discover migration work units with their source context.", {
+      label: "discover",
+      handoffs: { minItems: 0, maxItems: 1, maxItemChars: workUnit.length },
+      maxAnswerChars: JSON.stringify([workUnit]).length,
+      returnVia: "tool",
+    });
+    assert.deepEqual(value, [workUnit]);
+    assert.deepEqual(counters, { sessions: 1, prompts: 1, disposals: 1 });
+    assert.equal(runtime.getJournal().find((line) => line.kind === "agent_end")?.outputAcceptance?.attempts, 1);
+  }));
 
 test("runtime -> bridge -> SDK returns the validated record after same-session shape repair", async () =>
   temporary(async (root) => {

@@ -352,7 +352,8 @@ describe("npm public package boundary", () => {
     // 254 since the create skill gained the Repair + Continue and large-agent-runs cards.
     // 256 since the shared schema validator became its own runtime module and the create
     // skill gained the structured-results card.
-    expect(dryRun.files).toHaveLength(256);
+    // 259 with the external-session skill and its interactive/JSON lifecycle references.
+    expect(dryRun.files).toHaveLength(259);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -445,7 +446,7 @@ describe("npm public package boundary", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => `skills/${entry.name}/SKILL.md`)
       .sort();
-    expect(skillEntries).toHaveLength(2);
+    expect(skillEntries).toHaveLength(3);
 
     for (const skillPath of skillEntries) {
       expect(existsSync(path.join(root, skillPath)), `declared skill is missing: ${skillPath}`).toBe(true);

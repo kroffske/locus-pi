@@ -17,7 +17,7 @@ const diagnostic: WorkflowFailureDiagnostic = {
     'Fix the "review" workflow: its script rejected the run at stage "inventory-changes" — review inventory ' +
     "returned neither a coverage entry nor the declaration. " +
     "Script: extensions/workflows/examples/review/review.workflow.mjs. " +
-    "Failing stage answer: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md. " +
+    "Failure evidence: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md. " +
     "Run journal: .pi/locus-pi/runs/run-1/journal.ndjson.",
 };
 
@@ -40,7 +40,7 @@ describe("workflow failure surfaces", () => {
     expect(text).toContain(
       "stage: inventory-changes · script: extensions/workflows/examples/review/review.workflow.mjs",
     );
-    expect(text).toContain("answer: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md");
+    expect(text).toContain("evidence: .pi/locus-pi/runs/run-1/artifacts/answers/call-0003-inventory.md.md");
     expect(text).toContain("journal: .pi/locus-pi/runs/run-1/journal.ndjson");
     // A width-clamped widget cannot carry a copyable request; the transcript does.
     expect(text).not.toContain("copy:");

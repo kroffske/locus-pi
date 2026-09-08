@@ -1,8 +1,39 @@
 # Structured results and same-session format repair
 
-After command execution or file writes, prefer same-session tool return; a schema-only echo selects no value and must not become success. The linked output acceptance contract owns the worked example. Supported: exact `choice`, closed string `output`, `handoffs` and compatibility `schema` all go through the one `workflow_return` tool with `returnVia: "tool"`; strict standard source may use choice, output and handoffs, while raw `schema` stays compatibility-only.
+Start with plain `agent()` text for a report, review or narrative handoff. Running
+commands or writing files does not by itself require structured output. Add a
+contract only when the next consumer needs one: `choice` for code branching,
+`handoffs` for independently scheduled discovered work units, or `output` for an
+actual string-format requirement. Raw `schema` remains compatibility-only.
 
-Choose a choice for one routing decision, complete handoffs for independent worker instructions, and a schema record for several fields. Keep the payload limited to what downstream code needs; a bound on one answer is not a platform-wide agent cap. Do not parse Markdown fences or ask a second worker to rediscover facts solely because the first response has the wrong shape.
+When a structured result follows commands or file writes, use
+`returnVia: "tool"` for same-session correction. A schema-only echo selects no
+value and must not become success. Do not parse Markdown fences or ask a fresh
+worker to rediscover facts solely because the first answer has the wrong shape.
+
+For example, rejecting a complete 37,000-character review because a guessed
+singleton `handoffs` contract allows only 32,000 is an authoring defect. Raising
+that number to another guess preserves the defect. The review should return
+plain text; a separate routing decision retains its real contract:
+
+```js
+const review = await agent(`Review the proposed change against its acceptance criteria.\n${input}`, {
+  label: "review",
+  title: "Review the proposed change",
+});
+const decision = await agent(`Decide whether the acceptance criteria are met.\n${input}\n${review}`, {
+  label: "acceptance",
+  title: "Check acceptance",
+  choice: ["ready", "blocked"],
+  returnVia: "tool",
+});
+```
+
+The load-bearing distinction is prose versus code-consumed control, not these
+labels or this number of agents. Add a separate decision only if the graph needs
+to branch. A real output limit names its consumer, unit and source; ordinary
+narrative needs no author-selected cap. Keep platform safety budgets under their
+runtime owner, and never silently truncate complete work to pass validation.
 
 Extend the existing workflow_return path, not a second return tool. Format clarification stays in the same child session and uses bounded attempts and cumulative resources. Semantic improvement is a fresh worker with the original goal and exact feedback. A successful proposal followed by cancellation/provider failure is not an accepted result.
 

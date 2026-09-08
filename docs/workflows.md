@@ -147,6 +147,7 @@ Pi approvals remain the enforcement owner. Source hashes, confined output paths,
 - [Packaged examples](../extensions/workflows/examples/README.md)
 - [Workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md)
 - [Workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md)
+- [External Locus Pi: interactive session from Codex or Claude Code](../skills/external-locus-pi/SKILL.md)
 - [Skill host matrix and installation](../skills/README.md)
 
 Inside Pi, validate a standard-profile workflow source with the

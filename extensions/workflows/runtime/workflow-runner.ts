@@ -42,9 +42,11 @@ import {
   createWorkflowRuntime,
   createWorkflowSharedExecutionState,
   snapshotWorkflowItems,
+  WorkflowAgentExecutionError,
   workflowGroupFailureEnvelope,
   WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE,
   WORKFLOW_NO_OPERATOR_PRELUDE,
+  type WorkflowAgentResult,
   type WorkflowSavedChildResult,
   type WorkflowSharedExecutionState,
 } from "./workflow-runtime.js";
@@ -1254,6 +1256,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...(runtime?.getJournal() ?? []),
   ];
   type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
+  let failedChildResult: Pick<WorkflowAgentResult, "childTrace" | "resultArtifact"> | undefined;
+  let unhandledGroupFailure = false;
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
     let primaryOutputPath: string | undefined;
     const finalizationErrors: WorkflowFinalizationError[] = [];
@@ -1587,7 +1591,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     // verdict, not a defect: it already owns its own summary and needs no repair
     // request. Only a thrown/transport failure earns a diagnostic.
     if (fields.disposition?.status !== "failed" || fields.error === undefined) return fields;
-    let artifacts: readonly { kind: string; stage?: string; relativePath: string }[] = [];
+    let artifacts: readonly { kind: string; stage?: string; relativePath: string; callId?: string }[] = [];
     try {
       artifacts = artifactStore?.list() ?? [];
     } catch {
@@ -1601,6 +1605,8 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         journalPath: workflowJournalFile(runDir),
         journal: fields.journal,
         ...(fields.failureOrigin === undefined ? {} : { origin: fields.failureOrigin }),
+        ...(failedChildResult === undefined ? {} : { failedChild: failedChildResult }),
+        ...(unhandledGroupFailure ? { unhandledGroupFailure: true } : {}),
         ...(fields.error === undefined ? {} : { error: fields.error }),
         ...(fields.target === undefined ? {} : { target: fields.target }),
         ...(fields.scriptIdentity === undefined ? {} : { scriptIdentity: fields.scriptIdentity }),
@@ -2415,8 +2421,12 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     result = await runGuardedAgainstHostCrash(() => Promise.resolve(entry(runtime!.dsl, opts.input)));
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    if (err instanceof WorkflowAgentExecutionError) {
+      failedChildResult = err.result;
+    }
     const journalLines = currentJournal(runtime);
     const groupFailure = workflowGroupFailureEnvelope(err);
+    unhandledGroupFailure = groupFailure !== undefined;
     return finishRun({
       ok: false,
       result: groupFailure,

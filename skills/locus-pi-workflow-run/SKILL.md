@@ -1,13 +1,14 @@
 ---
 name: locus-pi-workflow-run
-description: Run, start, execute, launch, or resume an existing locus-pi workflow, monitor that current run, and recover a run that stopped, failed, or was interrupted when only its run id is known. Use the native `workflow` tool inside Pi; outside Pi invoke `/workflows run` through `pi --mode json -p` and follow typed receipts and journal paths. Not for creating workflows or browsing unrelated run history.
+description: Run, start, execute, launch, or resume an existing locus-pi workflow, monitor that current run, and recover a run that stopped, failed, or was interrupted when only its run id is known. Use the native `workflow` tool inside Pi; outside Pi route to external-locus-pi for an inspectable session. Owns workflow evidence and recovery. Not for creating workflows or browsing unrelated run history.
 ---
 
 # Run a locus-pi workflow
 
 Run an existing reviewed workflow through the host that already owns model,
-authentication, session, child-agent, and evidence lifecycle. Do not add a
-wrapper, ask a parent model to call the tool, or import the workflow runner.
+authentication, session, child-agent, and evidence lifecycle. Do not add a new
+workflow API wrapper, ask a parent model to call the tool, or import the workflow
+runner. A process supervisor may own the native CLI on the external path below.
 
 Workflow JavaScript is trusted code with full Node.js access in the Pi host. It
 is not sandboxed. Project approval is a broad Pi trust decision, not approval of
@@ -35,7 +36,9 @@ recovery path.
    fields; stop as unsupported when that tool is unavailable. Never drop them.
 2. If a structured tool named `workflow` is available, use the native Pi path.
 3. Otherwise, if the `pi` executable is available and the locus-pi package is
-   installed, use the external Pi path.
+   installed, use [external-locus-pi](../external-locus-pi/SKILL.md) for an
+   interactive session the user can inspect. Use the JSON path below only when
+   non-interactive execution is explicitly requested.
 4. Otherwise stop with the missing prerequisite and the install command:
    `pi install npm:@kroffske/locus-pi`.
 
@@ -111,7 +114,11 @@ model; assigning `default` does not replace that inheritance. Supplying
 `--model` and `--thinking` on an external launch overrides the main model for
 that Pi process only. It does not override an explicit workflow child role.
 
-## External Pi path
+## External JSON path
+
+This is the explicitly requested non-interactive transport. The default external
+route is [external-locus-pi](../external-locus-pi/SKILL.md), which retains the Pi UI
+for manual inspection. Print mode does not provide that interface.
 
 Invoke Pi in JSON print mode with the slash-command itself as one argv element:
 
@@ -150,6 +157,11 @@ Canonical grammar:
 `--approve` trusts project-local settings, packages, extensions, prompts, and
 other Pi resources. Use it only for a project the operator has authorized.
 
+For an external run that must outlive the current tool call or chat turn, read
+[external process lifecycle](references/external-lifecycle.md) before launching.
+Use an established supervisor with retained exit status and file-backed streams.
+A temporary exec session plus `Popen(...).wait()` is not durable ownership.
+
 ## Read the JSON stream
 
 Pi emits both `message_start` and `message_end` for a custom message. Interpret
@@ -164,8 +176,9 @@ message.customType == "locus-workflow-run"
 Then branch on `message.details.eventKind`:
 
 - `workflow_start` — capture `runId`, `runDir`, `journalPath`, and `resultPath`.
-  Require this or `workflow_rejected` within 30 seconds. Keep the Pi process
-  attached and read/tail `journalPath` when the caller needs liveness.
+  Require this or `workflow_rejected` within 30 seconds. Keep the owning Pi
+  process alive through its terminal receipt; use the supervised external path
+  for long runs and read/tail `journalPath` when the caller needs liveness.
 - `workflow_rejected` — stop and report its typed `code`, `target`, and message.
   No workflow started.
 - `workflow_end` — use `workflowStatus` and `resultPersisted` as terminal truth,
@@ -200,8 +213,9 @@ content, not something an agent can call.
 2. `failureDiagnostic` inside that file — `origin` (`script` or `runtime`),
    `stage`, `scriptPath`, `evidencePath`, `journalPath`, and one copyable
    `repairRequest`. An absent field means the run never proved it.
-3. The failing stage's answer at `evidencePath`, when the run persisted one.
-   This is the text that states why the stage rejected the work.
+3. The child result, transcript or answer at `evidencePath`, when one is proven.
+   If no terminal result exists, use the start receipt and launch binding to find
+   the journal and child transcript; a partial file is not a completion record.
 4. `.locus-pi/runs/<runId>/runtime/journal.ndjson` — the append-only lifecycle
    record. Its `replay:` line states whether the stopped run was recorded
    (`replay: not recorded reason=…` means no later run can resume from it).
@@ -265,7 +279,8 @@ describe are still there.
 ### Refuse, by name
 
 1. The run is unreadable: no `.locus-pi/runs/<runId>/`, or `result.json` is
-   missing or corrupt.
+   corrupt. A missing result requires the explicit interrupted-recovery checks
+   below; it is not an ordinary `--resume` source.
 2. The source journal says `replay: not recorded` — that run can never be
    resumed; only a fresh run remains.
 3. `scriptPath` resolves outside the current `projectRoot`, for example an
@@ -277,9 +292,10 @@ describe are still there.
 5. The terminal status is `awaiting_operator`. That run needs a real operator
    answer through `/workflows continue <runId>`; it is not a recovery route and
    the answer must never be synthesized.
-6. The workspace or project tree changed since the source run, so replayed
-   answers would describe files that no longer exist. Repairing the workflow
-   source itself is not this refusal.
+6. The workspace or project prerequisites needed by replayed calls are no longer
+   suitable. Changes from unfinished authorized work require reconciliation,
+   not a blanket whole-tree equality rule. Repairing the workflow source itself
+   is not this refusal.
 7. Resume was requested without the source workspace, or with a different one.
 8. The stopped run was recorded before node names existed, or its calls carry no
    `label`, and the source must be repaired. Every call then misses with
@@ -317,6 +333,16 @@ prefix, workspace ownership and the existing lease. A started but unconfirmed
 child, grouped execution, malformed result or missing binding requires operator
 review. Never fabricate `result.json` to bypass admission. See the canonical
 [recovery contract](../../extensions/workflows/references/recovery-and-continuation.md).
+
+For a dead process with a started-but-unconfirmed call, read the contract's
+[reconciliation path](../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
+The project owner reconciles current changes and effects first. When prerequisites
+remain suitable, ordinary resume from a verified terminal ancestor can reuse its
+prefix and run a repaired reconciliation stage fresh. Name that ancestor and the
+interrupted run separately; this does not resume or accept the orphaned call.
+Otherwise use an explicitly declared fresh recovery workflow or report the exact
+unresolved effect. Existing authorization covers in-scope repair and continuation;
+technical uncertainty is not a missing repeat approval.
 
 The same structured tool accepts optional `budget` overrides forwarded to the
 single runtime budget owner and shown in approval details. Slash syntax above

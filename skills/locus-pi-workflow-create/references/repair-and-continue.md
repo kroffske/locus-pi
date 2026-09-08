@@ -4,7 +4,7 @@ This is an existing runtime capability, not a new graph primitive. A resume reus
 
 ## Author's procedure
 
-Read the stopped run diagnostic and the failing answer it names. Find the project-owned source and the original goal. Preserve the same workflow target and workspace contract. Change the failing prompt or contract and the required suffix; keep unaffected labels, prompts, order and phases unchanged. Do not rename every node while fixing one of them. Use stable business keys where the graph already has them, without claiming that keys bypass the prefix rule.
+Read the stopped run diagnostic and the evidence it names: child result, transcript or answer; use the run journal when no child pointer is proven. Find the project-owned source and the original goal. Preserve the same workflow target and workspace contract. Change the failing prompt or contract and the required suffix; keep unaffected labels, prompts, order and phases unchanged. Do not rename every node while fixing one of them. Use stable business keys where the graph already has them, without claiming that keys bypass the prefix rule.
 
 Validate the exact repaired source with the supported checker and the module/source checks. Report what changed and which prefix is expected to remain reusable. Do not run it as part of Build. Hand the source path, the diagnostic and the original run id to the [run skill](../../locus-pi-workflow-run/SKILL.md).
 
@@ -15,6 +15,88 @@ Use the structured `workflow` field `resumeFromRunId`, or `--resume <runId>` on 
 For example, A completed, B failed, and C was never reached. Repair B: A is served from the record, B and C run fresh. Appending more work can preserve the completed prefix the same way. If A's request also changes, reuse ends at A. A label match without the matching request is not enough.
 
 ## Current limitations, by name
+
+### Unconfirmed call after process loss
+
+An absent process with no child completion or terminal result is an unconfirmed
+call. Preserve its journal, replay, transcript and partial artifacts. Read the
+canonical [reconciliation path](../../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call)
+before editing source: it requires assessing current effects and any reusable
+prerequisites. Direct interrupted recovery does not admit an unfinished child.
+
+For a checkpoint between attempts, retain the step-entry baseline tar/manifest
+and follow that contract's separate content-versus-Git reconciliation. Review the
+whole step against its original baseline, not only the post-checkpoint Git diff.
+
+When a verified terminal ancestor remains usable, keep its completed prefix and
+give the first fresh stage the accepted goal, current tree, preserved work and
+reconciliation findings. Its job is to retain valid work, finish or repair what
+is missing and produce fresh verification before ordinary review and QA. Do not
+blindly rerun an effect, reset the tree to the ancestor, or accept a previous
+child's self-report. Changed prerequisites may require an earlier fresh stage.
+Use [external-locus-pi](../../external-locus-pi/SKILL.md) for an inspectable, retained Pi session
+for long execution; creating a workflow still does not launch it.
+
+### Unfinished implementation
+
+Read the failed child's transcript and verification evidence before classifying
+the stop. If an environment problem was repaired within the accepted scope,
+reuse the prepared environment after checking it is still suitable and continue
+the assigned implementation. Preparation and passing baseline tests do not prove
+the requested behavior was implemented. Do not terminate a child voluntarily
+just because work remains while an authorized next step is available.
+
+A real blocker names the remaining obstacle, its evidence and why an in-scope
+repair cannot resolve it. An observed budget, provider or resource stop retains
+its exact machine reason and completed work; do not invent an owner-approval
+gate. Preserve real authorization, scope and safety boundaries.
+
+For example, missing dependencies fixed and baseline green, but implementation
+absent means continue implementation; required access still denied means report
+that obstacle; an actual turn-budget failure follows the section below. Keep
+acceptance checks: a valid return shape or `[]` is not proof of completion.
+Repair the unfinished source through the normal continuation route, preserving
+completed calls. Do not add an unbounded retry or turn incomplete work into success.
+
+### Repeated output-contract failures
+
+Inspect the entire unfinished suffix, including reachable saved child workflows,
+for the same defect before continuing. A narrative review wrapped in singleton
+`handoffs` can fail again at the next review even after an explicit array example.
+For each occurrence, check the actual downstream consumer: ordinary reports stay
+plain text, and their next semantic reviewer receives the complete text. Keep
+existing checks for completeness, verdict and blockers before subsequent writes.
+Preserve genuine choices that route the graph and handoffs that schedule
+independent work. Do not replace content review with text-length checks.
+
+Keep completed calls' prompts and effective options unchanged, and verify their
+replay identity. Do not redesign the graph or sweep completed stages as part of
+this repair. A raw-value example is a correction aid, not proof that the next
+model will submit the right shape; strict validation remains required.
+
+### Turn-budget failures
+
+`Child exceeded its cumulative ... assistant-turn budget` counts SDK model
+cycles (`turn_start`) during the whole child session, including ordinary
+tool use before its first result. It does not mean the workflow restarted or
+the agent attempted that many `workflow_return` calls. Read the failing child's
+transcript and journal to distinguish useful work from format repair or a loop.
+
+For legitimate work, use the supported explicit `maxTurns` allowance on the
+unfinished suffix. Keep other budgets and the original completion criteria.
+When a runtime default changed, preserve each completed call's recorded
+effective value explicitly: a prefix recorded with 20 turns needs `maxTurns: 20`
+under the new default. Verify actual prefix reuse before resuming; changing all
+calls to the new allowance would change their request keys. The
+[runtime reference](../../../extensions/workflows/REFERENCE.md)
+owns current values and timer constraints.
+
+Ordinary narrative still uses plain text. A singleton `handoffs` report that
+exceeds a guessed character limit is a separate authoring defect; increasing
+turns does not fix it. Use `choice` for a routing decision and `handoffs` only
+for independently scheduled work units.
+
+### Prefix and invocation limits
 
 The match is a strict completed prefix. The first miss — `no-record`, `unnamed-node`, `node-mismatch`, `key-mismatch`, `recorded-failure` or `side-effecting-call` — latches divergence, and every later call reports `diverged` even when its own prompt is unchanged.
 

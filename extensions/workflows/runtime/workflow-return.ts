@@ -27,6 +27,8 @@ export function normalizeWorkflowReturnContract(input: {
   output?: WorkflowStringOutput;
   choices?: readonly string[];
   schema?: unknown;
+  /** Runtime-derived canonical JSON allowance for explicitly enlarged handoffs. */
+  schemaMaxLength?: number;
   repair?: WorkflowOutputRepair;
 }): WorkflowReturnContract {
   if ([input.output, input.choices, input.schema].filter((part) => part !== undefined).length !== 1)
@@ -45,8 +47,13 @@ export function normalizeWorkflowReturnContract(input: {
   }
   if (input.output?.singleLine !== undefined && typeof input.output.singleLine !== "boolean")
     throw new Error("output.singleLine must be boolean");
-  const maxLength = input.output?.maxLength ?? 100_000;
-  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || maxLength > 500_000)
+  const maxLength = input.output?.maxLength ?? input.schemaMaxLength ?? 100_000;
+  if (
+    input.schemaMaxLength !== undefined &&
+    (input.schema === undefined || !Number.isSafeInteger(input.schemaMaxLength) || input.schemaMaxLength < 1)
+  )
+    throw new Error("schemaMaxLength requires a schema and a positive safe integer");
+  if (!Number.isSafeInteger(maxLength) || maxLength < 1 || (input.schemaMaxLength === undefined && maxLength > 500_000))
     throw new Error("output.maxLength must be in 1..500000");
   if (
     input.repair !== undefined &&
@@ -103,6 +110,18 @@ export function workflowReturnInstructions(contract: WorkflowReturnContract): st
       : " For a schema or handoffs contract, pass the JSON value itself (object or array) as value, not a string that contains JSON.")
   );
 }
+
+/** Syntax guidance only: the agent keeps its content and still has to satisfy the schema. */
+function workflowReturnCorrectionExample(contract: WorkflowReturnContract, value: unknown): string {
+  const type = contract.schema?.type;
+  if (type !== "array" && type !== "object") return "";
+  if (type === "array" ? Array.isArray(value) : isRecord(value)) return "";
+  const example = type === "array" ? '{"value":[]}' : '{"value":{}}';
+  return (
+    ` Raw ${type} tool-argument syntax: ${example}. This shows the container only; ` +
+    "fill it with your existing schema-matching content. Pass value directly, without JSON.stringify or wrapping the JSON in quotes."
+  );
+}
 /** The accepted proposal becomes authoritative ONLY after the enclosing child completes successfully. */
 export function createWorkflowReturnController(contract: WorkflowReturnContract): {
   tool: ReadOnlyAgentCustomTool;
@@ -112,6 +131,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
   let accepted: unknown;
   let failure: string | undefined;
   let lastError = "workflow_return was not called";
+  let correctionExample = "";
   let narrowTools: (() => void) | undefined;
   const reject = (reason: string): void => {
     lastError = reason;
@@ -144,8 +164,14 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
       attempts += 1;
       if (error !== undefined) {
         reject(error);
+        correctionExample = workflowReturnCorrectionExample(contract, value);
         return {
-          content: [{ type: "text", text: failure ?? `${error}. Correct workflow_return only; do not redo the task.` }],
+          content: [
+            {
+              type: "text",
+              text: failure ?? `${error}. Correct workflow_return only; do not redo the task.${correctionExample}`,
+            },
+          ],
           isError: true,
         };
       }
@@ -184,7 +210,7 @@ export function createWorkflowReturnController(contract: WorkflowReturnContract)
           reason: failure,
           failureCause: accepted === undefined ? "output-contract-exhausted" : "output-contract-conflict",
         };
-      const prompt = `${lastError}. Call workflow_return with the corrected value only. Reuse your existing evidence; do not perform the task again. ${contract.clarification ?? ""}`;
+      const prompt = `${lastError}. Call workflow_return with the corrected value only. Reuse your existing evidence; do not perform the task again. ${contract.clarification ?? ""}${correctionExample}`;
       lastError = "workflow_return was not called";
       return { status: "retry", prompt };
     },

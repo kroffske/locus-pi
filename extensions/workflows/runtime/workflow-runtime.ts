@@ -23,8 +23,6 @@ import type { AgentOutputAcceptance } from "../../_shared/agent-runtime/agent-ru
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   DEFAULT_WORKFLOW_BUDGET,
-  WORKFLOW_AGENT_MAX_TURNS,
-  WORKFLOW_AGENT_MIN_TURNS,
   WORKFLOW_MAX_TIMEOUT_MS,
   assertWorkflowBudgetValue,
   formatWorkflowBudgetRaise,
@@ -570,10 +568,9 @@ export interface WorkflowAgentOptions {
    */
   timeoutMs?: number;
   /**
-   * Assistant turns for one child attempt, within the host clamp of 1..20. It was
-   * a hardcoded `5` in the bridge and invisible to authors, while the child's whole
-   * wall clock is computed from it — a budget the package was making in silence.
-   * A value outside the clamp is refused before any child starts.
+   * SDK model cycles for one child attempt, including ordinary tool use and
+   * output clarification. Positive safe integer, not a restart count. The
+   * computed timeout/turn pair must fit the host timer.
    */
   maxTurns?: number;
   /**
@@ -999,7 +996,7 @@ export interface WorkflowRuntimeOptions {
   /** Default wall-clock fuse for one child attempt. Absent means a call that
    *  declares none arms no workflow-level fuse and is bounded only by the SDK host. */
   defaultTimeoutMs?: number;
-  /** Default assistant turns per child attempt, within the host clamp of 1..20.
+  /** Default cumulative SDK model cycles per child attempt.
    *  Absent leaves the bridge's own default in place. */
   defaultMaxTurns?: number;
   /**
@@ -1338,14 +1335,10 @@ function executedModelEvidence(
   };
 }
 
-/** The host clamps `maxTurns` to 1..20 (`agent-runner.ts`). The runtime refuses an
- *  out-of-range value here, BEFORE any child starts, so an author sees the rule
- *  instead of a request-validation failure after the run has begun spending. */
+/** Refuse unrepresentable assistant-turn counts before spending on a child. */
 function normalizeMaxTurns(maxTurns: number): number {
-  if (!Number.isSafeInteger(maxTurns) || maxTurns < WORKFLOW_AGENT_MIN_TURNS || maxTurns > WORKFLOW_AGENT_MAX_TURNS) {
-    throw new Error(
-      `agent maxTurns must be an integer between ${WORKFLOW_AGENT_MIN_TURNS} and ${WORKFLOW_AGENT_MAX_TURNS}`,
-    );
+  if (!Number.isSafeInteger(maxTurns) || maxTurns < 1) {
+    throw new Error("agent maxTurns must be a positive safe integer");
   }
   return maxTurns;
 }
@@ -1444,7 +1437,6 @@ const MAX_AGENT_CHOICES = 32;
 const MAX_AGENT_CHOICE_CHARS = 200;
 const MAX_AGENT_HANDOFFS = 100;
 const DEFAULT_AGENT_HANDOFF_MAX_CHARS = 8_000;
-const MAX_AGENT_HANDOFF_CHARS = 32_000;
 
 /** Validate the small standard routing contract before it enters the existing
  *  schema path. Refuse ambiguity instead of trimming or deduplicating author data. */
@@ -1490,18 +1482,25 @@ function normalizeAgentHandoffs(value: unknown): Required<WorkflowAgentHandoffBo
   if ((minItems as number) > (maxItems as number)) {
     throw new Error("agent handoffs minItems cannot exceed maxItems");
   }
-  if (
-    !Number.isSafeInteger(maxItemChars) ||
-    (maxItemChars as number) < 1 ||
-    (maxItemChars as number) > MAX_AGENT_HANDOFF_CHARS
-  ) {
-    throw new Error(`agent handoffs maxItemChars must be a safe integer between 1 and ${MAX_AGENT_HANDOFF_CHARS}`);
+  if (!Number.isSafeInteger(maxItemChars) || (maxItemChars as number) < 1) {
+    throw new Error("agent handoffs maxItemChars must be a positive safe integer");
   }
-  return {
+  const bounds = {
     minItems: minItems as number,
     maxItems: maxItems as number,
     maxItemChars: maxItemChars as number,
   };
+  handoffsJsonMaxLength(bounds);
+  return bounds;
+}
+
+/** JSON escaping needs at most six characters per UTF-16 code unit, plus array punctuation. */
+function handoffsJsonMaxLength(bounds: Required<WorkflowAgentHandoffBounds>): number {
+  const maxLength = bounds.maxItems * (6 * bounds.maxItemChars + 3) + 1;
+  if (!Number.isSafeInteger(maxLength)) {
+    throw new Error("agent handoffs canonical JSON allowance must be a safe integer");
+  }
+  return Math.max(100_000, maxLength);
 }
 
 /** The one array shape handoffs desugar to, shared by the text loop and tool acceptance so
@@ -3157,11 +3156,18 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       throw new Error("agent choiceFallback requires choice");
     const fallback = choices === undefined ? undefined : normalizeAgentChoiceFallback(opts.choiceFallback, choices);
     // Handoffs reach the contract as the same desugared array schema the text path sends.
-    const schema = opts.handoffs === undefined ? opts.schema : handoffsSchema(normalizeAgentHandoffs(opts.handoffs));
+    const bounds = opts.handoffs === undefined ? undefined : normalizeAgentHandoffs(opts.handoffs);
+    const schema = bounds === undefined ? opts.schema : handoffsSchema(bounds);
     const contract = normalizeWorkflowReturnContract({
       ...(choices === undefined ? {} : { choices }),
       ...(opts.output === undefined ? {} : { output: opts.output }),
       ...(schema === undefined ? {} : { schema }),
+      // Keep existing contracts byte-identical for replay. Newly opted-in large handoffs
+      // need room for JSON escaping (up to six characters per UTF-16 code unit), quotes,
+      // commas and brackets as well as their declared text. Outer answer budgets still apply.
+      ...(bounds !== undefined && bounds.maxItemChars > 32_000
+        ? { schemaMaxLength: handoffsJsonMaxLength(bounds) }
+        : {}),
       ...(opts.repair === undefined ? {} : { repair: opts.repair }),
     });
     try {
