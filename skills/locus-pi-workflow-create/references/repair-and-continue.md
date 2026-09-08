@@ -16,6 +16,28 @@ For example, A completed, B failed, and C was never reached. Repair B: A is serv
 
 ## Current limitations, by name
 
+### Legitimate quality refusal
+
+A correct quality refusal can identify a product defect, not a broken workflow.
+Preserve its diagnostics and acceptance criteria; a generic "fix the workflow"
+hint is not a reason to weaken the gate. Existing authorization for scoped
+implementation covers repairing that feature; a refusal does not create a new
+owner-approval requirement. New product scope or separately unauthorized
+external effects retain their actual authorization boundary.
+
+Give an explicit, bounded correction stage to a named tool-capable owner with
+the full findings, diagnostic/probe evidence, current tree and original baseline.
+Preserve only the valid completed prefix before that correction. Follow it with
+fresh independent review and the original read-only gate, passing the correction
+report and fresh review as current evidence. Do not replay an old blocked choice
+or treat pre-correction review as acceptance of changed bytes. If prerequisites
+drifted, move the fresh boundary earlier instead of claiming invalid reuse.
+
+Validate the repaired graph, then resume through the run skill under the existing
+authorization. A further refusal stays a refusal with fresh diagnostics. This
+explicit continuation is not a hidden retry or an unbounded automatic loop.
+The read-only gate records findings; it does not become the correction owner.
+
 ### Provider admission failures
 
 Read the provider error and actual executed route before changing the workflow.

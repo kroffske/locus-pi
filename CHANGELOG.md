@@ -8,6 +8,8 @@ User-visible changes to the public package.
 
 - Workflow guidance now keeps durable handoffs, final results, review evidence, and explicit resume inputs in the stable workflow workspace while disposable environments, dependency caches, test basetemp, transient renderer output, and staging use ordinary OS or tool temporary and cache locations. Final renderer assets are promoted before scratch expiry, existing Mac fn+Up / fn+Down history hints remain discoverable, and nested workflow_return string values stay readable without changing retained values.
 
+- Workflow repair guidance now distinguishes a legitimate quality refusal from a broken gate. Scoped correction retains existing authorization and valid completed work, then requires fresh independent review and the unchanged quality gate with current evidence; no automatic retry loop is added.
+
 - Workflow review guidance now requires an accessible evidence entrypoint, preserved baseline identity and complete changed-file coverage. Reviewers follow existing readable diff locators before declaring an archive/tool blocker; missing representations are prepared by a tool-capable owner without broadening read-only access or weakening acceptance.
 
 - Workflow CLI-provider children receive the declared call timeout instead of Pi's implicit HTTP idle timeout. Explicit shorter request/settings limits and cancellation still apply; HTTP provider defaults and saved settings are unchanged. Normal Pi shutdown now waits for cancelled workflow runs to persist terminal results before exiting. External-session guidance checks autocomplete dismissal and actual stop dispatch.
