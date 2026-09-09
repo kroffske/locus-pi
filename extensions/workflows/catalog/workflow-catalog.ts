@@ -8,11 +8,12 @@ import {
   type WorkflowRunResultEnvelope,
   type WorkflowRunScriptSnapshot,
 } from "../runtime/workflow-journal.js";
-import { listWorkflowCatalogTargets, type ResolvedWorkflowTarget } from "../runtime/workflow-runner.js";
 import {
   listWorkflowDefinitions,
   safeWorkflowSourceLocator,
   workflowTargetComposition,
+  listWorkflowCatalogTargets,
+  type ResolvedWorkflowTarget,
 } from "../runtime/workflow-discovery.js";
 import { isWorkflowSavedName } from "../runtime/workflow-saved-name.js";
 import { WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT } from "../runtime/workflow-run-layout.js";

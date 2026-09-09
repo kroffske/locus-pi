@@ -1880,8 +1880,10 @@ function withSchemaContract(
 // createWorkflowRuntime
 // ---------------------------------------------------------------------------
 
-// Fusion stays in this shipped module: extracting it would require widening the exact
-// npm allowlist. Keep pure declaration validation and packet rendering together here.
+// Fusion preparation shares the DSL budget accounting and the execution closure
+// (reservations, attempts, scheduler) with the rest of the runtime, so it stays here:
+// extracting it would split one execution invariant, not one package concern.
+// Keep pure declaration validation and packet rendering together here.
 function prepareWorkflowFusion(
   question: string,
   rawOptions: WorkflowFusionAnyOptions,

@@ -7,11 +7,11 @@ import type { WorkflowHandoffClaimLease } from "../runtime/workflow-handoff.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 import {
   runWorkflowScript,
-  type ResolvedWorkflowTarget,
   type RunWorkflowScriptOptions,
   type RunWorkflowScriptResult,
   type WorkflowHandoffWorkspaceReuseBinding,
 } from "../runtime/workflow-runner.js";
+import type { ResolvedWorkflowTarget } from "../runtime/workflow-discovery.js";
 import {
   workflowBackgroundRunRegistry,
   type WorkflowBackgroundLaunchResult,

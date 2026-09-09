@@ -1,4 +1,3 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../host/pi-api.js";
 import { setDismissibleView } from "./command-ui.js";
 import {
@@ -44,18 +43,6 @@ export function operatorBlockPlacement(block: Pick<OperatorBlock, "type">): "abo
 export interface SetOperatorWidgetOptions {
   placement?: "aboveEditor" | "belowEditor";
   fallbackWidth?: number;
-}
-
-class StaticTextWidget implements CustomUiComponent {
-  constructor(private readonly lines: string[]) {}
-
-  render(width: number): string[] {
-    return this.lines.map((line) => truncateToWidth(line, width));
-  }
-
-  invalidate(): void {
-    // Static text widget owns no cached state.
-  }
 }
 
 class OperatorBlockWidget implements CustomUiComponent {
@@ -125,22 +112,4 @@ export function setOperatorWidget(
 
 function operatorTheme(value: unknown): OperatorThemeLike | undefined {
   return typeof value === "object" && value !== null ? (value as OperatorThemeLike) : undefined;
-}
-
-/**
- * Render fixed text through the factory-widget path (ctx.ui.setWidget(key, () =>
- * component, ...)), which is EXEMPT from the host's hard 10-line cap on the
- * string[] setWidget path. Use this when a command's output is bounded by
- * domain data (e.g. a precondition list) rather than a small fixed constant —
- * the 10-line cap would otherwise silently hide real diagnostic content.
- */
-export function setUncappedTextWidget(
-  ctx: ExtensionContext,
-  key: string,
-  content: string,
-  options?: { placement?: "aboveEditor" | "belowEditor" },
-): void {
-  const lines = content.split(/\r?\n/);
-  const component = new StaticTextWidget(lines);
-  ctx.ui.setWidget(key, () => component, options ?? { placement: "belowEditor" });
 }

@@ -7,11 +7,11 @@ import {
   readWorkflowMeta,
   staticWorkflowMetaPhases,
 } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
+import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
-  runWorkflowScript,
-} from "../../../../extensions/workflows/runtime/workflow-runner.js";
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import workflows from "../../../../extensions/workflows/index.js";
 import { createHarness } from "../../../test-harness.js";

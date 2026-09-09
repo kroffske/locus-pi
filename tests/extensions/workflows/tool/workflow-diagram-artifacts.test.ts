@@ -1,7 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { packagedExamplesDir, packagedWorkflowPath } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  packagedExamplesDir,
+  packagedWorkflowPath,
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 
 /**
  * Diagrams used to be a generated triple — an `@kroffske/excalidraw-diagrams`

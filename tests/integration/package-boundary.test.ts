@@ -14,7 +14,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
-import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-discovery.js";
 import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {

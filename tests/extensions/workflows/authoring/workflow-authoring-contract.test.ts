@@ -6,7 +6,7 @@ import { standardWorkflowSourceShapeErrors } from "../../../../extensions/workfl
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
-} from "../../../../extensions/workflows/runtime/workflow-runner.js";
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 
 const root = process.cwd();
 
