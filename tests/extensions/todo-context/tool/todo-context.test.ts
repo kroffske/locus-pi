@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { registerTodoContext } from "../../../../extensions/todo-context/index.js";
-import { exportTodosToProjectTask } from "../../../../extensions/_shared/project/task-bridge.js";
-import { todoStateCache } from "../../../../extensions/todo-context/state/todo-state-cache.js";
+import { exportTodosToProjectTask } from "../../../../extensions/todo-context/state/task-bridge.js";
+import { todoStateCache } from "../../../../extensions/todo-context/state/phase-store.js";
 import { createHarness, emit, runTool } from "../../../test-harness.js";
 
 describe("todo-context OMP-compatible todo_write", () => {

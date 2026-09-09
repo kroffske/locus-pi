@@ -86,7 +86,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
   /** `runtime-capabilities` constructs and reports on the session store, so runtime owns it. */
   runtime: ["session-core", "artifacts", "event-bus", "runtime-capabilities"],
   model: ["model-settings", "live-model-display", "workflow-model-resolve"],
-  project: ["goal-mode", "prompt-command-store", "tasks-store", "task-bridge", "todo-state"],
+  project: ["goal-mode", "prompt-command-store", "tasks-store"],
   "agent-runtime": [
     "agents",
     "agent-context-extras",
@@ -95,7 +95,6 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     /** The closed failure-cause list is value-imported by workflow runtime; keep this module import-free. */
     "agent-failure-cause",
     "agent-live-panel",
-    "agent-live-tick",
     "agent-live-transcript",
     "agent-names",
     "agent-read-only-policy",
@@ -169,12 +168,12 @@ interface MutableStateEntry {
 /** Plain mutable module bindings whose process semantics require an explicit owner. */
 const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
   {
-    file: "extensions/agents/catalog/catalog-state.ts",
+    file: "extensions/agents/catalog/catalog.ts",
     binding: "agentCatalog",
     note: "the resolved agent catalog; agents/catalog/catalog.ts#refreshAgents is the only writer and rebuilds it from disk on every discovery pass.",
   },
   {
-    file: "extensions/todo-context/state/todo-state-cache.ts",
+    file: "extensions/todo-context/state/phase-store.ts",
     binding: "todoStateCache",
     note: "a cache and fallback in front of the durable session store; todo-context/state/phase-store.ts is the only writer.",
   },

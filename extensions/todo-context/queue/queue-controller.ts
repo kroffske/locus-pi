@@ -10,7 +10,7 @@
  * Block wording comes from `operator-ui.ts`; persistence from `phase-store.ts`.
  */
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
-import type { TodoStateSnapshot } from "../../_shared/project/todo-state.js";
+import type { TodoStateSnapshot } from "../state/todo-state.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { setTodoBlock } from "../operator/operator-surface.js";
 import { todoChangeBlock, todoWarningBlock } from "../operator/operator-ui.js";

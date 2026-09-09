@@ -1,5 +1,5 @@
-import { defaultRenderProfile } from "../host/render-profile.js";
-import { AGENT_LIVE_SPINNER_FRAME_COUNT } from "./agent-live-panel.js";
+import { defaultRenderProfile } from "../../_shared/host/render-profile.js";
+import { AGENT_LIVE_SPINNER_FRAME_COUNT } from "../../_shared/agent-runtime/agent-live-panel.js";
 
 /**
  * 1 Hz — slower than the render-scheduler's coalescing window, so a tick always

@@ -7,10 +7,9 @@
 import { registerCommandWithUiLifecycle } from "../../_shared/operator/command-ui.js";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
 import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
-import { agentCatalog } from "../catalog/catalog-state.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
 import { renderAgentObserverText } from "../../workflows/operator/progress-widget.js";
-import { refreshAgents } from "../catalog/catalog.js";
+import { agentCatalog, refreshAgents } from "../catalog/catalog.js";
 import {
   parseAgentDrillCommand,
   parseAgentObserverCommand,

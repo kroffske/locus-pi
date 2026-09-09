@@ -58,7 +58,26 @@ import {
 import type { WorkflowCommandLauncher } from "../launch/workflow-command-launcher.js";
 import { handleWorkflowRunCommand } from "./run.js";
 import { presentWorkflowSkillHostCommand } from "./skills.js";
-import { WORKFLOW_MENU_OPTIONS, type WorkflowMenuCommand } from "./menu.js";
+
+/** Canonical ordered root menu data for the `/workflows` command. */
+const WORKFLOW_MENU_DESCRIPTIONS = {
+  dashboard: "inspect persisted runs and evidence",
+  list: "browse available workflows",
+  info: "inspect one workflow's details",
+  status: "view recent run progress",
+  result: "read a finished run's output",
+  run: "start a workflow",
+  continue: "answer a pending handoff",
+  stop: "stop an active run",
+  skills: "install workflow skills for external agents",
+} as const;
+
+type WorkflowMenuCommand = keyof typeof WORKFLOW_MENU_DESCRIPTIONS;
+
+const WORKFLOW_MENU_OPTIONS = (Object.keys(WORKFLOW_MENU_DESCRIPTIONS) as WorkflowMenuCommand[]).map((command) => ({
+  command,
+  label: `${command} — ${WORKFLOW_MENU_DESCRIPTIONS[command]}`,
+}));
 
 /** Bounded preview for hosts without custom UI; the file path carries the rest. */
 const WORKFLOW_RESULT_WIDGET_LINES = 40;

@@ -28,7 +28,7 @@ import {
   formatDurationCoarse,
   statusMeta,
 } from "../../_shared/agent-runtime/agent-live-panel.js";
-import { startAgentLiveTicker, type AgentLiveTicker } from "../../_shared/agent-runtime/agent-live-tick.js";
+import { startAgentLiveTicker, type AgentLiveTicker } from "./agent-live-tick.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { padLine, viewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import { acquireFleetViewedRow } from "../../_shared/agent-runtime/fleet-menu.js";

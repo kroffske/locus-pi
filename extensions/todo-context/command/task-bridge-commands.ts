@@ -19,7 +19,7 @@ import {
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
   type TaskBridgeSnapshot,
-} from "../../_shared/project/task-bridge.js";
+} from "../state/task-bridge.js";
 import { tasksRoot, type ProjectTaskWorkspace } from "../../_shared/project/tasks-store.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { parseCompletionNoteInput } from "./command-parser.js";

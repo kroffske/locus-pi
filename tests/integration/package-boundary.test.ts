@@ -354,7 +354,8 @@ describe("npm public package boundary", () => {
     // skill gained the structured-results card.
     // 259 with the external-session skill and its interactive/JSON lifecycle references.
     // 260 with the agent viewer's workflow_return renderer.
-    expect(dryRun.files).toHaveLength(260);
+    // 257 since three one-export files merged into their sole writer (T-213).
+    expect(dryRun.files).toHaveLength(257);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
