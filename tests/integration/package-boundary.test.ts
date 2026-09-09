@@ -360,7 +360,9 @@ describe("npm public package boundary", () => {
     // took the declaration and result rules out of their durable counterparts (T-213).
     // 261 since runtime/workflow-live.ts took the live registry and the journal-to-live-row
     // projection out of the durable journal (T-213).
-    expect(dryRun.files).toHaveLength(261);
+    // 262 since _shared/agent-runtime/agent-live-store.ts took the shared live store out of
+    // the SDK executor host (T-213).
+    expect(dryRun.files).toHaveLength(262);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

@@ -8,7 +8,7 @@ import {
   withWorkflowGroupTotals,
   type AgentLiveThemeLike,
 } from "./agent-live-panel.js";
-import { agentLiveStore, type AgentLiveRow } from "./agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveRow } from "./agent-live-store.js";
 import { framesEqual, RenderScheduler } from "../host/render-scheduler.js";
 import { defaultRenderProfile } from "../host/render-profile.js";
 import type { CustomUiComponent, CustomUiTui } from "../host/pi-api.js";

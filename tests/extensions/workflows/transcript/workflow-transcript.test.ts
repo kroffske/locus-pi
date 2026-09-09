@@ -6,7 +6,7 @@ import {
   WORKFLOW_RESULT_CUSTOM_TYPE,
   WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../../extensions/workflows/command/receipts.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { compactWorkflowParentRows } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,

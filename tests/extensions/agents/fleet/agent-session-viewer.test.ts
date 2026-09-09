@@ -7,7 +7,7 @@ import { type TUI, TuiMainScreen, visibleWidth, type Terminal } from "@earendil-
 import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
-} from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+} from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { AgentTranscriptToolBlock } from "../../../../extensions/_shared/agent-runtime/agent-live-transcript.js";
 import { statusMeta } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";

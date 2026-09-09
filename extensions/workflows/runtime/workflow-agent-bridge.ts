@@ -19,12 +19,11 @@ import { createWorkflowWorktree } from "./workflow-worktree.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
 import {
-  agentLiveStore,
   createAgentSdkSessionExecutor,
   AGENT_SDK_UNAVAILABLE_HINT,
-  type AgentLiveExecutionHandle,
   type AgentSdkSessionExecutorOptions,
 } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveExecutionHandle } from "../../_shared/agent-runtime/agent-live-store.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
 import { discoverAgentDefinitions } from "../../_shared/agent-runtime/agents.js";
 import type { ModelRoleResolution } from "../../_shared/model/model-settings.js";

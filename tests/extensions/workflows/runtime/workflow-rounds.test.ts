@@ -13,14 +13,16 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  agentLiveStore,
   createAgentSdkSessionExecutor,
   type AgentSdkSessionExecutorOptions,
-  type AgentLiveExecutionHandle,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
-  type AgentLiveRow,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveExecutionHandle,
+  type AgentLiveRow,
+} from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { AgentExecutor } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {

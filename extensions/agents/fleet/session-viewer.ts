@@ -12,7 +12,7 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
   type AgentLiveRow,
-} from "../../_shared/agent-runtime/agent-sdk-host.js";
+} from "../../_shared/agent-runtime/agent-live-store.js";
 import type {
   AgentLiveTranscriptSnapshot,
   AgentTranscriptBlock,

@@ -13,8 +13,8 @@ import {
   installWorkflowTextWidget,
   renderAgentLiveRowsText,
 } from "../../../../extensions/workflows/operator/progress-widget.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
-import type { AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
+import type { AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import { acquireFleetViewedRow, fleetMenuState } from "../../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import {

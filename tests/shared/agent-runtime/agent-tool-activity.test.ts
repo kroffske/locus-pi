@@ -4,7 +4,7 @@ import {
   formatToolActivity,
   toolActivityGist,
 } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
-import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 
 // T-196 (agent-fleet-visibility slice — REQ-004 tool-activity action sub-line).
 // Every case here maps 1:1 to the REQ-004 acceptance column in

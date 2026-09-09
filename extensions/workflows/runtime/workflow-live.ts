@@ -14,7 +14,7 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
   type AgentLiveStatus,
-} from "../../_shared/agent-runtime/agent-sdk-host.js";
+} from "../../_shared/agent-runtime/agent-live-store.js";
 import { readWorkflowArtifactRecord } from "./workflow-artifacts.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
 

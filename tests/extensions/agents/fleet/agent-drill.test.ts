@@ -3,7 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import agents from "../../../../extensions/agents/index.js";
 import { ScrollableTextOverlay } from "../../../../extensions/agents/fleet/drill-overlay.js";
 import * as sessionViewer from "../../../../extensions/agents/fleet/session-viewer.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { SupersededInlineOperatorInteractionError } from "../../../../extensions/_shared/operator/operator-interaction.js";
 import type { ExtensionCommandContext } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../../test-harness.js";

@@ -3,7 +3,7 @@
  * target). Owns the per-session ownership epoch that keeps a late menu result from
  * acting on a reloaded session, and the open → select → drill → back → select loop.
  */
-import { agentLiveStore } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   FleetFocusComponent,
   fleetMenuState,

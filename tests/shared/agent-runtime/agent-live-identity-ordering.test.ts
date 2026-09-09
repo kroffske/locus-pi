@@ -5,7 +5,7 @@ import {
   formatDuration,
   orderAgentLiveRows,
 } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
-import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 
 function makeRow(id: string, over: Partial<AgentLiveRow> = {}): AgentLiveRow {
   const base: AgentLiveRow = {

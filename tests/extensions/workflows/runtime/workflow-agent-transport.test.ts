@@ -12,12 +12,12 @@ import {
 import {
   AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
   AgentSdkUnavailableError,
-  agentLiveStore,
   createAgentSdkSessionExecutor,
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import {
   createWorkflowAgentRunner,
   WorkflowAgentUnavailableError,

@@ -3,10 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentLivePanel } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
-import type {
-  AgentLiveRow,
-  SdkAgentSessionEventLike,
-} from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { SdkAgentSessionEventLike } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { ExtensionCommandContext } from "../../../extensions/_shared/host/pi-api.js";
 import { createHarness, runTool, type Harness } from "../../test-harness.js";
 import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../model-roles-fixture.js";
@@ -114,7 +112,7 @@ function mockSdkSession(
 // assertions and production code share one agentLiveStore instance.
 async function loadAgents() {
   const { default: agents } = await import("../../../extensions/agents/index.js");
-  const { agentLiveStore } = await import("../../../extensions/_shared/agent-runtime/agent-sdk-host.js");
+  const { agentLiveStore } = await import("../../../extensions/_shared/agent-runtime/agent-live-store.js");
   // The production store is intentionally process-shared across fresh jiti
   // entrypoints. Reset explicitly between isolated unit cases; resetModules no
   // longer implies a new store (that implication caused the live Pi bug).

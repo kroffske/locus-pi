@@ -5,7 +5,7 @@
  * catalog falls back from, and the notifications an agents surface emits.
  */
 import { truncate } from "../../_shared/agent-runtime/agent-live-panel.js";
-import { agentLiveStore } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   isStaleInlineOperatorInteractionError,
   isSupersededInlineOperatorInteractionError,

@@ -2,7 +2,11 @@ import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../.
 import { DEFAULT_RENDER_MIN_INTERVAL_MS, framesEqual, RenderScheduler } from "../../_shared/host/render-scheduler.js";
 import { defaultRenderProfile } from "../../_shared/host/render-profile.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveRow,
+  type AgentLiveStatus,
+} from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   AgentLivePanel,
   AGENT_LIVE_SPINNER_FRAME_COUNT,

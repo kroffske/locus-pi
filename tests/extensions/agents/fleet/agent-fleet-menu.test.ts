@@ -8,7 +8,7 @@ import {
   selectFleetMenuLeafRows,
   selectFleetMenuRows,
 } from "../../../../extensions/_shared/agent-runtime/fleet-menu.js";
-import { agentLiveStore, type AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveStatus } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { orderAgentLiveRows } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS } from "../../../../extensions/_shared/host/render-scheduler.js";
 import {

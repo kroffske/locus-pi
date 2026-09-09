@@ -3,7 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { AgentLiveTranscript } from "../../../extensions/_shared/agent-runtime/agent-live-transcript.js";
 import { AgentLivePanel, orderAgentLiveRows } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { renderFleetMenuRows } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
-import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 
 function liveRow(id: string, label: string, over: Partial<AgentLiveRow> = {}): AgentLiveRow {
   return {
