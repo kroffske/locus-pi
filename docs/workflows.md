@@ -177,6 +177,16 @@ Use `"mode": "orchestration-only"` for new source produced by
 `locus-pi-workflow-create`. The default compatibility mode remains available
 for existing reviewed workflows that use the broader standard DSL surface.
 
+From a `locus-pi` source checkout, run the same strict validator without
+starting a Pi child session:
+
+```bash
+npm run check:workflow-source -- --mode orchestration-only <workflow-path>
+```
+
+`<workflow-path>` may be relative to the command working directory or absolute.
+The command reads source text and does not import or run the workflow.
+
 The tool prints compiler-style diagnostics as
 `path:line:column [CODE] message` and returns structured one-based spans in
 `details.diagnostics`. Errors fail the check. Warning-only results remain

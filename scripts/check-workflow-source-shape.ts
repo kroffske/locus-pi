@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { parseArgs } from "node:util";
 import { staticWorkflowMeta } from "../extensions/workflows/catalog/workflow-meta.js";
-import { standardWorkflowSourceShapeErrors } from "../extensions/workflows/tool/workflow-source-shape.js";
+import {
+  orchestrationOnlyWorkflowSourceShapeDiagnostics,
+  standardWorkflowSourceShapeDiagnostics,
+  type WorkflowSourceDiagnostic,
+} from "../extensions/workflows/tool/workflow-source-shape.js";
 import { packagedWorkflowNames, packagedWorkflowPath } from "../extensions/workflows/runtime/workflow-discovery.js";
 
 interface SourceShapeTarget {
@@ -10,7 +15,20 @@ interface SourceShapeTarget {
   requireStandard: boolean;
 }
 
-const requestedPaths = process.argv.slice(2);
+type SourceMode = "compatibility" | "orchestration-only";
+
+const { values, positionals: requestedPaths } = parseArgs({
+  args: process.argv.slice(2),
+  allowPositionals: true,
+  strict: true,
+  options: { mode: { type: "string" } },
+});
+const requestedMode = values.mode ?? "compatibility";
+if (requestedMode !== "compatibility" && requestedMode !== "orchestration-only") {
+  console.error('Workflow source mode must be "compatibility" or "orchestration-only".');
+  process.exit(1);
+}
+const mode: SourceMode = requestedMode;
 const targets: SourceShapeTarget[] =
   requestedPaths.length > 0
     ? requestedPaths.map((requestedPath) => ({
@@ -47,15 +65,23 @@ for (const target of targets) {
   }
 
   checked += 1;
-  const errors = standardWorkflowSourceShapeErrors(source);
+  const diagnostics =
+    mode === "orchestration-only"
+      ? orchestrationOnlyWorkflowSourceShapeDiagnostics(source)
+      : standardWorkflowSourceShapeDiagnostics(source);
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
+  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
+  const shapeLabel = mode === "orchestration-only" ? "orchestration-only workflow source" : "standard source";
   if (errors.length === 0) {
-    console.log(`${target.label}: standard source shape passed`);
+    const warningSuffix = warnings.length === 0 ? "" : ` with ${warnings.length} warning(s)`;
+    console.log(`${target.label}: ${shapeLabel} shape passed${warningSuffix}`);
+    for (const warning of warnings) console.log(`  - ${formatDiagnostic(warning)}`);
     continue;
   }
 
   failed = true;
-  console.error(`${target.label}: standard source shape failed`);
-  for (const error of errors) console.error(`  - ${error}`);
+  console.error(`${target.label}: ${shapeLabel} shape failed`);
+  for (const diagnostic of diagnostics) console.error(`  - ${formatDiagnostic(diagnostic)}`);
 }
 
 if (checked === 0 && !failed) {
@@ -64,3 +90,7 @@ if (checked === 0 && !failed) {
 }
 
 if (failed) process.exitCode = 1;
+
+function formatDiagnostic(diagnostic: WorkflowSourceDiagnostic): string {
+  return `${diagnostic.line}:${diagnostic.column} [${diagnostic.code}] ${diagnostic.message}`;
+}
