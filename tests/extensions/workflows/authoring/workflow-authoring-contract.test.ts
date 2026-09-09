@@ -214,7 +214,7 @@ describe("design-first readable workflow authoring", () => {
   it("checks canonical AUTHORING fragments while keeping the installed router code-free", () => {
     const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
-    expect(authoring).toHaveLength(5);
+    expect(authoring).toHaveLength(6);
     expect(skill).toHaveLength(0); // Entrypoint routes to tested complete examples; it duplicates no harness.
 
     const fragments = [
@@ -592,7 +592,7 @@ ${authoring[1] ?? ""}
     expect(callerItems).toContain("requires caller-supplied items");
   });
 
-  it("ships four pattern cards and keeps legacy names as redirects, not conflicting recipes", () => {
+  it("ships four pattern cards and keeps no empty redirect cards beside them", () => {
     const base = "skills/locus-pi-workflow-create/references";
     const cards = ["fixed-graph.md", "bounded-refinement.md", "decomposition.md", "human-continuation.md"];
     const index = source(`${base}/INDEX.md`);
@@ -603,18 +603,28 @@ ${authoring[1] ?? ""}
         expect(text, name).toContain(word);
       expect(text).toContain(".workflow.mjs");
     }
-    for (const name of [
+    // The six legacy redirect cards and large-agent-runs.md are gone, not renamed:
+    // a card that only points elsewhere is catalog noise, and fan-out is run-skill territory.
+    const retired = [
       "sequential-text",
       "fixed-fan-out",
       "bounded-review-loop",
       "bounded-candidate-search",
       "dynamic-orchestrator-workers",
       "human-gate",
-    ]) {
-      const text = source(`${base}/${name}.md`);
-      expect(text.split("\n").length).toBeLessThan(12);
-      expect(text).not.toContain("```js");
-    }
+      "large-agent-runs",
+    ];
+    expect(readdirSync(path.join(root, base)).sort()).toEqual([
+      "INDEX.md",
+      "bounded-refinement.md",
+      "decomposition.md",
+      "design-and-build.md",
+      "fixed-graph.md",
+      "human-continuation.md",
+      "repair-and-continue.md",
+      "structured-results.md",
+    ]);
+    for (const name of retired) expect(index, name).not.toContain(name);
     // Return contracts refine a graph; the worked example must use the real standard DSL.
     expect(index).toContain("structured-results.md");
     const snippets = javascriptDocSnippets(`${base}/structured-results.md`);
@@ -655,8 +665,9 @@ ${authoring[1] ?? ""}
       "post-code-review/simplicity": "standard",
       "post-code-review/style": "standard",
       "post-code-review/synthesis": "standard",
+      "stage-loop": "standard",
     });
-    expect(packagedWorkflowNames()).toHaveLength(11);
+    expect(packagedWorkflowNames()).toHaveLength(12);
     for (const name of [
       "live-smoke",
       "task/draft",

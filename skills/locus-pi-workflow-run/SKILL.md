@@ -267,6 +267,16 @@ What reuse costs and requires:
   panel out, or accept a fully fresh run. The same boundary costs one case that
   used to work: a byte-identical resume no longer replays a fusion tail that sat
   after a recorded failure.
+- The first miss is reported by name: `no-record`, `unnamed-node`,
+  `node-mismatch`, `key-mismatch`, `recorded-failure` or `side-effecting-call`.
+  A recorded failure is re-run, never served back as an answer; a worktree or
+  otherwise side-effecting call never replays.
+- Changed parallel scheduling may shorten the usable prefix, and independently
+  completed branches are not recovered by business key. Stable `keys` prevent
+  item mismatch; they create no per-item checkpoint.
+- Regression evidence for these limits lives in the source repository at
+  `tests/extensions/workflows/runtime/workflow-replay.test.ts` and
+  `tests/extensions/workflows/runtime/workflow-fusion.test.ts`.
 
 A resume runs in the workspace of the source run. When that workspace was
 selected explicitly, repeat it with `outputDir` (operator surface:
@@ -358,11 +368,16 @@ Semantic extra rounds and same-session output corrections are not crash replay.
 
 ## Large runs: observe and let the operator decide
 
-Hundreds of small agents can be the intended workload. Do not add a new
-total-agent limit, token-floor stop, estimated-cost gate or automatic graph
-reduction. Existing explicit operator settings and package fuses stay in force;
-this guidance removes none of them. Concurrency limits simultaneous work, not
-the total number of tasks.
+Hundreds of small agents can be the intended workload: thirty-five work units
+with ten focused fields each legitimately require 350 agent calls. Do not infer
+from that count that the graph is wrong, and do not add a new total-agent limit,
+token-floor stop, estimated-cost gate or automatic graph reduction. Existing
+explicit operator settings and package fuses stay in force; this guidance removes
+none of them. Concurrency limits simultaneous work, not the total number of
+tasks: the keyed `parallel(thunks, { concurrency, keys, title })` group width is
+local, and separate from the shared leaf concurrency gate. A chosen maximum
+number of refinement rounds is local to one design, not an economic policy for
+every workflow.
 
 Use the existing `/ps`, `/workflows status <runId>` and explicit
 `/workflows stop <runId>` surfaces. Separate new physical attempts,
@@ -377,3 +392,7 @@ structured tool; never raise it automatically, and never reinterpret
 interrupted-recovery binding checks as ordinary-resume rules. See
 [execution controls](../../extensions/workflows/references/execution-controls.md).
 Report actual reuse from the new result.
+
+When more work is discovered after a run stops, preserve the completed work
+through Repair + Continue where the prefix contract permits; that is not
+arbitrary per-item checkpoint support.

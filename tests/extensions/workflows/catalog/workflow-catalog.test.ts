@@ -358,6 +358,7 @@ describe("workflow operator catalog", () => {
       "post-code-review/simplicity",
       "post-code-review/style",
       "post-code-review/synthesis",
+      "stage-loop",
       "task/draft",
       "task/plan",
     ]);
@@ -386,6 +387,7 @@ describe("workflow operator catalog", () => {
         "post-code-review/simplicity",
         "post-code-review/style",
         "post-code-review/synthesis",
+        "stage-loop",
         "task/draft",
         "task/plan",
       ]);
