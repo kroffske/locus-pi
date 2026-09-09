@@ -944,6 +944,8 @@ describe("workflow child task composition", () => {
     assert.match(task, /write or promote a final rendered deliverable there/u);
     assert.match(task, /never beside evidence/u);
     assert.match(task, /another owner's state/u);
+    assert.match(task, /Never delete, rename, truncate, chmod, or replace \.locus-pi-workflow\.lock/u);
+    assert.match(task, /instruction to write no other artifact means create or modify no other file/u);
     assert.match(task, /authored prompt that explicitly requests another placement remains authoritative/u);
     assert.doesNotMatch(task, /do not invent another project-relative durable root/u);
   });

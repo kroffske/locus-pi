@@ -86,6 +86,21 @@ User-visible changes to the public package.
 
 ### Fixed
 
+- **Workflow agents preserve the runtime lease and sibling handoffs in shared
+  workspaces.** Every child task now states that an instruction to write one
+  assigned artifact forbids extra writes but never authorizes cleanup. It
+  explicitly protects `.locus-pi-workflow.lock` and pre-existing workflow
+  files. This prevents a compliant child from deleting the parent's live lease
+  or an operator's `style.md` before the next stage starts.
+
+- **Historical post-code reviews no longer attribute descendant policy to the
+  reviewed commit.** Scope, boundaries, contracts, necessity, and synthesis
+  now keep the base tree, frozen target tree, and current checkout distinct. The
+  final verifier rechecks decision-critical positive and `NO_ACTION`
+  architecture claims as well as retained defects. Agreement between earlier
+  lanes therefore cannot turn a config key added later into evidence that the
+  target already admitted a dependency edge.
+
 - Keep the newest streamed assistant text and external CLI progress visible in agent previews instead of truncating away fresh activity. Completed reports retain their opening.
 
 - A fan-out's group heading now counts up while the run is still going. The heading read its `k/n done · f failed` from fields the journal writes only when the group ends, so a nine-member fan-out sat at `0/9 done` until it settled, next to a panel header that was counting correctly. Both surfaces now fold the members' own states into the heading, and a group that reported its own final numbers still wins.
