@@ -6,7 +6,7 @@ import {
   matchWorkflowPhaseGroups,
   readWorkflowMeta,
   staticWorkflowMetaPhases,
-} from "../../../../extensions/workflows/catalog/workflow-catalog.js";
+} from "../../../../extensions/workflows/catalog/workflow-meta.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   packagedWorkflowNames,

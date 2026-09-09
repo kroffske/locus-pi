@@ -21,7 +21,7 @@ import {
   type WorkflowBackgroundStopResult,
   type WorkflowSessionLease,
 } from "../run/background-run-registry.js";
-import { readWorkflowMeta, type WorkflowMetaPhase } from "../catalog/workflow-catalog.js";
+import { readWorkflowMeta, type WorkflowMetaPhase } from "../catalog/workflow-meta.js";
 
 export interface WorkflowCommandLaunchRequest {
   ctx: ExtensionContext;

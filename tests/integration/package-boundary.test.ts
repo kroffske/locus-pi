@@ -355,7 +355,8 @@ describe("npm public package boundary", () => {
     // 259 with the external-session skill and its interactive/JSON lifecycle references.
     // 260 with the agent viewer's workflow_return renderer.
     // 257 since three one-export files merged into their sole writer (T-213).
-    expect(dryRun.files).toHaveLength(257);
+    // 258 since the bounded static metadata scanner became catalog/workflow-meta.ts (T-213).
+    expect(dryRun.files).toHaveLength(258);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

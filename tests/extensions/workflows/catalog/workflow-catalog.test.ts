@@ -11,10 +11,10 @@ import {
   buildWorkflowCatalogBlock,
   buildWorkflowCatalogModel,
   buildWorkflowInfoBlock,
-  readWorkflowMetaDescription,
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
+import { readWorkflowMetaDescription } from "../../../../extensions/workflows/catalog/workflow-meta.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   packagedWorkflowNames,

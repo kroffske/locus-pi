@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { staticWorkflowMeta } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
+import { staticWorkflowMeta } from "../../../../extensions/workflows/catalog/workflow-meta.js";
 import { standardWorkflowSourceShapeErrors } from "../../../../extensions/workflows/tool/workflow-source-shape.js";
 import {
   packagedWorkflowNames,

@@ -32,12 +32,8 @@ import {
   workflowStatusTone,
   workflowWarningBlock,
 } from "../operator/operator-ui.js";
-import {
-  matchWorkflowPhaseGroups,
-  staticWorkflowMetaPhases,
-  WORKFLOW_SOURCE_LEGEND,
-  workflowSourceBadge,
-} from "../catalog/workflow-catalog.js";
+import { WORKFLOW_SOURCE_LEGEND, workflowSourceBadge } from "../catalog/workflow-catalog.js";
+import { matchWorkflowPhaseGroups, staticWorkflowMetaPhases } from "../catalog/workflow-meta.js";
 
 export const WORKFLOW_RPC_STATUS_ROWS = 4;
 const WORKFLOW_RPC_DETAIL_EVENT_LIMIT = 1;
