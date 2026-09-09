@@ -6,7 +6,7 @@
  * surfaces share: the session epoch a drill leases against, the fleet-menu
  * controller, and the fallback focus shortcut.
  */
-import { agentLiveStore } from "../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../_shared/agent-runtime/agent-live-store.js";
 import { FLEET_FOCUS_FALLBACK_SHORTCUT, fleetMenuState } from "../_shared/agent-runtime/fleet-menu.js";
 import type { ExtensionAPI, ExtensionContext } from "../_shared/host/pi-api.js";
 import { getProjectRoot } from "../_shared/host/pi-api.js";

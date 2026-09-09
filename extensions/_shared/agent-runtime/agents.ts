@@ -204,24 +204,6 @@ export function formatAgentListItem(agent: AgentDefinition): string {
   return `${agent.name}: ${agent.description} [${parts.join("; ")}]`;
 }
 
-export function formatAgentInspect(agent: AgentDefinition): string {
-  return [
-    `${agent.name}: ${agent.description}`,
-    `source: ${agent.source ?? "unknown"}`,
-    `file: ${agent.filePath ?? "unknown"}`,
-    `tools: ${agent.allowedTools.join(", ")}`,
-    `readOnly: ${String(agent.readOnly)}`,
-    ...(agent.permissionMode === undefined ? [] : [`permissionMode: ${agent.permissionMode}`]),
-    `risk: ${agent.risk}`,
-    ...(agent.spawns === undefined
-      ? []
-      : [`spawns metadata: ${agent.spawns === "*" ? "*" : agent.spawns.join(", ")} (direct nesting blocked by host)`]),
-    ...(agent.model?.length ? [`model: ${agent.model.join(", ")}`] : []),
-    ...(agent.thinkingLevel ? [`thinking: ${agent.thinkingLevel}`] : []),
-    ...(agent.blocking === undefined ? [] : [`blocking: ${String(agent.blocking)}`]),
-  ].join("\n");
-}
-
 function nearestProjectAgentDir(projectRoot: string, segments: string[]): string | null {
   let current = path.resolve(projectRoot);
   while (true) {

@@ -12,9 +12,9 @@ import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runt
 import { createWorkflowArtifactStore } from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
 import {
   createAgentSdkSessionExecutor,
-  agentLiveStore,
   type SdkAgentSessionEventLike,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import {
   formatAgentLiveRowLine,
   formatAgentDrillTitle,

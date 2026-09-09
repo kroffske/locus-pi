@@ -9,7 +9,7 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-handoff.js";
 import type { CustomUiFactory } from "../../../../extensions/_shared/host/pi-api.js";
 import * as runner from "../../../../extensions/workflows/runtime/workflow-runner.js";
-import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowRunRuntimeDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";

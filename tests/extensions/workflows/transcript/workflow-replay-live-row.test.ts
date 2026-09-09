@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import * as runner from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowArtifactStore,
@@ -14,7 +14,7 @@ import {
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
   workflowLiveExecutionCount,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { workflowRunArtifactsDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";

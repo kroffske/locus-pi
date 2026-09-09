@@ -1,47 +1,34 @@
-import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { Lang, parse } from "@ast-grep/napi";
-import type { SgNode } from "@ast-grep/napi";
 import {
   listWorkflowRuns,
   readWorkflowRunScriptSnapshot,
   type WorkflowRunResultEnvelope,
   type WorkflowRunScriptSnapshot,
 } from "../runtime/workflow-journal.js";
-import { listWorkflowCatalogTargets, type ResolvedWorkflowTarget } from "../runtime/workflow-runner.js";
 import {
   listWorkflowDefinitions,
   safeWorkflowSourceLocator,
   workflowTargetComposition,
+  listWorkflowCatalogTargets,
+  type ResolvedWorkflowTarget,
 } from "../runtime/workflow-discovery.js";
 import { isWorkflowSavedName } from "../runtime/workflow-saved-name.js";
 import { WORKFLOW_SAVED_SOURCE_RELATIVE_ROOT } from "../runtime/workflow-run-layout.js";
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
 import { buildWorkflowRunCommand, formatWorkflowCommandToken, workflowRunUsage } from "../command/command-parser.js";
+import {
+  readWorkflowMeta,
+  staticWorkflowMeta,
+  type WorkflowAuthoringProfile,
+  type WorkflowMetaPhase,
+} from "./workflow-meta.js";
 
 const RECENT_WORKFLOW_LIMIT = 5;
-const WORKFLOW_METADATA_SCAN_BYTES = 64 * 1024;
-const DESCRIPTION_MAX_CHARS = 96;
 const HISTORICAL_WORKFLOW_DESCRIPTION = "historical run snapshot";
 export const WORKFLOW_SOURCE_LEGEND = "Sources: [P] Project · [U] User · [PKG] Package · [R] immutable run history";
 export const WORKFLOW_DISPLAY_ORDER_LEGEND =
   "Display order: Project → User → Package (does not change first-wins resolution)";
-
-/** One statically declared stage from a workflow's exported `meta.phases`. */
-export interface WorkflowMetaPhase {
-  title: string;
-  detail?: string;
-}
-
-/** Everything the bounded static scan accepts from one literal exported `meta`. */
-export interface WorkflowStaticMeta {
-  description: string;
-  profile: WorkflowAuthoringProfile;
-  /** Empty when nothing was declared, or when a declaration was not fully literal. */
-  phases: WorkflowMetaPhase[];
-}
-
-export type WorkflowAuthoringProfile = "standard" | "legacy" | "integration" | "unclassified";
 
 export interface WorkflowCatalogRow {
   name: string;
@@ -521,33 +508,6 @@ function compactWorkflowCatalogBody(
   return { lines };
 }
 
-/**
- * Read only a bounded prefix and accept metadata from the top-level literal
- * `export const meta = { description: <static string>, phases?: [...] }`. One
- * read and one parse serve every field, because the catalog rebuilds this per
- * row on each list/info call. No module is imported or executed: this function
- * only ever holds the file's bytes as a string.
- */
-export function readWorkflowMeta(file: string): WorkflowStaticMeta {
-  let source: string;
-  try {
-    source = readBoundedSource(file);
-  } catch {
-    return { description: "description unavailable", profile: "unclassified", phases: [] };
-  }
-  const meta = staticWorkflowMeta(source);
-  return {
-    description: meta.description ?? "no description",
-    profile: meta.profile,
-    phases: meta.phases,
-  };
-}
-
-/** Description-only projection of {@link readWorkflowMeta}. */
-export function readWorkflowMetaDescription(file: string): string {
-  return readWorkflowMeta(file).description;
-}
-
 /** Privacy projection for persisted path targets; never returns an absolute path. */
 export function safeRecentWorkflowLabel(
   target: { kind: "name" | "scriptPath"; ref: string },
@@ -612,135 +572,6 @@ function safeSnapshotLocator(snapshotPath: string | undefined, projectRoot: stri
     : `run:${runId}`;
 }
 
-/**
- * Parse one bounded source prefix and project every accepted literal `meta`
- * field. Both fields come from the same parse; a source with no literal `meta`
- * yields an undefined description and no phases.
- */
-export function staticWorkflowMeta(source: string): {
-  description: string | undefined;
-  profile: WorkflowAuthoringProfile;
-  phases: WorkflowMetaPhase[];
-} {
-  let description: string | undefined;
-  let profile: WorkflowAuthoringProfile = "unclassified";
-  let phases: WorkflowMetaPhase[] = [];
-  try {
-    const root = parse(Lang.JavaScript, source).root();
-    for (const statement of root.findAll("export const meta = $META")) {
-      const value = exportedMetaObject(statement);
-      if (value === undefined) continue;
-      const pairs = value.children().filter((child) => child.kind() === "pair");
-      if (description === undefined) {
-        const literal = staticStringValue(
-          pairs.find((pair) => staticObjectKey(pair.field("key")) === "description")?.field("value"),
-        );
-        if (literal !== undefined && literal.trim() !== "") {
-          description = compactCatalogText(literal.replace(/\s+/gu, " ").trim());
-        }
-      }
-      const declaredProfile = staticStringValue(
-        pairs.find((pair) => staticObjectKey(pair.field("key")) === "profile")?.field("value"),
-      );
-      if (declaredProfile === "standard" || declaredProfile === "legacy" || declaredProfile === "integration") {
-        profile = declaredProfile;
-      }
-      if (phases.length === 0) {
-        phases = staticMetaPhases(
-          pairs.find((pair) => staticObjectKey(pair.field("key")) === "phases")?.field("value"),
-        );
-      }
-    }
-  } catch {
-    return { description: undefined, profile: "unclassified", phases: [] };
-  }
-  return { description, profile, phases };
-}
-
-/** Declared phases from one bounded source prefix; empty when nothing literal was declared. */
-export function staticWorkflowMetaPhases(source: string): WorkflowMetaPhase[] {
-  return staticWorkflowMeta(source).phases;
-}
-
-/**
- * Accept `phases: [{ title: <static string>, detail?: <static string> }, ...]`
- * and nothing else. One non-literal entry discards the whole array: a partially
- * read pipeline would describe a shape the workflow does not have, with no
- * marker telling the reader so.
- */
-function staticMetaPhases(node: SgNode | null | undefined): WorkflowMetaPhase[] {
-  if (node == null || node.kind() !== "array") return [];
-  const declared: WorkflowMetaPhase[] = [];
-  for (const element of node.children()) {
-    if (isStructuralLiteralNode(element)) continue;
-    if (element.kind() !== "object") return [];
-    // A spread, shorthand, or method member means the element is not fully
-    // literal, so the declaration cannot be trusted as a whole.
-    if (element.children().some((child) => !isStructuralLiteralNode(child) && child.kind() !== "pair")) return [];
-    const pairs = element.children().filter((child) => child.kind() === "pair");
-    const title = staticStringValue(
-      pairs.find((pair) => staticObjectKey(pair.field("key")) === "title")?.field("value"),
-    );
-    if (title === undefined || title.trim() === "") return [];
-    const detailPair = pairs.find((pair) => staticObjectKey(pair.field("key")) === "detail");
-    if (detailPair !== undefined) {
-      const detail = staticStringValue(detailPair.field("value"));
-      if (detail === undefined) return [];
-      const compacted = detail.replace(/\s+/gu, " ").trim();
-      declared.push(
-        compacted === "" ? { title: title.trim() } : { title: title.trim(), detail: compactCatalogText(compacted) },
-      );
-      continue;
-    }
-    declared.push({ title: title.trim() });
-  }
-  return declared;
-}
-
-/** Punctuation and comments carry no declaration; everything else must be literal. */
-function isStructuralLiteralNode(node: SgNode): boolean {
-  const kind = node.kind();
-  return kind === "{" || kind === "}" || kind === "[" || kind === "]" || kind === "," || kind === "comment";
-}
-
-/** One declared-or-observed phase group for a finished or in-flight run. */
-export interface WorkflowPhaseGroup {
-  title: string;
-  detail?: string;
-  /** The workflow's `meta.phases` named this stage before the run started. */
-  declared: boolean;
-  /** The run actually emitted a `phase()` line with this exact title. */
-  reached: boolean;
-}
-
-/**
- * Match a static declaration against the titles a run actually emitted.
- * Declared order is kept; an observed title with no declaration is appended in
- * first-seen order as its own undeclared group. Nothing fails on a mismatch —
- * a `phase()` inside a branch may legitimately never run, and a drifted
- * declaration is evidence a reader should see, not a rule to enforce.
- */
-export function matchWorkflowPhaseGroups(
-  declared: readonly WorkflowMetaPhase[],
-  observedTitles: readonly string[],
-): WorkflowPhaseGroup[] {
-  const observed = new Set(observedTitles);
-  const declaredTitles = new Set(declared.map((phase) => phase.title));
-  const groups: WorkflowPhaseGroup[] = declared.map((phase) => ({
-    title: phase.title,
-    ...(phase.detail !== undefined ? { detail: phase.detail } : {}),
-    declared: true,
-    reached: observed.has(phase.title),
-  }));
-  const appended = new Set<string>();
-  for (const title of observedTitles) {
-    if (declaredTitles.has(title) || appended.has(title)) continue;
-    appended.add(title);
-    groups.push({ title, declared: false, reached: true });
-  }
-  return groups;
-}
-
 function sameRunSnapshotIdentity(left: WorkflowRunScriptSnapshot, right: WorkflowRunScriptSnapshot): boolean {
   return (
     left.runId === right.runId &&
@@ -757,57 +588,6 @@ function samePersistedTarget(
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   return left.kind === right.kind && left.ref === right.ref && left.source === right.source;
-}
-
-function readBoundedSource(file: string): string {
-  const descriptor = openSync(file, "r");
-  try {
-    const buffer = Buffer.alloc(WORKFLOW_METADATA_SCAN_BYTES);
-    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead).toString("utf8");
-  } finally {
-    closeSync(descriptor);
-  }
-}
-
-function exportedMetaObject(statement: SgNode): SgNode | undefined {
-  const declaration = statement.children().find((child) => child.kind() === "lexical_declaration");
-  const variable = declaration
-    ?.children()
-    .find((child) => child.kind() === "variable_declarator" && child.field("name")?.text() === "meta");
-  const value = variable?.field("value");
-  return value?.kind() === "object" ? value : undefined;
-}
-
-function staticStringValue(node: SgNode | null | undefined): string | undefined {
-  if (node == null || (node.kind() !== "string" && node.kind() !== "template_string")) return undefined;
-  let value = "";
-  for (const child of node.children()) {
-    if (child.kind() === "string_fragment") value += child.text();
-    else if (child.kind() === "escape_sequence") value += decodeEscapeSequence(child.text());
-    else if (child.kind() === "template_substitution") return undefined;
-  }
-  return value;
-}
-
-function staticObjectKey(node: SgNode | null | undefined): string | undefined {
-  if (node == null || node.kind() === "computed_property_name") return undefined;
-  if (node.kind() === "string") return staticStringValue(node);
-  return node.text();
-}
-
-function decodeEscapeSequence(value: string): string {
-  const body = value.slice(1);
-  const fixed: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", 0: "\0" };
-  if (fixed[body] !== undefined) return fixed[body];
-  const unicodeCodePoint = /^u\{([0-9a-f]+)\}$/iu.exec(body)?.[1];
-  if (unicodeCodePoint !== undefined) return String.fromCodePoint(Number.parseInt(unicodeCodePoint, 16));
-  const unicode = /^u([0-9a-f]{4})$/iu.exec(body)?.[1];
-  if (unicode !== undefined) return String.fromCharCode(Number.parseInt(unicode, 16));
-  const hex = /^x([0-9a-f]{2})$/iu.exec(body)?.[1];
-  if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
-  if (body === "\n" || body === "\r\n") return "";
-  return body;
 }
 
 function rowsForSource<Row extends WorkflowCatalogRow>(rows: Row[], source: WorkflowCatalogRow["source"]): Row[] {
@@ -949,13 +729,6 @@ function compareCatalogRows(a: WorkflowCatalogRow, b: WorkflowCatalogRow): numbe
   if (root !== 0) return root;
   if (a.role !== b.role) return a.role === "root" ? -1 : 1;
   return a.label.localeCompare(b.label);
-}
-
-function compactCatalogText(value: string): string {
-  if (value.length <= DESCRIPTION_MAX_CHARS) return value;
-  const candidate = value.slice(0, DESCRIPTION_MAX_CHARS - 1);
-  const boundary = candidate.lastIndexOf(" ");
-  return `${(boundary > DESCRIPTION_MAX_CHARS / 2 ? candidate.slice(0, boundary) : candidate).trimEnd()}…`;
 }
 
 function compactWorkflowCatalogLine(value: string): string {

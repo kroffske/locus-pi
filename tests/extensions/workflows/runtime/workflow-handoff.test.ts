@@ -27,10 +27,10 @@ import {
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import {
   readWorkflowResumeWorkspaceIdentity,
-  resolveWorkflowTarget,
   runWorkflowScript,
   type WorkflowHandoffWorkspaceReuseBinding,
 } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import { createWorkflowRuntime } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../../test-harness.js";
 

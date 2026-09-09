@@ -74,6 +74,42 @@ describe("extension layer checker negative rules", () => {
 
     await expectRule(root, "rule 6 (feature-internal facade)");
   });
+
+  it("rejects a cross-feature import of the workflow live projection", async () => {
+    const root = await extensionFixture();
+    await appendFile(
+      path.join(root, "extensions/loop/index.ts"),
+      '\nimport "../workflows/runtime/workflow-live.js";\n',
+      "utf8",
+    );
+
+    await expectRule(root, "rule 6 (feature-internal facade)");
+  });
+
+  it("rejects a declared pure module that value-imports a host-bound builtin", async () => {
+    const root = await extensionFixture();
+    await appendFile(
+      path.join(root, "extensions/workflows/runtime/workflow-outcome.ts"),
+      '\nimport { readFileSync } from "node:fs";\nvoid readFileSync;\n',
+      "utf8",
+    );
+
+    await expectRule(root, "rule 7 (pure modules)");
+  });
+
+  it("accepts a per-specifier type-only edge from a pure module into a host-bound module", async () => {
+    const root = await extensionFixture();
+    // No `type` on the clause: only the specifier is type-only, so the edge
+    // erases at compile time and rule 7 must not follow it into workflow-result.ts,
+    // which reaches node:fs through the run layout.
+    await appendFile(
+      path.join(root, "extensions/workflows/runtime/workflow-outcome.ts"),
+      '\nimport { type WorkflowResultPersistence } from "./workflow-result.js";\nexport type PersistenceEcho = WorkflowResultPersistence;\n',
+      "utf8",
+    );
+
+    await expectClean(root);
+  });
 });
 
 async function extensionFixture(): Promise<string> {
@@ -81,6 +117,22 @@ async function extensionFixture(): Promise<string> {
   fixtureRoots.push(root);
   await cp(path.resolve("extensions"), path.join(root, "extensions"), { recursive: true });
   return root;
+}
+
+async function expectClean(root: string): Promise<void> {
+  const previousExitCode = process.exitCode;
+  const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  process.exitCode = undefined;
+  try {
+    await checkExtensionLayers(root);
+    expect(error.mock.calls.flatMap((call) => call.map(String)).join("\n")).toBe("");
+    expect(process.exitCode).toBeUndefined();
+  } finally {
+    error.mockRestore();
+    log.mockRestore();
+    process.exitCode = previousExitCode;
+  }
 }
 
 async function expectRule(root: string, message: string): Promise<void> {

@@ -18,7 +18,7 @@ import {
 } from "../command/command-parser.js";
 import { WORKFLOW_WORKSPACES_STORAGE_PREFIX } from "../runtime/workflow-run-layout.js";
 import { listExampleNames } from "../operator/operator-ui.js";
-import { listWorkflowCatalogTargets } from "../runtime/workflow-runner.js";
+import { listWorkflowCatalogTargets } from "../runtime/workflow-discovery.js";
 
 export function workflowArgumentCompletions(
   rawPrefix: string,

@@ -48,7 +48,7 @@ The current direct feature graph has two edges:
 - `agents → workflows`
 - `loop → workflows` through the read-only persisted-run facade
 
-`scripts/check-extension-layers.ts` enforces the shared-layer ownership and import direction rules.
+`scripts/check-extension-layers.ts` enforces the shared-layer ownership and import direction rules. It also enforces that the workflow DSL core (`extensions/workflows/runtime/workflow-runtime.ts`) reaches operator handoff and result semantics only through the fs-free contract modules `workflow-handoff-contract.ts` and `workflow-outcome.ts`, never through their durable counterparts, so no `node:fs` dependency enters the core's value-import closure.
 
 ## Runtime state
 

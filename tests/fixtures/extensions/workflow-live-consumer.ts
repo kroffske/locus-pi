@@ -3,12 +3,12 @@
  * proves; this entrypoint opens the consumer-side writer and closes the producer's.
  */
 import type { ExtensionAPI } from "../../../extensions/_shared/host/pi-api.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
   workflowLiveExecutionCount,
-} from "../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-live.js";
 import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const WORKFLOW_LIVE_EXECUTIONS_KEY = Symbol.for("locus-pi.workflow-live-executions.v1");

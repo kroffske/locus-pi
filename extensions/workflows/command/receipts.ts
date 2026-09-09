@@ -5,7 +5,7 @@ import type {
   ExtensionMessage,
 } from "../../_shared/host/pi-api.js";
 import { notifyOperator } from "../../_shared/operator/operator-notify.js";
-import type { WorkflowProjectedStatus } from "../runtime/workflow-result.js";
+import type { WorkflowProjectedStatus } from "../runtime/workflow-outcome.js";
 
 export const WORKFLOW_RUN_CUSTOM_TYPE = "locus-workflow-run";
 export const WORKFLOW_RESULT_CUSTOM_TYPE = "locus-workflow-result";

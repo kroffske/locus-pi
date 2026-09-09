@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { RuntimeArtifact } from "../../../extensions/_shared/runtime/artifacts.js";
+import type { RuntimeArtifact } from "../../../../extensions/_shared/runtime/artifacts.js";
 import {
   createTaskFromApprovedPrompt,
   exportTodosToProjectTask,
@@ -11,8 +11,8 @@ import {
   loadTaskBridgeSnapshot,
   resolveCurrentProjectTask,
   writeCompletionNoteWithApproval,
-} from "../../../extensions/_shared/project/task-bridge.js";
-import { createHarness } from "../../test-harness.js";
+} from "../../../../extensions/todo-context/state/task-bridge.js";
+import { createHarness } from "../../../test-harness.js";
 
 const tempRoots: string[] = [];
 

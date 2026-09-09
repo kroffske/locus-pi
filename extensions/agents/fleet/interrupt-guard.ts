@@ -1,4 +1,4 @@
-import { agentLiveStore } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-live-store.js";
 import { hasDismissibleCommandView } from "../../_shared/operator/command-ui.js";
 import { fleetMenuState } from "../../_shared/agent-runtime/fleet-menu.js";
 import { getProjectRoot, getSessionId, type ExtensionContext } from "../../_shared/host/pi-api.js";

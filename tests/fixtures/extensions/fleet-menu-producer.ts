@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "../../../extensions/_shared/host/pi-api.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { acquireFleetViewedRow, fleetMenuState } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 
 /**

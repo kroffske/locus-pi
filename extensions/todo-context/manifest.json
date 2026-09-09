@@ -56,7 +56,7 @@
   "sourceAuditPath": null,
   "tests": [
     "tests/extensions/todo-context/tool/todo-context.test.ts",
-    "tests/shared/project/task-bridge.test.ts",
+    "tests/extensions/todo-context/state/task-bridge.test.ts",
     "tests/extensions/todo-context/state/todo-project-task-truth.test.ts",
     "tests/shared/runtime/session-core-jsonl.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts",

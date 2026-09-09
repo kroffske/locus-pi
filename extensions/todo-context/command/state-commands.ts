@@ -11,7 +11,7 @@
  */
 import { requestOperatorInput } from "../../_shared/operator/operator-input.js";
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
-import { cloneTodoPhases, type TodoPhase, type TodoTask } from "../../_shared/project/todo-state.js";
+import { cloneTodoPhases, type TodoPhase, type TodoTask } from "../state/todo-state.js";
 import { titleCaseSentence, titleCaseWords, tokenize } from "./command-parser.js";
 import { markdownToPhases, phasesToMarkdown } from "../state/markdown-checklist.js";
 import { setTodoBlock } from "../operator/operator-surface.js";

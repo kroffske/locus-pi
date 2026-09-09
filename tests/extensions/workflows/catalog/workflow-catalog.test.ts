@@ -11,18 +11,18 @@ import {
   buildWorkflowCatalogBlock,
   buildWorkflowCatalogModel,
   buildWorkflowInfoBlock,
-  readWorkflowMetaDescription,
   safeRecentWorkflowLabel,
   type WorkflowBrowserIntent,
 } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
+import { readWorkflowMetaDescription } from "../../../../extensions/workflows/catalog/workflow-meta.js";
+import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
   listWorkflowCatalogTargets,
   resolveWorkflowTarget,
   WorkflowGroupOnlyError,
-  runWorkflowScript,
-} from "../../../../extensions/workflows/runtime/workflow-runner.js";
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import { isPostCodeReviewTargetIdentity } from "../../../../extensions/workflows/runtime/workflow-saved-name.js";
 import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { preflightWorkflowCommandTarget } from "../../../../extensions/workflows/launch/launch-guard.js";

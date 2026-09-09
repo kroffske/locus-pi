@@ -3,22 +3,24 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  agentLiveStore,
   createAgentSdkSessionExecutor,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
   type SdkCreateSessionOptionsLike,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { AgentExecutor } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
-  applyWorkflowJournalLineToAgentLiveStore,
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
   readWorkflowRunSummary,
+} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  applyWorkflowJournalLineToAgentLiveStore,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import {
   createWorkflowRuntime,
   type WorkflowAgentResult,

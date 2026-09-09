@@ -10,7 +10,8 @@ import {
   executeAgentRunBoundary,
   type ApprovalTier,
 } from "../../_shared/agent-runtime/agent-runner.js";
-import { agentLiveStore, createAgentSdkSessionExecutor } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { createAgentSdkSessionExecutor } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   formatAgentFinishedEventLine,
   formatAgentStartedEventLine,

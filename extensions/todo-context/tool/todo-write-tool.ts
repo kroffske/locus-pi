@@ -10,11 +10,10 @@
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
 import { errorResult, textResult } from "../../_shared/host/pi-api.js";
-import { todoStateCache } from "../state/todo-state-cache.js";
-import type { TodoPhase } from "../../_shared/project/todo-state.js";
+import type { TodoPhase } from "../state/todo-state.js";
 import { validateParams } from "../../_shared/host/validation.js";
 import { applyTodoOps, findActiveTask, getCompletionTransitions, type TodoOp } from "../state/phase-ops.js";
-import { commitTodoPhases, loadTodoPhases, normalizeQueueContext } from "../state/phase-store.js";
+import { commitTodoPhases, loadTodoPhases, normalizeQueueContext, todoStateCache } from "../state/phase-store.js";
 import type { TodoQueueController } from "../queue/queue-controller.js";
 
 const TodoWriteParams = Type.Object({

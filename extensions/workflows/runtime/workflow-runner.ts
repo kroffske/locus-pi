@@ -78,38 +78,17 @@ import {
 } from "./workflow-launch-binding.js";
 import {
   isPostCodeReviewTargetProjection,
-  isWorkflowSavedName,
   workflowTargetIdentityKey,
   type WorkflowTargetIdentity,
 } from "./workflow-saved-name.js";
 import {
   assertResolvedWorkflowTargetBinding,
-  listPackagedWorkflowEntries,
-  listWorkflowCatalogTargets,
-  packagedExamplesDir,
-  packagedWorkflowNames,
   packagedWorkflowPath,
   resolveOwnedWorkflowChild,
   resolveWorkflowTarget,
   WORKFLOW_ENTRY_SUFFIX,
-  WorkflowNameNotFoundError,
-  WorkflowGroupOnlyError,
-  type PackagedWorkflowEntry,
   type ResolvedWorkflowTarget,
-  type WorkflowTargetKind,
 } from "./workflow-discovery.js";
-
-export {
-  listPackagedWorkflowEntries,
-  listWorkflowCatalogTargets,
-  packagedExamplesDir,
-  packagedWorkflowNames,
-  packagedWorkflowPath,
-  resolveWorkflowTarget,
-  WorkflowNameNotFoundError,
-  WorkflowGroupOnlyError,
-};
-export type { PackagedWorkflowEntry, ResolvedWorkflowTarget, WorkflowTargetKind };
 import {
   createWorkflowReplayController,
   readWorkflowReplayLog,
@@ -986,18 +965,6 @@ class SavedChildExecutionOwner {
 }
 
 const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
-
-// ---------------------------------------------------------------------------
-// Path resolution
-// ---------------------------------------------------------------------------
-
-export function resolveExampleScriptPath(scriptRef: string, projectRoot: string): string {
-  return resolveWorkflowTarget(
-    isWorkflowSavedName(scriptRef) ? { name: scriptRef } : { scriptPath: scriptRef },
-    projectRoot,
-    projectRoot,
-  ).path;
-}
 
 function workflowDefaultOutputName(target: ResolvedWorkflowTarget): string {
   return target.kind === "name" ? target.ref : path.basename(target.path, WORKFLOW_ENTRY_SUFFIX);

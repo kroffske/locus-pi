@@ -7,7 +7,7 @@ import type {
   ToolRenderResultOptions,
   ToolResult,
 } from "../../../../extensions/_shared/host/pi-api.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import agents from "../../../../extensions/agents/index.js";
 import { createHarness } from "../../../test-harness.js";
 

@@ -6,12 +6,12 @@ import {
   WORKFLOW_RESULT_CUSTOM_TYPE,
   WORKFLOW_RUN_CUSTOM_TYPE,
 } from "../../../../extensions/workflows/command/receipts.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { compactWorkflowParentRows } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import type { RunWorkflowScriptResult } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../../test-harness.js";

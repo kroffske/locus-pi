@@ -13,12 +13,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  packagedWorkflowNames,
   loadWorkflowScript,
-  packagedWorkflowPath,
   runWorkflowScript,
   type RunWorkflowScriptResult,
 } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  packagedWorkflowNames,
+  packagedWorkflowPath,
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import {
   assessWorkflowSourceIdentity,
   createWorkflowScriptSnapshot,

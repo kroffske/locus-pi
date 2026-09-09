@@ -1,4 +1,3 @@
-import { mkdir } from "node:fs/promises";
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -35,10 +34,6 @@ export function sessionJsonlPath(projectRoot: string): string {
 
 export function artifactStoreDir(projectRoot: string): string {
   return path.join(runtimeStateDir(projectRoot), "artifacts");
-}
-
-export async function ensureParentDir(filePath: string): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
 }
 
 async function collectFiles(dir: string, files: string[], limit: number): Promise<void> {

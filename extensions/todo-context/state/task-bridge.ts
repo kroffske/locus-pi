@@ -1,5 +1,5 @@
-import type { ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
-import type { RuntimeArtifact } from "../runtime/artifacts.js";
+import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
+import type { RuntimeArtifact } from "../../_shared/runtime/artifacts.js";
 import type { TodoPhase } from "./todo-state.js";
 import { cloneTodoPhases } from "./todo-state.js";
 import {
@@ -11,7 +11,7 @@ import {
   type ProjectTaskIndexEntry,
   type ProjectTaskStatus,
   type ProjectTaskWorkspace,
-} from "./tasks-store.js";
+} from "../../_shared/project/tasks-store.js";
 
 export const CURRENT_PROJECT_TASK_STATUS_ORDER = [
   "doing",
@@ -167,7 +167,7 @@ export function createTaskFromApprovedPrompt(input: CreateTaskFromPromptInput): 
 // The host's filesystem-write approval layer — not this extension — gates the write
 // (permission: delegated-to-pi). `approvalTier` is parsed by `/todo completion-note` for
 // forward-compatibility and is advisory only; the "deny" tier is legacy and still writes
-// (see tests/shared/project/task-bridge.test.ts `legacyDenyTier`). Do not re-introduce an extension-level
+// (see tests/extensions/todo-context/state/task-bridge.test.ts `legacyDenyTier`). Do not re-introduce an extension-level
 // gate here without also updating todo-context's advertised behavior and that test.
 export async function writeCompletionNoteWithApproval(
   input: CompletionNoteInput,

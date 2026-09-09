@@ -327,7 +327,7 @@ describe("consilium reference workflow", () => {
 
   it("stays out of the Package registry by placement, and still loads by path", async () => {
     const { packagedWorkflowNames, resolveWorkflowTarget } =
-      await import("../../../../extensions/workflows/runtime/workflow-runner.js");
+      await import("../../../../extensions/workflows/runtime/workflow-discovery.js");
 
     // `references/` is a sibling of the scanned `examples/` directory and is never
     // visited, so this file is unreachable by name.

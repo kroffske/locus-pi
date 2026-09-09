@@ -1,5 +1,5 @@
 import { sliceByColumn, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { AgentLiveRow, AgentLiveStatus } from "./agent-sdk-host.js";
+import type { AgentLiveRow, AgentLiveStatus } from "./agent-live-store.js";
 
 const SPINNER_FRAMES = ["⠿", "⠻", "⠽", "⠾"];
 export const AGENT_LIVE_SPINNER_FRAME_COUNT = SPINNER_FRAMES.length;

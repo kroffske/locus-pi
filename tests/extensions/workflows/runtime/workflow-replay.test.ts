@@ -22,11 +22,11 @@ import {
   type WorkflowReplayEntry,
   type WorkflowReplayRefusalReason,
 } from "../../../../extensions/workflows/runtime/workflow-replay.js";
+import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
-  runWorkflowScript,
-} from "../../../../extensions/workflows/runtime/workflow-runner.js";
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import { assessWorkflowReplaySafety } from "../../../../extensions/workflows/runtime/workflow-script-identity.js";
 import {
   WorkflowGroupFailureError,
