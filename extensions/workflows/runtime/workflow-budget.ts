@@ -67,9 +67,10 @@ export const DEFAULT_WORKFLOW_BUDGET: Readonly<WorkflowBudget> = Object.freeze({
   // invalidate every replay record for no observed benefit: no stage approaches it,
   // and stages that need less already narrow to 40 or 0.
   toolCalls: 1_000,
-  // Host maximum. Turn count no longer ends ordinary long reasoning at the old
-  // hidden five-turn default; explicit tighter limits remain available.
-  turns: 20,
+  // Emergency allowance for long tool-using work, not a target or a retry count.
+  // Explicit per-call limits remain available; completed replay prefixes keep
+  // the effective limit recorded by their original requests.
+  turns: 1_000,
   // Above the largest curated per-stage bound (256_000) or the shipped examples
   // would break on their first run. This is a fuse against a pathological answer,
   // not a work target; per-stage narrowing stays the script's job.
@@ -100,22 +101,20 @@ export const WORKFLOW_SDK_BACKSTOP_MARGIN_MS = 5_000;
 /** Node's timer implementation clamps a larger delay to 1 ms. */
 export const NODE_TIMER_MAX_DELAY_MS = 2_147_483_647;
 
-/** The host accepts 1..20 assistant turns for one child. */
-export const WORKFLOW_AGENT_MIN_TURNS = 1;
-export const WORKFLOW_AGENT_MAX_TURNS = 20;
+/** Representable assistant-turn counts; wall-clock timers have their own bounds. */
+export const WORKFLOW_AGENT_MAX_TURNS = Number.MAX_SAFE_INTEGER;
 
 /**
- * Largest workflow fuse that remains a real timer even after the SDK backstop is
- * derived at the host's maximum turn count.
+ * Retain the previously accepted timeout range, derived for 20 turns. Larger
+ * explicit turn counts additionally validate their actual timeout/turn pair.
  *
  * `n * ceil(timeoutMs / n)` can exceed `timeoutMs` by at most `n - 1`; the SDK
  * then adds `n * WORKFLOW_SDK_BACKSTOP_MARGIN_MS`. Reserving both terms at
- * `n = 20` keeps the workflow timer and the multiplied SDK timer at or below
+ * `n = 20` kept the workflow timer and the multiplied SDK timer at or below
  * Node's maximum delay. Without this cap Node warns and schedules the supposed
  * long timeout after roughly one millisecond.
  */
-export const WORKFLOW_MAX_TIMEOUT_MS =
-  NODE_TIMER_MAX_DELAY_MS - WORKFLOW_AGENT_MAX_TURNS * WORKFLOW_SDK_BACKSTOP_MARGIN_MS - (WORKFLOW_AGENT_MAX_TURNS - 1);
+export const WORKFLOW_MAX_TIMEOUT_MS = NODE_TIMER_MAX_DELAY_MS - 20 * WORKFLOW_SDK_BACKSTOP_MARGIN_MS - 19;
 
 /**
  * The SDK per-turn timeout derived from one call's declared fuse.
@@ -128,8 +127,12 @@ export const WORKFLOW_MAX_TIMEOUT_MS =
 export function workflowSdkTurnTimeoutMs(timeoutMs: number, maxTurns: number): number {
   assertWorkflowBudgetValue("timeoutMs", timeoutMs);
   assertWorkflowBudgetValue("turns", maxTurns);
-  const turns = maxTurns;
-  return Math.ceil(timeoutMs / turns) + WORKFLOW_SDK_BACKSTOP_MARGIN_MS;
+  const turnTimeoutMs = Math.ceil(timeoutMs / maxTurns) + WORKFLOW_SDK_BACKSTOP_MARGIN_MS;
+  const sdkBudgetMs = turnTimeoutMs * maxTurns;
+  if (!Number.isSafeInteger(sdkBudgetMs) || sdkBudgetMs > NODE_TIMER_MAX_DELAY_MS) {
+    throw new Error("workflow timeoutMs/maxTurns pair cannot be represented by Node timers with the SDK backstop");
+  }
+  return turnTimeoutMs;
 }
 
 /** One axis a caller asked to raise above the value that would otherwise apply. */
@@ -223,11 +226,6 @@ function assertClosedWorkflowBudgetKeys(override: Partial<WorkflowBudget>): void
 export function assertWorkflowBudgetValue(axis: keyof WorkflowBudget, value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error(`workflow budget ${axis} must be a positive safe integer`);
-  }
-  if (axis === "turns" && value > WORKFLOW_AGENT_MAX_TURNS) {
-    throw new Error(
-      `workflow budget turns must be an integer between ${WORKFLOW_AGENT_MIN_TURNS} and ${WORKFLOW_AGENT_MAX_TURNS}`,
-    );
   }
   if (axis === "timeoutMs" && value > WORKFLOW_MAX_TIMEOUT_MS) {
     throw new Error(

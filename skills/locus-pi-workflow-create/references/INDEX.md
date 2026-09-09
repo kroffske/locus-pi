@@ -11,4 +11,10 @@ Choose by the required control decision, not by agent count. Read one card, then
 
 Crash replay is a runtime capability, not another graph pattern. Generated source is a way to obtain a graph, not semantic continuation. Candidate search, councils and fixed fan-out are fixed-graph techniques unless the design explicitly adds refinement. No universal judge is injected.
 
-The legacy card filenames below remain redirects so old links still work. They do not define a second catalog or their own API.
+[Structured results](structured-results.md) covers a same-agent shaped answer — choice, closed string, handoffs or compatibility schema through `returnVia: "tool"`. It is an output contract inside a card's graph, not a fifth graph form.
+
+## Start from the user's current problem
+
+[Repair + Continue](repair-and-continue.md) is the first card for a failed or stopped graph that needs a source fix. Keep the matching completed prefix instead of recreating the workflow.
+
+Large fan-out runs are owned by [locus-pi-workflow-run](../../locus-pi-workflow-run/SKILL.md#large-runs-observe-and-let-the-operator-decide). Authoring adds no total-call cap and no token budget API.

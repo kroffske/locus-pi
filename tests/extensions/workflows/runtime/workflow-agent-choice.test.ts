@@ -33,7 +33,8 @@ describe("agent({ choice }) exact routing output", () => {
     const typed: "accept" | "revise" | "blocked" = decision;
 
     expect(typed).toBe("revise");
-    expect(requests[0]?.prompt).toContain('"enum": [');
+    expect(requests[0]?.prompt).toContain("Allowed answers (choose one):");
+    expect(requests[0]?.prompt).not.toContain('"enum": [');
     expect(requests[0]?.prompt).toContain('"blocked"');
     expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
       status: "valid",
@@ -53,6 +54,40 @@ describe("agent({ choice }) exact routing output", () => {
       SchemaValidationError,
     );
     expect(failed.requests).toHaveLength(2);
+  });
+
+  it("rejects a schema with no selected value and requests one literal without treating files as success", async () => {
+    const echo = JSON.stringify({ type: "string", enum: ["success", "failed"] });
+    const repaired = scriptedRuntime("compose-schema-echo", [echo, '"success"']);
+    await expect(
+      repaired.dsl.agent("Compose the catalog and report its exit status.", {
+        choice: ["success", "failed"],
+      }),
+    ).resolves.toBe("success");
+    expect(repaired.requests).toHaveLength(2);
+    for (const request of repaired.requests) {
+      expect(request.prompt).toContain('Allowed answers (choose one):\n- "success"\n- "failed"');
+      expect(request.prompt).toContain("Do not return the list, a JSON object, or a JSON Schema.");
+      expect(request.prompt).not.toContain("```json");
+    }
+    const exhausted = scriptedRuntime("compose-schema-echo-exhausted", [echo]);
+    await expect(
+      exhausted.dsl.agent("The catalog file exists. Report the command status.", {
+        choice: ["success", "failed"],
+      }),
+    ).rejects.toBeInstanceOf(SchemaValidationError);
+    expect(exhausted.requests).toHaveLength(2);
+  });
+
+  it("keeps all schema constraints visible for a string enum with extra rules", async () => {
+    const runtime = scriptedRuntime("choice-extra-constraint", ['"failed"']);
+    await expect(
+      runtime.dsl.agent("Choose.", {
+        schema: { type: "string", enum: ["ok", "failed"], minLength: 3 },
+      }),
+    ).resolves.toBe("failed");
+    expect(runtime.requests[0]?.prompt).toContain('"minLength": 3');
+    expect(runtime.requests[0]?.prompt).toContain("```json");
   });
 
   it("uses an explicit fallback after the model echoes the choice schema twice", async () => {

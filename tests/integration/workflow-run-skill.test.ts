@@ -12,6 +12,8 @@ describe("shipped workflow run skill", () => {
     for (const contract of [
       "If a structured tool named `workflow` is available",
       "If the request supplies `items` or `continuation`",
+      "[external-locus-pi](../external-locus-pi/SKILL.md)",
+      "non-interactive execution is explicitly requested",
       "stop as unsupported when that tool is unavailable",
       '"pi", "--mode", "json", "-p", "--no-session", "--approve", prompt',
       "`target`, `runName`, `outputDir`, and `resumeFromRunId`",
@@ -47,7 +49,7 @@ describe("shipped workflow run skill", () => {
       "The `workflow` tool schema has no `status` operation",
       ".locus-pi/runs/<runId>/runtime/result.json",
       "`failureDiagnostic` inside that file",
-      "The failing stage's answer at `evidencePath`",
+      "The child result, transcript or answer at `evidencePath`",
       ".locus-pi/runs/<runId>/runtime/journal.ndjson",
       "`replay: not recorded reason=…` means no later run can resume from it",
       // The completed prefix is readable from the record by node name alone.
@@ -74,12 +76,12 @@ describe("shipped workflow run skill", () => {
       "repeat it with `outputDir`",
       "fails closed instead of creating a new\nworkspace silently",
       // The seven named refusals.
-      "no `.locus-pi/runs/<runId>/`, or `result.json` is\n   missing or corrupt",
+      "A missing result requires the explicit interrupted-recovery checks",
       "The source journal says `replay: not recorded`",
       "`scriptPath` resolves outside the current `projectRoot`",
       "The original semantic input is unavailable",
       "The terminal status is `awaiting_operator`",
-      "The workspace or project tree changed since the source run",
+      "The workspace or project prerequisites needed by replayed calls are no longer",
       "Resume was requested without the source workspace, or with a different one",
       "recorded before node names existed",
       // Source edits belong to the authoring skill; operator answers are never invented.

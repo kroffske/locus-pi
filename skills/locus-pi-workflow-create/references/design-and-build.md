@@ -16,8 +16,11 @@ sequence in the same turn:
    design. A `runnable root` design includes
    `.locus-pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
    and builds only its direct children. Never invent a root.
-4. Validate source identity, module load, graph correspondence, and standard
-   source shape. Do not run the workflow unless the user separately asks to run it.
+4. Validate source identity, module load, and standard source shape with the
+   packaged tools, then read the design against the built source yourself: walk
+   its node and edge list and confirm each one appears. No tool checks that
+   correspondence and no home-made checker script should be written for it. Do
+   not run the workflow unless the user separately asks to run it.
 
 The design remains the readable source of truth and must exist before JavaScript;
 continuous authoring removes only the mandatory human pause between them. Stop
@@ -75,6 +78,18 @@ Status: REVIEWED — ready for build.
 Count orchestration machinery, not agents. More agents are fine when the task
 really decomposes into more coherent subtasks.
 
+Review whether each brief gives the agent enough to complete its task. Remove
+mechanical headings, repeated completion criteria, tool choreography and
+general policy that add no task-specific information.
+For a review edge, end the reviewed stage with a commit and let the reviewer read
+`git diff <stage-base>..HEAD` with its own tools; require it to account for every
+in-scope path in that diff before a favorable verdict. Do not have the producer
+rebuild the change as an evidence bundle for the reviewer to read.
+For each shaped result or author-selected limit, identify the consuming edge
+and why it needs that contract. Plain narrative is passed whole without an
+invented length cap; structured controls belong only at real routing or
+decomposition edges.
+
 Read [the pattern index](INDEX.md), then only the selected
 pattern card. The cards are algorithms and small snippets, not full workflows to
 copy blindly.
@@ -92,7 +107,8 @@ namespace has no root source and never receives a fake one. It then checks:
 - `meta.profile` is `"standard"`;
 - source identity policy passes;
 - the module loads and exports `meta` plus a default function;
-- source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits;
+- source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits,
+  confirmed by reading the design's node and edge list against the source;
 - no design-absent node or standard-profile bad smell appeared.
 - the exact built file passes the Pi-native `workflow_check_source` tool with
   `mode: "orchestration-only"` for every built

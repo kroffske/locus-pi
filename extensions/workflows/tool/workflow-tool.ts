@@ -135,7 +135,7 @@ const WorkflowParams = Type.Object(
       Type.String({
         maxLength: WORKFLOW_OUTPUT_DIR_MAX_CHARS,
         description:
-          "Optional workflow workspace path. Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name> workspaces; resume repeats the source workspace. Existing legacy .locus-pi/plans/<name> paths are accepted only when already present. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
+          "Optional workflow workspace path. Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name> workspaces; resume repeats the source workspace. Existing legacy .locus-pi/plans/<name> paths are accepted only when already present. A task artifacts directory such as .tasks/<task>/artifacts is a legal explicit workspace. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
       }),
     ),
     runName: Type.Optional(

@@ -253,10 +253,10 @@ export default function workflows(pi: ExtensionAPI): void {
     rememberCompletionContext(ctx);
     commandLauncher.startSession(ctx);
   });
-  pi.on("session_shutdown", (_event, _ctx) => {
+  pi.on("session_shutdown", async (_event, _ctx) => {
     resetWorkflowLiveExecutions();
     disposeSessionPanels();
-    commandLauncher.shutdown();
+    await commandLauncher.shutdown();
     unpinTransientUiKey(pi, WORKFLOW_LIVE_WIDGET_KEY);
   });
 

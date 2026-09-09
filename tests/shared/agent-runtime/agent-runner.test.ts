@@ -66,7 +66,10 @@ describe("agent runner contract", () => {
   });
 
   it("enforces budgets, depth, and allowed tools before creating a child run", () => {
-    expect(validateRunPolicy(fullRequest({ maxTurns: 0 }))).toBe("maxTurns must be between 1 and 20.");
+    for (const maxTurns of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(validateRunPolicy(fullRequest({ maxTurns }))).toBe("maxTurns must be a positive safe integer.");
+    }
+    expect(validateRunPolicy(fullRequest({ maxTurns: 1000 }))).toBeUndefined();
     expect(validateRunPolicy(fullRequest({ depth: 1, maxDepth: 1 }))).toBe("Agent run depth limit reached.");
     expect(validateRunPolicy(fullRequest({ allowedTools: ["read", "bash"] }))).toBe(
       "Requested tools exceed the agent definition allow-list.",

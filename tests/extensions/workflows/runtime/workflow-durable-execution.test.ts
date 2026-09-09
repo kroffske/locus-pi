@@ -253,6 +253,15 @@ describe("stable workflow output paths", () => {
     ).toBe(true);
     expect(() => assertWorkflowOutputDirPath(".locus-pi/plans/nested/task-draft")).toThrow();
     expect(() => assertWorkflowOutputDirPath(".locus-pi/workspaces/nested/task-draft")).toThrow();
+    const grammar = new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u");
+    for (const accepted of [".tasks/T-144-2026-09-08-workflow/artifacts", ".tasks/a/b/c", ".tasks/T-144"]) {
+      expect(assertWorkflowOutputDirPath(accepted)).toBe(accepted);
+      expect(grammar.test(accepted)).toBe(true);
+    }
+    for (const rejected of [".tasks", ".tasks/", ".tasks/../x", ".tasks/.hidden/x", ".tasks//x", ".tasks/x/../y"]) {
+      expect(() => assertWorkflowOutputDirPath(rejected)).toThrow();
+      expect(grammar.test(rejected)).toBe(false);
+    }
     expect(assertWorkflowPhysicalWorkspaceIdentity("packages/docs site/tmp/files")).toBe(
       "packages/docs site/tmp/files",
     );
@@ -260,6 +269,65 @@ describe("stable workflow output paths", () => {
     for (const invalid of ["", "/outside", "a\\b", "a\0b", ".", "..", "a/../b", "a//b", "a/./b"]) {
       expect(() => assertWorkflowPhysicalWorkspaceIdentity(invalid)).toThrow();
     }
+  });
+
+  it("opens only the .tasks root and keeps every other dot directory closed", () => {
+    const grammar = new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u");
+    for (const denied of [
+      ".git/objects",
+      ".ssh/x",
+      ".env/x",
+      ".locus-pi/workflow-state/v1/x",
+      ".locus-pi/runs/x",
+      ".locus-pi",
+      ".tasksextra/x",
+    ]) {
+      expect(() => assertWorkflowOutputDirPath(denied)).toThrow();
+      expect(grammar.test(denied)).toBe(false);
+    }
+  });
+
+  it("records that a task artifacts workspace also holds the runtime lease and navigation files", () => {
+    const root = project();
+    const outputDir = ".tasks/T-144-2026-09-08-workflow/artifacts";
+    const output = resolveWorkflowOutputDirectory(root, outputDir, "unused", root);
+    expect(output.relativePath).toBe(outputDir);
+    const groupDir = ensureWorkflowRunDir(root, "tasks-root");
+    const lease = acquireWorkflowRootLease({ projectRoot: root, output, rootRunId: "tasks-root" });
+    expect(existsSync(path.join(root, outputDir, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(true);
+    writeWorkflowRunGroupReport(
+      {
+        projectRoot: root,
+        runId: "tasks-root",
+        storageRootRunId: "tasks-root",
+        workspaceDir: output.absolutePath,
+        workflow: "unused",
+      },
+      lease,
+    );
+    writeWorkflowWorkspaceRunLink(lease, groupDir, "tasks-root");
+    expect(existsSync(path.join(root, outputDir, ".workflow-runs.md"))).toBe(true);
+    releaseWorkflowRootLease(lease);
+    expect(existsSync(path.join(root, outputDir, WORKFLOW_OUTPUT_LOCK_FILE))).toBe(false);
+  });
+
+  it("rejects a .tasks workspace whose root escapes the project through a symlink", async () => {
+    const root = project();
+    const outside = mkdtempSync(path.join(tmpdir(), "workflow-tasks-outside-"));
+    symlinkSync(outside, path.join(root, ".tasks"), "dir");
+    writeWorkflow(root, "empty", `export default () => "ok";\n`);
+    const harness = createHarness(root);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "empty",
+      outputDir: ".tasks/T-144/artifacts",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("symlink");
   });
 
   it.each([
@@ -2806,6 +2874,19 @@ describe("fenced output leases and atomic checkpoints", () => {
     const readme = readFileSync(path.join(groupDir, "README.md"), "utf8");
     const backlinkFile = path.join(output.absolutePath, ".workflow-runs.md");
     const backlink = readFileSync(backlinkFile, "utf8");
+    expect(readme).toContain("# Workflow run group");
+    expect(backlink).toContain("# Linked workflow runs");
+    const legacyBacklink = backlink
+      .replace("# Linked workflow runs", "# Связанные запуски workflow")
+      .replace(
+        "Status and history are stored in group directories; this file contains links only.",
+        "Статусы и история находятся в папках групп; этот файл содержит только ссылки.",
+      )
+      .replace("[Group root-one]", "[Группа root-one]");
+    writeFileSync(backlinkFile, legacyBacklink);
+    writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one");
+    expect(readFileSync(backlinkFile, "utf8")).toBe(backlink);
+
     writeFileSync(path.join(groupDir, "README.md"), "<!-- locus-pi:workflow-run-group:v1 -->\npartial");
     writeWorkflowRunGroupReport(input, lease);
     expect(readFileSync(path.join(groupDir, "README.md"), "utf8")).toBe(readme);
@@ -2815,7 +2896,7 @@ describe("fenced output leases and atomic checkpoints", () => {
     );
     expect(readFileSync(backlinkFile, "utf8")).toBe("<!-- locus-pi:workflow-workspace-runs:v1 -->\npartial");
     writeFileSync(backlinkFile, backlink);
-    writeFileSync(backlinkFile, backlink.replace("[Группа root-one]", "[Группа root-two]"));
+    writeFileSync(backlinkFile, backlink.replace("[Group root-one]", "[Group root-two]"));
     expect(() => writeWorkflowWorkspaceRunLink(lease, groupDir, "root-one")).toThrow(
       expect.objectContaining({ code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED" }),
     );

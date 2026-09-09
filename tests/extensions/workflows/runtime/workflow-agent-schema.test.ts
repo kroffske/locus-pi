@@ -4,6 +4,7 @@ import {
   createWorkflowRuntime,
   type WorkflowAgentRequest,
   type WorkflowAgentOptions,
+  type WorkflowAgentSchemaOptions,
   type WorkflowAgentResult,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 
@@ -240,5 +241,30 @@ describe("agent({ schema }) structured output", () => {
     // @ts-expect-error validate selects WorkflowAgentSchemaOptions, never WorkflowAgentOptions
     const invalidValidateOptions: WorkflowAgentOptions = { validate: () => [] };
     expect(invalidValidateOptions).toBeDefined();
+
+    // A shaped tool return carries its shape in schema, so the string `output` contract
+    // stays unavailable there, and the call stays typed as unknown rather than string.
+    const shapedTool: WorkflowAgentSchemaOptions = {
+      schema: { ...VERDICT_SCHEMA },
+      returnVia: "tool",
+      // @ts-expect-error output is a string-only contract
+      output: { type: "string" },
+    };
+    expect(shapedTool.returnVia).toBe("tool");
+  });
+
+  it("keeps a shaped tool return out of Promise<string>, and refuses validate before any child starts", async () => {
+    const { dsl, requests } = scriptedRuntime("agent-schema-tool-typing", ['{"answer":"yes"}']);
+    const never = async (): Promise<void> => {
+      // @ts-expect-error a shaped tool return is never Promise<string>
+      const asText: Promise<string> = dsl.agent("x", { schema: VERDICT_SCHEMA, returnVia: "tool" });
+      expect(asText).toBeDefined();
+    };
+    expect(never).toBeTypeOf("function");
+
+    await expect(
+      dsl.agent("Decide.", { label: "decide", schema: VERDICT_SCHEMA, returnVia: "tool", validate: () => [] }),
+    ).rejects.toThrow(/does not support validate/u);
+    expect(requests).toHaveLength(0);
   });
 });

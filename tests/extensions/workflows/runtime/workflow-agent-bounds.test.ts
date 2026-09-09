@@ -232,7 +232,7 @@ describe("contract-defaulted per-child bounds", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turn-budget" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number }> = [];
+    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
     const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
@@ -263,10 +263,13 @@ describe("contract-defaulted per-child bounds", () => {
 
     await expect(dsl.agent("work")).resolves.toBe("fine");
     const turnTimeoutMs = factoryOptions[0]?.turnTimeoutMs;
-    expect(turnTimeoutMs).toBe(workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, 20));
+    expect(turnTimeoutMs).toBe(
+      workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, DEFAULT_WORKFLOW_BUDGET.turns),
+    );
     // ORDERING, not only the value: the host kills a child at turnTimeoutMs * maxTurns
     // (`agent-sdk-host.ts`), and that moment must come strictly after the workflow fuse.
-    expect(turnTimeoutMs! * 20).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    expect(turnTimeoutMs! * DEFAULT_WORKFLOW_BUDGET.turns).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    expect(factoryOptions[0]?.cliRequestTimeoutMs).toBe(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -279,7 +282,7 @@ describe("contract-defaulted per-child bounds", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turn-budget-absent" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number }> = [];
+    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
     const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
@@ -326,7 +329,7 @@ describe("maxTurns as a budget axis", () => {
     expect(requests[0]?.maxTurns).toBe(DEFAULT_WORKFLOW_BUDGET.turns);
   });
 
-  it("lets a call declare its own turn budget within the host clamp", async () => {
+  it("lets a call declare its own turn budget above the former host ceiling", async () => {
     const requests: WorkflowAgentRequest[] = [];
     const { dsl } = createWorkflowRuntime({
       runId: "declared-turns",
@@ -337,27 +340,30 @@ describe("maxTurns as a budget axis", () => {
       },
     });
 
-    await expect(dsl.agent("work", { maxTurns: 20 })).resolves.toBe("fine");
+    await expect(dsl.agent("work", { maxTurns: 1000 })).resolves.toBe("fine");
     await expect(dsl.agent("work", { maxTurns: 1 })).resolves.toBe("fine");
-    expect(requests.map((request) => request.maxTurns)).toEqual([20, 1]);
+    expect(requests.map((request) => request.maxTurns)).toEqual([1000, 1]);
   });
 
-  it.each([25, 0, -1, 1.5])("refuses a maxTurns outside the host clamp with zero child calls (%s)", async (value) => {
-    let calls = 0;
-    const { dsl } = createWorkflowRuntime({
-      runId: "clamped-turns",
-      defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
-      agentRunner: async () => {
-        calls += 1;
-        throw new Error("must not run");
-      },
-    });
+  it.each([0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "refuses an invalid maxTurns with zero child calls (%s)",
+    async (value) => {
+      let calls = 0;
+      const { dsl } = createWorkflowRuntime({
+        runId: "clamped-turns",
+        defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
+        agentRunner: async () => {
+          calls += 1;
+          throw new Error("must not run");
+        },
+      });
 
-    await expect(dsl.agent("work", { maxTurns: value })).rejects.toThrow(
-      /agent maxTurns must be an integer between 1 and 20/u,
-    );
-    expect(calls).toBe(0);
-  });
+      await expect(dsl.agent("work", { maxTurns: value })).rejects.toThrow(
+        /agent maxTurns must be a positive safe integer/u,
+      );
+      expect(calls).toBe(0);
+    },
+  );
 
   it("reaches the child request, so the bridge stops choosing the turn budget", async () => {
     // The canonical-key consequence is proven in workflow-replay.test.ts, where a
@@ -381,7 +387,7 @@ describe("maxTurns as a budget axis", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turns-sdk" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number }> = [];
+    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
     const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {

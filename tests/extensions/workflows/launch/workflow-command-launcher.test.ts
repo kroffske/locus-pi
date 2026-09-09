@@ -20,6 +20,51 @@ function completedResult(runId: string): RunWorkflowScriptResult {
 }
 
 describe("workflow command launcher", () => {
+  it.each(["command", "tool"] as const)("shutdown cancels and drains a %s run before host exit", async (kind) => {
+    const harness = createHarness();
+    let signal!: AbortSignal;
+    let persist!: () => void;
+    const persistence = new Promise<void>((resolve) => {
+      persist = resolve;
+    });
+    const observer = {
+      onRunStart: vi.fn(),
+      onEvent: vi.fn(),
+      onResult: vi.fn(),
+      onError: vi.fn(),
+      onFinally: vi.fn(),
+      onRejected: vi.fn(),
+    };
+    const execute = async (abort: AbortSignal) => {
+      signal = abort;
+      await new Promise<void>((resolve) => abort.addEventListener("abort", () => resolve(), { once: true }));
+      await persistence;
+      return completedResult("shutdown-run");
+    };
+    const launcher = createWorkflowCommandLauncher({
+      pi: harness.pi,
+      runScript: (options) => execute(options.signal!),
+      createObserver: () => observer,
+      onTerminal: vi.fn(),
+    });
+    launcher.startSession(harness.ctx);
+    if (kind === "command") launcher.launch({ ctx: harness.ctx, scriptRef: "hold" });
+    else launcher.attach(harness.ctx, new AbortController().signal, (background) => execute(background.signal));
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    let exited = false;
+    const shutdown = launcher.shutdown().then(() => {
+      exited = true;
+    });
+    expect(signal.aborted).toBe(true);
+    await Promise.resolve();
+    expect(exited).toBe(false);
+    expect(launcher.launch({ ctx: harness.ctx, scriptRef: "late" })).toEqual({ status: "stale" });
+    persist();
+    await shutdown;
+    expect(exited).toBe(true);
+    expect(observer.onResult).not.toHaveBeenCalled();
+  });
+
   it("routes ordinary and continuation requests through one runner and observer lifecycle", async () => {
     const harness = createHarness();
     const observed: string[] = [];

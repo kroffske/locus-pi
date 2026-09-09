@@ -20,8 +20,9 @@ a runtime mode or model choice.
 | `live-smoke`       | runnable root                 | Provides the smallest real child-session diagnostic for an installed Pi host.                                                                  |
 | `task`             | group-only: `draft`, `plan`   | Separates an editable orchestration brief from direct construction of one reviewed `workflow.mjs`; no generic implementation workflow remains. |
 | `post-code-review` | runnable root plus 7 children | Owns the modular review graph: `scope`, `boundaries`, `simplicity`, `contracts`, `style`, `necessity`, and `synthesis`.                        |
+| `stage-loop`       | runnable root                 | Shows the bounded fix loop: implement, review and checks in parallel, a `choice` gate, then a commit; refusal is returned, never thrown.       |
 
-The registry therefore exposes eleven runnable names across three namespaces.
+The registry therefore exposes twelve runnable names across four namespaces.
 The retired generic implementation, template-rendering, substep, and
 workflow-creator entries duplicated the direct draft-to-source route. They are
 intentionally absent rather than retained as catalog noise.

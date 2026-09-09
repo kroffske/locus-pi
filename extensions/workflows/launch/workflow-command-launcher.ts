@@ -93,7 +93,7 @@ export interface WorkflowCommandLauncher {
   ): WorkflowBackgroundLaunchResult<T>;
   unsettled(lease: WorkflowSessionLease): WorkflowBackgroundRunSnapshot<unknown>[];
   stop(lease: WorkflowSessionLease, selector?: string): WorkflowBackgroundStopResult;
-  shutdown(): void;
+  shutdown(): Promise<void>;
 }
 
 export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOptions): WorkflowCommandLauncher {
@@ -221,9 +221,14 @@ export function createWorkflowCommandLauncher(options: WorkflowCommandLauncherOp
     },
     unsettled: (lease) => backgroundRuns.unsettled(lease),
     stop: (lease, selector) => backgroundRuns.stop(lease, selector),
-    shutdown() {
+    async shutdown() {
       sessionRevoked = true;
+      const unsettled = sessionLease === undefined ? [] : backgroundRuns.unsettled(sessionLease);
       if (sessionLease !== undefined) backgroundRuns.shutdown(sessionLease);
+      // Pi awaits session_shutdown before exiting. Revocation cancels children
+      // and suppresses stale UI callbacks; keep the host alive until the runner
+      // has persisted its terminal result, including tool-owned attached runs.
+      await Promise.all(unsettled.map((run) => run.terminal));
     },
   };
 }

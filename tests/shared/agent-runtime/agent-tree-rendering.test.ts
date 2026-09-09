@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { AgentLiveTranscript } from "../../../extensions/_shared/agent-runtime/agent-live-transcript.js";
 import { AgentLivePanel, orderAgentLiveRows } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { renderFleetMenuRows } from "../../../extensions/_shared/agent-runtime/fleet-menu.js";
 import type { AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
@@ -56,6 +58,32 @@ describe("agent live tree rendering", () => {
     expect(line("Hopper").startsWith("│  │  └─ ⠿")).toBe(true);
     expect(line("Turing").startsWith("│  └─ ✓")).toBe(true);
     expect(line("Noether").startsWith("└─ ○")).toBe(true);
+  });
+
+  it("follows live text at narrow widths without cutting tree rails or the final report opening", () => {
+    const transcript = new AgentLiveTranscript();
+    const message = {
+      role: "assistant",
+      content: [{ type: "text", text: `Report opening ${"界 ".repeat(400)}Read done` }],
+    };
+    const group = liveRow("stream-group", "group", { groupKind: "parallel" });
+    const frame = (complete: boolean, width: number) => {
+      const snapshot = transcript.ingest({ type: complete ? "message_end" : "message_update", message });
+      const row = liveRow("stream-child", "child", {
+        parentRowId: group.id,
+        transcript: snapshot,
+        latestMessage: snapshot.latestMessage,
+      });
+      return new AgentLivePanel().renderRows([group, row], width);
+    };
+    const streaming = frame(false, 32);
+    expect(streaming.at(-1)).toMatch(/^   └ ….*Read done$/u);
+    expect(streaming.every((line) => visibleWidth(line) <= 32)).toBe(true);
+    const completed = frame(true, 32);
+    expect(completed.at(-1)).toContain("Report opening");
+    for (const width of [0, 1, 5]) {
+      expect(frame(false, width).every((line) => visibleWidth(line) <= width)).toBe(true);
+    }
   });
 
   it("keeps projected tree geometry when a surface renders one row at a time", () => {

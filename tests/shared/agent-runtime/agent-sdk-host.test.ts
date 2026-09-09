@@ -180,6 +180,97 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     await expect(materializeSdkSessionOptions({}, { cwd: "/repo" })).rejects.toThrow("SessionManager.create");
   });
 
+  it("preserves an explicit request timeout and abort through the real SDK stream boundary", async () => {
+    const sdk = await import("@earendil-works/pi-coding-agent");
+    const { getModel } = await import("@earendil-works/pi-ai/compat");
+    const { createAssistantMessageEventStream } = await import("@earendil-works/pi-ai");
+    const cwd = tmpReportsDir();
+    const settings = sdk.SettingsManager.inMemory({ retry: { enabled: false } });
+    const model = { ...getModel("openai", "gpt-4o-mini"), baseUrl: "cli://fixture" };
+    const materialized = await materializeSdkSessionOptions(
+      { ...sdk, getAgentDir: () => cwd, SettingsManager: { create: () => settings } },
+      {
+        cwd,
+        model,
+        cliRequestTimeoutMs: 86_400_000,
+        resourceLoaderOptions: {
+          noExtensions: true,
+          noSkills: true,
+          noPromptTemplates: true,
+          noThemes: true,
+          noContextFiles: true,
+          systemPrompt: "Local SDK contract test",
+          appendSystemPrompt: [],
+        },
+      },
+    );
+    const runtime = await sdk.ModelRuntime.create({
+      authPath: path.join(cwd, "auth.json"),
+      modelsPath: null,
+      modelsStorePath: path.join(cwd, "models-store.json"),
+      refreshOnCreate: false,
+    });
+    const stream = vi.spyOn(runtime, "streamSimple").mockImplementation(() => createAssistantMessageEventStream());
+    const { session } = await sdk.createAgentSession({
+      ...materialized,
+      cwd,
+      model,
+      modelRuntime: runtime,
+      resourceLoader: materialized.resourceLoader as InstanceType<typeof sdk.DefaultResourceLoader>,
+      settingsManager: settings,
+      noTools: "all",
+    });
+    const controller = new AbortController();
+    try {
+      await session.agent.streamFunction(model, { messages: [] }, { signal: controller.signal });
+      expect(stream.mock.calls[0]?.[2]).toMatchObject({ timeoutMs: 86_400_000, signal: controller.signal });
+      await session.agent.streamFunction(model, { messages: [] }, { timeoutMs: 1234, signal: controller.signal });
+      expect(stream.mock.calls[1]?.[2]).toMatchObject({ timeoutMs: 1234, signal: controller.signal });
+      controller.abort();
+      expect(stream.mock.calls[1]?.[2]?.signal?.aborted).toBe(true);
+      expect(settings.getRetrySettings().enabled).toBe(false);
+    } finally {
+      session.dispose();
+      stream.mockRestore();
+    }
+  });
+
+  it.each([
+    ["cli://local", {}, 86_400_000],
+    ["cli://local", { httpIdleTimeoutMs: 45_000 }, 45_000],
+    ["cli://local", { httpIdleTimeoutMs: 0 }, 86_400_000],
+    ["cli://local", { retry: { provider: { timeoutMs: 20_000, maxRetries: 2 } } }, 20_000],
+    ["cli://local", { retry: { provider: { timeoutMs: 100_000_000 } } }, 86_400_000],
+    ["https://api.example", {}, undefined],
+  ])("scopes the declared CLI timeout without rewriting settings (%s, %j)", async (baseUrl, config, expected) => {
+    const { SettingsManager } = await import("@earendil-works/pi-coding-agent");
+    const settings = SettingsManager.inMemory(config);
+    const before = settings.getGlobalSettings();
+    const create = vi.fn(() => settings);
+    const materialized = await materializeSdkSessionOptions(
+      {
+        SessionManager: { create: () => ({}) },
+        SettingsManager: { create },
+        DefaultResourceLoader: class {
+          async reload() {}
+        },
+      },
+      { cwd: "/repo", model: { baseUrl }, cliRequestTimeoutMs: 86_400_000 },
+    );
+    expect(materialized).not.toHaveProperty("cliRequestTimeoutMs");
+    expect(settings.getGlobalSettings()).toEqual(before);
+    if (expected === undefined) {
+      expect(create).not.toHaveBeenCalled();
+      expect(materialized).not.toHaveProperty("settingsManager");
+    } else {
+      expect(settings.getProviderRetrySettings().timeoutMs).toBe(expected);
+      expect(materialized.settingsManager).toBe(settings);
+      expect(settings.getProviderRetrySettings().maxRetries).toBe(
+        "retry" in config && "maxRetries" in config.retry.provider ? 2 : undefined,
+      );
+    }
+  });
+
   it("keeps the package-owned generic child identity in the tool-free system prompt without a catalog persona", () => {
     const prompt = buildAgentSystemPrompt(request(), { suppressContextExtras: true });
 
@@ -1822,6 +1913,50 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.reason).toContain("budget and was aborted");
     expect(abortSpy).toHaveBeenCalledTimes(1); // child was force-stopped
     expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { maxTurns: 20, cycles: 20, status: "completed" },
+    { maxTurns: 20, cycles: 21, status: "failed" },
+    { maxTurns: 1000, cycles: 25, status: "completed" },
+    { maxTurns: 1000, cycles: 1000, status: "completed" },
+    { maxTurns: 1000, cycles: 1001, status: "failed" },
+  ])("enforces $maxTurns assistant cycles on plain text ($cycles cycles)", async ({ maxTurns, cycles, status }) => {
+    const { session, abortSpy } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "Review complete.",
+      events: Array.from({ length: cycles }, () => [
+        { type: "turn_start" },
+        { type: "message_start", message: { role: "assistant" } },
+      ]).flat(),
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      turnTimeoutMs: 1000,
+    });
+    const result = await executor.run({ ...request(), maxTurns }, new AbortController().signal);
+    expect(result.status).toBe(status);
+    if (status === "failed") {
+      expect(result.failureCause).toBe("assistant-turn-budget");
+      expect(abortSpy).toHaveBeenCalledOnce();
+      expect(result.text).toBeUndefined();
+    } else {
+      expect(result.text).toBe("Review complete.");
+      expect(abortSpy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("refuses an overflowing computed timer before creating a session", async () => {
+    const createSession = vi.fn<CreateAgentSessionFactory>();
+    const executor = createAgentSdkSessionExecutor({ createSession, turnTimeoutMs: 2_147_483_647 });
+    const result = await executor.run({ ...request(), maxTurns: 2 }, new AbortController().signal);
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("run-policy-blocked");
+    expect(result.reason).toContain("cannot be represented by Node timers");
+    expect(createSession).not.toHaveBeenCalled();
+    expect(result.executedModel).toBeUndefined();
   });
 
   it("fails closed when the child starts a tool call beyond its configured budget", async () => {

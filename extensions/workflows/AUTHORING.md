@@ -191,11 +191,92 @@ run from a pipeline is in it unless the caller passes `--operator`. Author for
 that reality: a workflow meant for automation asks nothing and turns unknowns
 into explicit assumptions inside its result.
 
+## Stage refusal and fix loops without throw
+
+A stage that cannot finish returns that fact. `throw` aborts the whole run with a
+JavaScript error, discards the graph's own reporting, and leaves the operator a
+stack trace instead of a named outcome. Reserve it for a caller-contract
+violation that makes the workflow meaningless before any agent runs — the
+`items()` guard in the durable-item example below is exactly that case and is not
+a model for a stage gate. A gate that answers "not ready" is ordinary control
+flow, not an exception.
+
+Ask the runtime for the identity the script branches on, and return a named
+result when the stage refuses:
+
+- the gate stage declares `choice: ["ready", "needs_fix", "blocked"]` with
+  `choiceFallback: "blocked"`, so an unusable answer degrades to the safe route;
+- a refusal leaves the workflow as a value —
+  `return { ok: false, status: "blocked", summary, evidence }` — where `status`
+  is one of `failed`, `blocked` or `cancelled`;
+- an empty `handoffs` list is not a refusal signal. It carries no reason, no
+  summary and no evidence; a list is a work-unit transport, not a verdict.
+
+The bounded fix loop around that gate is a canonical literal `for`: a numeric
+literal start, an ascending literal `<`/`<=` bound, a positive literal step, and
+one writer of the counter (`isCanonicalBoundedCarryLoop` in
+`tool/workflow-source-shape.ts`). `while` does not carry values between rounds.
+A list produced by `parallel()` inside that loop is read by index
+(`opinions[0]`): the checker registers prompt-`join()` receivers only for list
+bindings declared outside the bounded loop.
+
+```js
+export const meta = {
+  name: "stage-fix-loop",
+  description: "Implement one stage, gate it, and fix it a bounded number of times.",
+  profile: "standard",
+};
+
+export default async function run({ agent, phase, publishArtifact, publishPrimaryArtifact }, input) {
+  let feedback = "";
+  for (let round = 1; round <= 3; round += 1) {
+    phase("implement");
+    const work = await agent(
+      `Implement the stage described by the task file and report what you changed.\nTask: ${input}\nPrevious gate feedback:\n${feedback}`,
+      { label: "implement", title: "Implement the stage" },
+    );
+    phase("gate");
+    const review = await agent(
+      `Read the change yourself and judge it against the task. Do not edit it.\nTask: ${input}\nStage report:\n${work}`,
+      { label: "review", title: "Review the stage" },
+    );
+    const verdict = await agent(`Choose the identity this review supports.\nReview:\n${review}`, {
+      label: "gate",
+      title: "Stage gate",
+      choice: ["ready", "needs_fix", "blocked"],
+      choiceFallback: "blocked",
+      returnVia: "tool",
+    });
+    const evidence = publishArtifact(
+      `round-${round}.md`,
+      `Verdict: ${verdict}\nStage report:\n${work}\nReview:\n${review}`,
+    );
+    if (verdict === "ready") return publishPrimaryArtifact("stage.md", work);
+    if (verdict === "blocked") return { ok: false, status: "blocked", summary: "gate_blocked", evidence };
+    if (round === 3) return { ok: false, status: "blocked", summary: "fix_round_cap", evidence };
+    feedback = review;
+  }
+}
+```
+
+The runnable form of the same loop ships as
+[the refinement example](references/examples/refinement.workflow.mjs) and as the
+Package entry [`stage-loop`](examples/stage-loop/stage-loop.workflow.mjs).
+
 ## Target source shape
 
 Keep stable stage option groups together near the top. Keep prompts, calls,
 branches, and handoffs visible at their execution edges. Stage prompts own their
 roles; package agent names are never required.
+
+Give an agent its task, relevant context and completion condition, each stated
+once in a coherent brief rather than a mandatory set of headings. Let it choose
+the work steps; prescribe a procedure only for a real repository constraint or
+known failure. Reports and narrative handoffs use ordinary `agent()` text.
+Reserve `choice` for routing and `handoffs` for independently scheduled work
+units. Do not wrap a report in a singleton list or guess a response-length cap.
+An author-selected bound must come from an explicit user requirement, actual
+consumer contract or measured failure. Runtime safety budgets remain in force.
 
 ```js
 export const meta = {
@@ -249,6 +330,25 @@ rule. Package task drafting and planning use the same workspace contract;
 saved children and later manual stages share the selected named path. Use
 `projectRoot()` for source context. Do not add permission/tool fields,
 another default writable root, a path parser, or an information-gathering script.
+
+The workflow workspace is the durable location for handoffs, final results,
+review evidence, and explicit resume inputs. Keep disposable environments,
+dependency caches, test basetemp, transient renderer output, and staging in the
+ordinary OS or tool temporary and cache locations. When renderer output is the
+final deliverable, write or promote it into the workflow workspace. Promote any
+scratch output needed for review or resume before its temporary or cache location
+expires. This guidance reduces accidental mixing; an authored prompt that
+explicitly requests another placement remains authoritative.
+
+When a workflow carries one task, the task's own artifact folder is a legitimate
+and usually preferable durable root: `.tasks/<task>/artifacts/<stage>/` keeps
+stage reports beside the task text a human already reads, and later stages read
+earlier ones from there instead of receiving them again as prompt text.
+`--output-dir .tasks/<task>/artifacts` is accepted by the operator surface (see
+[REFERENCE](REFERENCE.md)); the runtime places its own lock and run marker inside
+whatever root is selected. Nothing changes for disposable output: environments,
+dependency caches, test basetemp and staging stay in ordinary OS or tool
+temporary and cache locations, never beside evidence.
 
 That path-oriented shape is compatibility guidance for existing hand-authored
 workflows. The packaged authoring skill does not generate it. New source puts
@@ -329,14 +429,14 @@ file under that root and returns its path, byte count, and SHA-256 digest withou
 copying or interpreting the content. Failed runs leave workspace files intact for
 inspection and retry.
 
-Runtime связывает workspace с группой в `.locus-pi/runs/<storageRootRunId>/README.md`.
-Saved children сохраняют отдельные IDs в `children/<runId>/`, root resume — в
-`attempts/<runId>/`. Не вычисляйте путь evidence из одного runId: используйте
-возвращённый `runDir` или команды status/result. Автоматические файлы группы и
-workspace `.workflow-runs.md` принадлежат runtime; не поручайте agents их переписывать.
-Resume сохраняет workspace и физическую группу, но создаёт новый execution root;
-`lineage.rootRunId` не означает первый запуск группы. Checkpoint/replay правила от
-группировки не меняются, старые flat runs и workspace не мигрируют.
+Runtime links the workspace to the group at `.locus-pi/runs/<storageRootRunId>/README.md`.
+Saved children keep separate IDs in `children/<runId>/`, and root resume in
+`attempts/<runId>/`. Do not compute the evidence path from a single runId: use the
+returned `runDir` or the status/result commands. The group's automatic files and
+workspace `.workflow-runs.md` belong to the runtime; do not ask agents to rewrite them.
+Resume preserves the workspace and physical group but creates a new execution root;
+`lineage.rootRunId` does not mean the group's first launch. Grouping does not change
+checkpoint or replay rules, and old flat runs and workspaces are not migrated.
 
 Completed-item checkpoints are keyed by parent source hash, child source hash,
 workflow workspace, and exact item key. A matching checkpoint skips that
@@ -565,13 +665,17 @@ human-readable description and never replaces stable identity.
 
 ### Output acceptance is not semantic continuation
 
-Standard authoring may opt into `agent({ choice, returnVia: "tool" })` or the
-closed string `output` contract described in [output acceptance](references/output-acceptance.md).
+Standard authoring may opt into `agent({ choice, returnVia: "tool" })`, the
+closed string `output` contract, or `agent({ handoffs, returnVia: "tool" })`
+described in [output acceptance](references/output-acceptance.md).
 The workflow-only `workflow_return` tool validates a proposed value within the
-same child session; it does not certify the truth of a decision. Ordinary text,
+same child session; it does not certify the truth of a decision, nor the facts
+inside a shaped record. Ordinary text,
 legacy text-choice repair and adaptive fresh-worker rounds retain separate
 contracts. The standard source grammar still does not parse model prose or
-permit raw `schema`/`validate`. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
+permit raw `schema`/`validate`; `schema` with `returnVia: "tool"` is available
+to reviewed compatibility scripts only, because the strict checker refuses raw
+`schema` regardless of transport. Review the [pattern index](../../skills/locus-pi-workflow-create/references/INDEX.md)
 before selecting fixed, refinement, decomposition or human-gated execution.
 
 The owner contract separately forbids mandatory acknowledgement protocols whose
@@ -639,7 +743,7 @@ Failure statuses remain domain detail; the durable run disposition is
 Invocation cap, timeout, inherited tool access, answer
 bounds, transport retry policy, artifact integrity, continuation, operator
 approval, and replay are runtime responsibilities. The package-wide
-budget allows 1,000 tool calls, a 24-hour timeout, 20 turns, and 500,000 answer
+budget allows 1,000 tool calls, a 24-hour timeout, 1,000 turns, and 500,000 answer
 characters per child attempt. One run admits at most 10,000 physical attempts,
 starts no new child after its 24-hour gate, and executes at most four attempts
 concurrently. Implementer, reviewer, transport-retry, and value-repair attempts
@@ -648,6 +752,14 @@ Same-session tool-output corrections consume the existing child budgets instead
 of creating a new physical invocation. Structured launchers may explicitly set
 the shared budget; see [execution controls](references/execution-controls.md).
 The SDK timeout is a later transport backstop, not authored workflow policy.
+
+Turns count SDK model cycles, including ordinary tool use and output
+clarification within the same child. They are not workflow retries or return
+submissions. The default is an emergency allowance, not a prompt instruction to
+consume it. Explicit `maxTurns` values must be positive safe integers whose
+combined SDK timer is representable. When resuming work recorded under an older
+default, pin completed calls to their recorded effective value before changing
+the unfinished suffix, then verify prefix reuse.
 
 `meta.profile` makes authoring intent explicit. New generated source uses
 `"standard"`; existing compatibility-heavy entries use `"legacy"`, end-to-end
@@ -663,3 +775,49 @@ Workflow JavaScript is reviewed trusted local code executed in Pi’s main Node.
 process with filesystem, subprocess, and network authority. A worktree isolates
 changes for review; it is not a security sandbox. Pi exec approval records
 consent; it does not remove capabilities. Run only files you have read.
+
+## Decisions
+
+Dated records of authoring rules that changed because a real run failed. Each
+entry names what the old text prescribed, what it cost, and the rule that
+replaced it. This file is the single owner of "how to write a workflow"; skills
+and family READMEs link here instead of restating a rule.
+
+### D-2026-09-09 — feature ceremony
+
+**What was prescribed.** The private `feature-workflow` skill and the feature
+family README required, for every stage: a readable review handoff with an
+evidence entrypoint, locators and content hashes so a read-only reviewer could
+inspect a change without shell access (`feature-workflow/SKILL.md:116-126`,
+feature `README.md:85,87,99`,
+`locus-pi-workflow-create/references/repair-and-continue.md:79-110` — six copies
+of one requirement); "native gate checks hashes against the current tree"
+(`feature-workflow/SKILL.md:125`); an entry/exit baseline tar plus content
+manifest reviewed instead of the post-checkpoint Git diff
+(`repair-and-continue.md:66-68`); "no retry loop"
+(`feature-workflow/SKILL.md:139`); SHA-256 freezing of the specification and
+contracts re-verified at build time (`feature-workflow/SKILL.md:193-216,250-273`);
+previous stage reports pasted into the next prompt as complete text; and a
+`throw` on an empty list, copied from the `items()` guard in this file
+(`AUTHORING.md:300`, now the durable-item example under "Target source shape").
+
+**What it cost.** One run of that shape (`t-143-async`, engine task T-143)
+produced a 59-node, 250 KB workflow script in which 92 % of the prompt text was
+ceremony and 55 % of the file was 142 duplicated inline "authorized repair"
+paragraphs. It stopped 12 times in 15 hours — roughly 56 % of elapsed time spent
+on repair, and not one stop caused by the product under work. Its workspace
+reached 21 GB and 471 thousand files, of which 20.6 GB were dependency and tool
+caches written beside the evidence.
+
+**The rule now.** Context is a path, not pasted text: the stage prompt names
+`task.md` or the specification by path and `.tasks/<task>/artifacts/<stage>/`,
+and the agent reads the previous stages' artifacts itself. A stage is
+implement → gate in parallel with review → fix at most three rounds → commit.
+Refusal travels as a `choice` identity and a returned `{ ok: false, status }`,
+never as `throw` (see "Stage refusal and fix loops without throw"). The reviewer
+reads `git diff <stage-base>..HEAD` with its own tools. Caches, virtualenvs and
+test basetemp go to OS or tool temporary locations. No content manifests, no
+tree hashes, no baseline tar, no prefix proofs: the stage commit already carries
+that identity.
+
+**Where the rule lives.** This file. Skills and family READMEs point here.

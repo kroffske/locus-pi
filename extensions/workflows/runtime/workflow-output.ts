@@ -37,11 +37,28 @@ const OUTPUT_COMPONENT_SOURCE = "[A-Za-z0-9][A-Za-z0-9._-]{0,199}";
 const OUTPUT_COMPONENT = new RegExp(`^${OUTPUT_COMPONENT_SOURCE}$`, "u");
 const WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_PLANS_DIRNAME].join("/");
 const WORKFLOW_WORKSPACES_RELATIVE_ROOT = [WORKFLOW_ROOT_DIRNAME, WORKFLOW_WORKSPACES_DIRNAME].join("/");
-/** TypeBox-compatible grammar for the same confined path accepted by the runtime. */
+/** Единственный задачный корень с ведущей точкой, открытый для `--output-dir`. */
+const WORKFLOW_TASKS_RELATIVE_ROOT = ".tasks";
+/**
+ * TypeBox-compatible grammar for the same confined path accepted by the runtime.
+ *
+ * Разрешено: обычные видимые компоненты, workspace-корни `.locus-pi/{workspaces,plans}/<leaf>`
+ * и произвольная глубина под единственным задачным корнем `.tasks/`.
+ * Почему: ведущий якорь [A-Za-z0-9] появился как anti-traversal-защита от `.`/`..`
+ * (см. isSimpleWorkflowRunId, 347cdd6), а не как политика скрытых каталогов;
+ * `.tasks/<task>/artifacts` — легитимная пользовательская поверхность артефактов.
+ * Остаётся запрещено: любой другой каталог с ведущей точкой (`.git`, `.ssh`, `.env`,
+ * произвольные пути внутри `.locus-pi/`), `.`/`..` в любом компоненте, обратные слэши,
+ * NUL, пустые компоненты. Confinement (isWorkflowPathWithinRoot), physical-realpath-обход
+ * и запрет symlink (ensureDirectoryWithoutSymlinks) не ослабляются — грамматика их не заменяет.
+ *
+ * Паттерн и `assertWorkflowOutputDirPath` описывают одно множество путей; менять их врозь нельзя.
+ */
 export const WORKFLOW_OUTPUT_DIR_PATTERN =
   `^(?:(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*|` +
   `\\${WORKFLOW_ROOT_DIRNAME}/(?:${WORKFLOW_WORKSPACES_DIRNAME}|${WORKFLOW_PLANS_DIRNAME})/` +
-  `(?:${OUTPUT_COMPONENT_SOURCE}))$`;
+  `(?:${OUTPUT_COMPONENT_SOURCE})|` +
+  `\\${WORKFLOW_TASKS_RELATIVE_ROOT}/(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*)$`;
 /** Shared aggregate bound for tool, command, and direct runtime callers. */
 export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
 export const WORKFLOW_RUN_NAME_MAX_CHARS = 200;
@@ -54,9 +71,14 @@ const LEASE_OWNER_READ_ATTEMPTS = 20;
 const LEASE_OWNER_READ_RETRY_MS = 5;
 const LEASE_OWNER_READ_WAIT = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 const WORKFLOW_WORKSPACE_RUNS_MARKER = "<!-- locus-pi:workflow-workspace-runs:v1 -->";
-const WORKFLOW_WORKSPACE_RUNS_HEADER =
+// Retained only to read and upgrade navigation written by earlier versions.
+const LEGACY_WORKFLOW_WORKSPACE_RUNS_HEADER =
   `${WORKFLOW_WORKSPACE_RUNS_MARKER}\n# Связанные запуски workflow\n\n` +
   `Статусы и история находятся в папках групп; этот файл содержит только ссылки.\n\n`;
+
+const WORKFLOW_WORKSPACE_RUNS_HEADER =
+  `${WORKFLOW_WORKSPACE_RUNS_MARKER}\n# Linked workflow runs\n\n` +
+  `Status and history are stored in group directories; this file contains links only.\n\n`;
 
 class InvalidJsonContentError extends Error {}
 class UnstableJsonReadError extends Error {}
@@ -507,9 +529,13 @@ export function writeWorkflowWorkspaceRunLink(
   assertWorkflowRootLease(lease);
   const file = path.join(lease.workspaceDir, ".workflow-runs.md");
   const href = path.relative(lease.workspaceDir, groupDir).split(path.sep).map(encodeURIComponent).join("/");
-  const line = `- [Группа ${assertWorkflowRunId(storageRootRunId)}](${href}/README.md).\n`;
+  const line = `- [Group ${assertWorkflowRunId(storageRootRunId)}](${href}/README.md).\n`;
   const exists = assertWorkflowStatePath(lease.projectRoot, lease.workspaceDir, file, "file", false);
-  const previous = exists ? readFileSync(file, "utf8") : WORKFLOW_WORKSPACE_RUNS_HEADER;
+  const original = exists ? readFileSync(file, "utf8") : WORKFLOW_WORKSPACE_RUNS_HEADER;
+  const previous = original.startsWith(LEGACY_WORKFLOW_WORKSPACE_RUNS_HEADER)
+    ? WORKFLOW_WORKSPACE_RUNS_HEADER +
+      original.slice(LEGACY_WORKFLOW_WORKSPACE_RUNS_HEADER.length).replace(/^- \[Группа /gmu, "- [Group ")
+    : original;
   if (exists && !previous.startsWith(WORKFLOW_WORKSPACE_RUNS_MARKER + "\n")) {
     throw new Error(`Reserved workflow workspace file already exists: ${file}`);
   }
@@ -518,9 +544,10 @@ export function writeWorkflowWorkspaceRunLink(
       code: "WORKFLOW_NAVIGATION_RECOVERY_REQUIRED",
     });
   }
-  if (previous.split("\n").includes(line.trimEnd())) return;
+  const updated = previous.split("\n").includes(line.trimEnd()) ? previous : previous + line;
+  if (updated === original) return;
   assertWorkflowRootLease(lease);
-  replaceWorkflowWorkspaceTextFile(lease, file, previous + line);
+  replaceWorkflowWorkspaceTextFile(lease, file, updated);
 }
 
 function validWorkflowWorkspaceRunLinks(text: string, projectRoot: string, workspaceDir: string): boolean {
@@ -528,7 +555,7 @@ function validWorkflowWorkspaceRunLinks(text: string, projectRoot: string, works
   const links = text.slice(WORKFLOW_WORKSPACE_RUNS_HEADER.length).split("\n").filter(Boolean);
   const groups = new Set<string>();
   for (const link of links) {
-    const match = /^- \[Группа ([A-Za-z0-9][A-Za-z0-9._-]{0,127})\]\(([^\r\n()]+)\/README\.md\)\.$/u.exec(link);
+    const match = /^- \[Group ([A-Za-z0-9][A-Za-z0-9._-]{0,127})\]\(([^\r\n()]+)\/README\.md\)\.$/u.exec(link);
     if (match === null || groups.has(match[1]!)) return false;
     const groupId = match[1]!;
     const expectedHref = path
@@ -825,6 +852,14 @@ export function assertWorkflowOutputDirPath(value: unknown): string {
     if (!OUTPUT_COMPONENT.test(workspaceName)) {
       throw new Error(`workflow outputDir contains an unsafe workspace path component: ${JSON.stringify(value)}`);
     }
+    return value;
+  }
+  if (value === WORKFLOW_TASKS_RELATIVE_ROOT || value.startsWith(`${WORKFLOW_TASKS_RELATIVE_ROOT}/`)) {
+    const rest = value.slice(WORKFLOW_TASKS_RELATIVE_ROOT.length + 1);
+    if (rest === "") {
+      throw new Error(`workflow outputDir must name a directory under ${WORKFLOW_TASKS_RELATIVE_ROOT}`);
+    }
+    assertRelativeOutputPath(rest);
     return value;
   }
   return assertRelativeOutputPath(value);

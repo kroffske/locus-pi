@@ -1,13 +1,14 @@
 # locus-pi workflow skills
 
-The npm package is the canonical source for two action-named workflow skills.
+The npm package is the canonical source for three workflow skills.
 Pi loads them directly from `package.json#pi.skills`. External agents use managed
 symlinks; they do not receive copied skill text that can drift from the package.
 
-| Skill                      | Owns                                                           | Native Pi/API route                                                     | External agent route                                            |
-| -------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `locus-pi-workflow-create` | Design, review, Build, source validation; never run            | Follow the packaged skill directly                                      | Follow the managed packaged skill directly                      |
-| `locus-pi-workflow-run`    | One existing reviewed workflow run, receipts, evidence, resume | Call the structured `workflow` tool; the skill is only routing guidance | Invoke literal `/workflows run ...` through `pi --mode json -p` |
+| Skill                      | Owns                                                           | Native Pi/API route                                                     | External agent route                                                 |
+| -------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `locus-pi-workflow-create` | Design, review, Build, source validation; never run            | Follow the packaged skill directly                                      | Follow the managed packaged skill directly                           |
+| `locus-pi-workflow-run`    | One existing reviewed workflow run, receipts, evidence, resume | Call the structured `workflow` tool; the skill is only routing guidance | Delegate session ownership to `external-locus-pi`                    |
+| `external-locus-pi`        | External interactive Pi session and manual attachment          | Not needed when already inside Pi                                       | Start Pi in a retained terminal; keep the UI available after the run |
 
 ## Install for Codex and Claude Code
 
@@ -37,7 +38,7 @@ For an external Pi invocation, select the main Pi model and reasoning level on
 the command line:
 
 ```bash
-pi --mode json -p --no-session --approve \
+pi --approve \
   --model '<provider/model>' --thinking high \
   '/workflows run <name> -- <semantic input>'
 ```
@@ -46,3 +47,8 @@ Child model routing is separate. Configure roles through `/model-roles` or
 `~/.pi/agent/model-roles/config.json`. An unassigned role inherits the main Pi
 model.
 `--approve` is broad project trust, not workflow-only approval.
+
+For an inspectable session launched from Codex or Claude Code, use
+[`external-locus-pi`](external-locus-pi/SKILL.md). It returns a command to attach
+to the same interactive Pi terminal. JSON print mode is an explicit alternative
+for non-interactive output, not the default external session.
