@@ -358,7 +358,9 @@ describe("npm public package boundary", () => {
     // 258 since the bounded static metadata scanner became catalog/workflow-meta.ts (T-213).
     // 260 since the fs-free runtime/workflow-handoff-contract.ts and runtime/workflow-outcome.ts
     // took the declaration and result rules out of their durable counterparts (T-213).
-    expect(dryRun.files).toHaveLength(260);
+    // 261 since runtime/workflow-live.ts took the live registry and the journal-to-live-row
+    // projection out of the durable journal (T-213).
+    expect(dryRun.files).toHaveLength(261);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

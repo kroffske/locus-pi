@@ -16,7 +16,7 @@ import {
   workflowAgentLiveChildRowId,
   workflowAgentLiveRowId,
   workflowGroupLiveRowId,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import type { CustomUiComponent, CustomUiFactory } from "../../../../extensions/_shared/host/pi-api.js";
 import {

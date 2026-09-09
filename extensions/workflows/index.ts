@@ -15,7 +15,7 @@ import {
   applyWorkflowJournalLineToAgentLiveStore,
   pruneCompletedWorkflowRunLiveRows,
   resetWorkflowLiveExecutions,
-} from "./runtime/workflow-journal.js";
+} from "./runtime/workflow-live.js";
 import { setOperatorWidget } from "../_shared/operator/widget-render.js";
 import { registerWorkflowCommands } from "./command/command-router.js";
 import {

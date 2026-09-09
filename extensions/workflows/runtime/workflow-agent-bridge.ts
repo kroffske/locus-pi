@@ -41,7 +41,7 @@ import {
 } from "../../_shared/model/model-settings.js";
 import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
 import { workflowSlotKey } from "./workflow-runtime.js";
-import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
+import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-live.js";
 import type {
   WorkflowAgentPreflight,
   WorkflowAgentRunner,

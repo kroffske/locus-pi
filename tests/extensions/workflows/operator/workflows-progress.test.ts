@@ -20,7 +20,7 @@ import { acquireFleetViewedRow, fleetMenuState } from "../../../../extensions/_s
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {

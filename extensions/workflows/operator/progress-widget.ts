@@ -24,7 +24,7 @@ import {
   selectFleetMenuLeafRows,
 } from "../../_shared/agent-runtime/fleet-menu.js";
 import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "../runtime/workflow-failure.js";
-import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../runtime/workflow-journal.js";
+import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../runtime/workflow-live.js";
 import {
   projectWorkflowDisposition,
   type WorkflowDisposition,

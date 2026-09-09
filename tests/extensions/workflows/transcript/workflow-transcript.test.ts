@@ -11,7 +11,7 @@ import { compactWorkflowParentRows } from "../../../../extensions/_shared/agent-
 import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import type { RunWorkflowScriptResult } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../../test-harness.js";

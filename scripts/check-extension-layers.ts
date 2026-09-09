@@ -135,7 +135,14 @@ const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,
     reason:
-      "the journal owns run layout, append/write operations and live-row retention; outside consumers receive only the read operations exposed by the workflow facade.",
+      "the journal owns run layout and append/write operations; outside consumers receive only the read operations exposed by the workflow facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-live.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module owns the process-global live-executions registry and the journal-to-live-row projection; outside consumers get only row-id reads through the workflow facade.",
   },
 ];
 
@@ -189,7 +196,7 @@ interface RegistryEntry {
 /** Symbol string -> the one executable module allowed to name it. */
 const REGISTRIES: readonly RegistryEntry[] = [
   { symbol: "locus-pi.agent-live-store.v5", owner: "extensions/_shared/agent-runtime/agent-sdk-host.ts" },
-  { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-journal.ts" },
+  { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-live.ts" },
   { symbol: "locus-pi.fleet-menu-state.v3", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.fleet-viewed-row.v1", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },

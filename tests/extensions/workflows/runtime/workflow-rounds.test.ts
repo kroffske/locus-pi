@@ -34,11 +34,11 @@ import {
   type WorkflowAgentRequest,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import {
-  applyWorkflowJournalLineToAgentLiveStore,
   listWorkflowRoundsForSlot,
   readWorkflowRoundBody,
   readWorkflowSlotPhase,
 } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { applyWorkflowJournalLineToAgentLiveStore } from "../../../../extensions/workflows/runtime/workflow-live.js";
 import {
   formatAgentLiveRowLine,
   formatRoundBadge,

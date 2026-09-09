@@ -25,10 +25,12 @@ import {
 import {
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
+} from "../../extensions/workflows/runtime/workflow-journal.js";
+import {
   applyWorkflowJournalLineToAgentLiveStore,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
-} from "../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../extensions/workflows/runtime/workflow-live.js";
 import {
   createAgentSdkSessionExecutor,
   agentLiveStore,

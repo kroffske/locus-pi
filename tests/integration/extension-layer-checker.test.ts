@@ -75,6 +75,17 @@ describe("extension layer checker negative rules", () => {
     await expectRule(root, "rule 6 (feature-internal facade)");
   });
 
+  it("rejects a cross-feature import of the workflow live projection", async () => {
+    const root = await extensionFixture();
+    await appendFile(
+      path.join(root, "extensions/loop/index.ts"),
+      '\nimport "../workflows/runtime/workflow-live.js";\n',
+      "utf8",
+    );
+
+    await expectRule(root, "rule 6 (feature-internal facade)");
+  });
+
   it("rejects a declared pure module that value-imports a host-bound builtin", async () => {
     const root = await extensionFixture();
     await appendFile(

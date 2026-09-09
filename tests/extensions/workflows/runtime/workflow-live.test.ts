@@ -12,7 +12,7 @@ import {
   workflowGroupLiveRowId,
   workflowLiveExecutionCount,
   workflowRunIdFromRowId,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../../extensions/workflows/runtime/workflow-live.js";
 import {
   createWorkflowRuntime,
   type WorkflowJournalLine,

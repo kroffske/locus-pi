@@ -1,9 +1,9 @@
 /**
  * One of two separately registered Pi entrypoints used to prove that the process-global
  * `locus-pi.workflow-live-executions.v1` writer registry declared by
- * `extensions/workflows/runtime/workflow-journal.ts` is ONE registry with ONE authority,
+ * `extensions/workflows/runtime/workflow-live.ts` is ONE registry with ONE authority,
  * even though Pi loads each entrypoint with the module cache disabled and therefore gives
- * each one its own instance of the journal module.
+ * each one its own instance of that module.
  *
  * This entrypoint OPENS a journal writer (`agent_start`) and CLOSES the one the peer
  * opened (`agent_end`). The peer does the mirror image, so authority is proven in both
@@ -15,7 +15,7 @@ import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
   workflowLiveExecutionCount,
-} from "../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-live.js";
 import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const WORKFLOW_LIVE_EXECUTIONS_KEY = Symbol.for("locus-pi.workflow-live-executions.v1");

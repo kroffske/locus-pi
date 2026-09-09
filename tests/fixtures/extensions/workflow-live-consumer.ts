@@ -8,7 +8,7 @@ import {
   applyWorkflowJournalLineToAgentLiveStore,
   workflowAgentLiveRowId,
   workflowLiveExecutionCount,
-} from "../../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../../extensions/workflows/runtime/workflow-live.js";
 import type { WorkflowJournalLine } from "../../../extensions/workflows/runtime/workflow-runtime.js";
 
 const WORKFLOW_LIVE_EXECUTIONS_KEY = Symbol.for("locus-pi.workflow-live-executions.v1");

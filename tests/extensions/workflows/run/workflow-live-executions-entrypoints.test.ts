@@ -9,9 +9,10 @@ import { describe, expect, it } from "vitest";
  * `check:layers` rule 4 asserts STATICALLY that exactly one module names
  * `Symbol.for("locus-pi.workflow-live-executions.v1")`. That is a source-level count and
  * cannot show what the process actually gets: Pi loads each registered entrypoint with the
- * module cache disabled, so every entrypoint holds its OWN instance of the journal module,
- * and a relocation that split the registry into two slots — or left one entrypoint
- * resolving a different copy — would keep rule 4 green while breaking the run.
+ * module cache disabled, so every entrypoint holds its OWN instance of workflow-live.ts,
+ * the module that declares the registry, and a relocation that split the registry into two
+ * slots — or left one entrypoint resolving a different copy — would keep rule 4 green while
+ * breaking the run.
  *
  * A same-process test that pokes `globalThis` would prove nothing here, because the failure
  * mode is per-entrypoint module instances, not per-process state. So this test loads two
