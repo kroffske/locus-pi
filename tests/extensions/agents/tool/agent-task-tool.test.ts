@@ -2,10 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  agentLiveStore,
-  type SdkAgentSessionEventLike,
-} from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { type SdkAgentSessionEventLike } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { createHarness, runTool } from "../../../test-harness.js";
 
 const tempRoots: string[] = [];

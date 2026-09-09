@@ -11,7 +11,8 @@ import {
   readWorkflowHandoffClaim,
   type WorkflowOperatorHandoffEnvelope,
 } from "../../../../extensions/workflows/runtime/workflow-handoff.js";
-import { resolveWorkflowTarget, runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowRunRuntimeDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";

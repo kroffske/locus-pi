@@ -14,7 +14,8 @@ style:
 
 1. `post-code-review/scope` resolves the requested function, file, commit,
    commit range, diff, or locally available PR range into an exact evidence
-   boundary.
+   boundary. Historical targets keep base, target, and current-descendant
+   evidence distinct, so later policy cannot be attributed to an older commit.
 2. `post-code-review/boundaries`, `post-code-review/simplicity`,
    `post-code-review/contracts`, and `post-code-review/style` run behind one
    parallel barrier. Each reopens `review-scope.md`, inspects live evidence
@@ -26,10 +27,12 @@ style:
    proven behavioral or code-shape defect, a clear guarantee owner, duplicated
    responsibility, and net simplicity. It splits immediate cleanup from future
    product work, preserves each lane's stable question id, and writes
-   `review-necessity.md`.
+   `review-necessity.md`. Historical targets are judged against their frozen
+   tree rather than descendant policy.
 4. `post-code-review/synthesis` reopens all six reports, independently verifies
-   admitted claims against live source and consumers, removes unsupported or
-   duplicate findings, assigns the final code-shape action levels, and writes
+   admitted findings and decision-critical positive/`NO_ACTION` claims against
+   the frozen target and current live source, removes unsupported or duplicate
+   claims, assigns the final code-shape action levels, and writes
    `post-code-review.md`. A proven defect introduced or materially worsened by
    the reviewed change remains REQUIRED even when its impact is low.
 5. The parent publishes that final Markdown file as the run result.

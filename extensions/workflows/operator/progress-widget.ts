@@ -2,7 +2,11 @@ import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../.
 import { DEFAULT_RENDER_MIN_INTERVAL_MS, framesEqual, RenderScheduler } from "../../_shared/host/render-scheduler.js";
 import { defaultRenderProfile } from "../../_shared/host/render-profile.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { agentLiveStore, type AgentLiveRow, type AgentLiveStatus } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import {
+  agentLiveStore,
+  type AgentLiveRow,
+  type AgentLiveStatus,
+} from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   AgentLivePanel,
   AGENT_LIVE_SPINNER_FRAME_COUNT,
@@ -24,13 +28,13 @@ import {
   selectFleetMenuLeafRows,
 } from "../../_shared/agent-runtime/fleet-menu.js";
 import { formatWorkflowFailureDiagnosticLines, type WorkflowFailureDiagnostic } from "../runtime/workflow-failure.js";
-import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../runtime/workflow-journal.js";
+import { workflowAgentLiveRowId, workflowGroupLiveRowId } from "../runtime/workflow-live.js";
 import {
   projectWorkflowDisposition,
   type WorkflowDisposition,
   type WorkflowProjectedStatus,
-  type WorkflowResultPersistence,
-} from "../runtime/workflow-result.js";
+} from "../runtime/workflow-outcome.js";
+import type { WorkflowResultPersistence } from "../runtime/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../../_shared/operator/widget-render.js";
 import { clearViewerExternalRows, setViewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";

@@ -4,12 +4,12 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, it } from "vitest";
 import {
-  agentLiveStore,
   createAgentSdkSessionExecutor,
   type CreateAgentSessionFactory,
   type SdkAgentSessionEventLike,
   type SdkAgentSessionLike,
 } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import {
   writeAgentRunResultArtifact,
   type AgentRunRequest,

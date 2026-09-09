@@ -10,11 +10,8 @@
  * The ctx-bound write of these blocks lives in `operator-surface.ts`.
  */
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
-import {
-  formatCurrentProjectTaskResolution,
-  type CurrentProjectTaskResolution,
-} from "../../_shared/project/task-bridge.js";
-import type { TodoPhase } from "../../_shared/project/todo-state.js";
+import { formatCurrentProjectTaskResolution, type CurrentProjectTaskResolution } from "../state/task-bridge.js";
+import type { TodoPhase } from "../state/todo-state.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { phasesToMarkdown } from "../state/markdown-checklist.js";
 import { findActiveTask } from "../state/phase-ops.js";

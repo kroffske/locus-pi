@@ -51,7 +51,7 @@ import {
   workflowLaunchBindingFile,
 } from "../../../../extensions/workflows/runtime/workflow-launch-binding.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
-import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import { createHarness } from "../../../test-harness.js";
 
 function project(): string {

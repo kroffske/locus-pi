@@ -90,7 +90,7 @@ the displayed rows; distinct labels alone do not prove readable titles.
 
 Every callsite needs its own literal `label`. A dynamic `title` is display text, not identity. Same-session output clarification is not a semantic round; semantic continuation creates a fresh worker. Recovery is a separate runtime capability.
 
-Run `workflow_check_source` with `mode: "orchestration-only"` on every exact built source, plus the design/source and module-load checks. An unavailable tool or failed checker result is a failed gate: never report a successful Build after skipping it. Return the exact copyable launch command `/workflows run <name>` without executing it unless execution was separately requested.
+Run `workflow_check_source` with `mode: "orchestration-only"` on every exact built source, plus the design/source and module-load checks. When that Pi-native tool is unavailable and a `locus-pi` source checkout is present, use its supported equivalent from that checkout: `npm run check:workflow-source -- --mode orchestration-only <exact-path>`. Both routes call the same workflows-owned validator and neither imports or executes the target. If neither route is available, or the selected validator fails, Build fails: never report a successful Build after skipping the gate. Return the exact copyable launch command `/workflows run <name>` without executing it unless execution was separately requested.
 
 ## Trust and further references
 

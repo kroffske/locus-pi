@@ -4,7 +4,7 @@ import {
   type WorkflowBackgroundRunContext,
 } from "../../../../extensions/workflows/run/background-run-registry.js";
 import workflows from "../../../../extensions/workflows/index.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import * as runner from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   WORKFLOW_LIVE_WIDGET_KEY,

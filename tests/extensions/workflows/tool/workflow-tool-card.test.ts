@@ -8,7 +8,7 @@ import type {
 } from "../../../../extensions/_shared/host/pi-api.js";
 import type { ToolDefinition } from "../../../../extensions/_shared/host/pi-api.js";
 import workflows from "../../../../extensions/workflows/index.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import { snapshotWorkflowToolCardAgents } from "../../../../extensions/workflows/tool/workflow-tool-card.js";
 import { createHarness } from "../../../test-harness.js";
 

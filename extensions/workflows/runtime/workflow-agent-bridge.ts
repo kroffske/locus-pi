@@ -19,12 +19,11 @@ import { createWorkflowWorktree } from "./workflow-worktree.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
 import {
-  agentLiveStore,
   createAgentSdkSessionExecutor,
   AGENT_SDK_UNAVAILABLE_HINT,
-  type AgentLiveExecutionHandle,
   type AgentSdkSessionExecutorOptions,
 } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveExecutionHandle } from "../../_shared/agent-runtime/agent-live-store.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
 import { discoverAgentDefinitions } from "../../_shared/agent-runtime/agents.js";
 import type { ModelRoleResolution } from "../../_shared/model/model-settings.js";
@@ -41,7 +40,7 @@ import {
 } from "../../_shared/model/model-settings.js";
 import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
 import { workflowSlotKey } from "./workflow-runtime.js";
-import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-journal.js";
+import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-live.js";
 import type {
   WorkflowAgentPreflight,
   WorkflowAgentRunner,
@@ -182,6 +181,7 @@ export function composeWorkflowChildTask(
     "Use pwd for code work. Durable handoffs, final results, review evidence, and explicit resume inputs belong in the workflow workspace above, or in the task artifact folder (.tasks/<task>/artifacts/<stage>/) when the authored prompt selects one; replace assigned files idempotently and write or promote a final rendered deliverable there.",
     "Keep disposable environments, dependency caches, test basetemp, transient renderer output, and staging in ordinary OS/tool temporary or cache locations, never beside evidence; promote anything needed for review or resume before its temporary or cache location expires.",
     "Files already in the workflow workspace are another owner's state: read them and replace only the files assigned to you.",
+    "Never delete, rename, truncate, chmod, or replace .locus-pi-workflow.lock or sibling workflow files. An instruction to write no other artifact means create or modify no other file; it never authorizes cleanup.",
     "This is placement guidance only. An authored prompt that explicitly requests another placement remains authoritative.",
     "Workflow files keep their exact names; runtime records references and does not reconstruct their content.",
   ].join("\n");

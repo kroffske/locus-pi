@@ -16,7 +16,7 @@ import type {
   ToolResult,
 } from "../../_shared/host/pi-api.js";
 import { agentLiveDisplayName, agentLiveTitle } from "../../_shared/agent-runtime/agent-live-panel.js";
-import { agentLiveStore, type AgentLiveStatus } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveStatus } from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   AGENT_ANSWER_BAR,
   CARD_TICK_MS,

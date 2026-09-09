@@ -11,7 +11,7 @@ import type {
 } from "../../_shared/host/pi-api.js";
 import { errorResult, getCommandText, getProjectRoot, setTextWidget, textResult } from "../../_shared/host/pi-api.js";
 import { validateParams } from "../../_shared/host/validation.js";
-import { applyWorkflowJournalLineToAgentLiveStore } from "../runtime/workflow-journal.js";
+import { applyWorkflowJournalLineToAgentLiveStore } from "../runtime/workflow-live.js";
 import { installWorkflowProgress } from "../operator/progress-widget.js";
 import {
   FUSION_CONFIG_VERSION,

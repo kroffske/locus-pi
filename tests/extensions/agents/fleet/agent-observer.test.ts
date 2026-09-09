@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../../extensions/agents/index.js";
 import { registerLoop } from "../../../../extensions/loop/index.js";
-import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { ExtensionCommandContext } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../../test-harness.js";
 

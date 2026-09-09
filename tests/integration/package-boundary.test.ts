@@ -14,7 +14,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
-import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-runner.js";
+import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-discovery.js";
 import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {
@@ -358,7 +358,11 @@ describe("npm public package boundary", () => {
     // 260 with the agent viewer's workflow_return renderer.
     // 254 after the create skill dropped six redirect cards and large-agent-runs.md,
     // and the registry gained the stage-loop example.
-    expect(dryRun.files).toHaveLength(254);
+    // 256 after T-213: three one-export files merged into their sole writer (-3), and five
+    // owner modules appeared — catalog/workflow-meta.ts, runtime/workflow-handoff-contract.ts,
+    // runtime/workflow-outcome.ts, runtime/workflow-live.ts and
+    // _shared/agent-runtime/agent-live-store.ts (+5).
+    expect(dryRun.files).toHaveLength(256);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

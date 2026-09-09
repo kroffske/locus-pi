@@ -25,6 +25,13 @@ an evidence gap or false provenance anchor, not a contract the later lanes may c
 For each admitted source, record one exact locator: reviewed-tree path plus head object id,
 or local-only path plus the reason it belongs to this review.
 
+For every historical Git target, provenance each source, policy, documentation, and
+contract fact as coming from the base tree, reviewed target tree, or live descendant.
+Read exact frozen bytes and diffs from the resolved objects rather than treating the
+current checkout as the target. Never attribute live-only descendant content to the reviewed target.
+When current project authority differs from the target tree, record both versions and
+state whether the difference affects introducedness or the target's accepted boundaries.
+
 Scope resolution is read-only mapping only. Do not execute tests, linters, typechecks,
 builds, dependency resolution, index rebuilds, runtime commands, or any command that
 materializes auxiliary output. Do not create caches, bytecode, indexes, reports, fixtures,

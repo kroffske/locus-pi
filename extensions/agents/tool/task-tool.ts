@@ -2,7 +2,8 @@
  * extensions/agents/tool/task-tool.ts — the canonical spawn-a-subagent tool.
  * It routes through the createAgentSession host + honesty gate.
  */
-import { agentLiveStore, AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { AGENT_SDK_UNAVAILABLE_DIAGNOSTIC } from "../../_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../_shared/agent-runtime/agent-live-store.js";
 import { pinTransientUiKey, unpinTransientUiKey } from "../../_shared/operator/command-ui.js";
 import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
 import { loadModelRolesState, resolveAgentModelPreference } from "../../_shared/model/model-settings.js";

@@ -15,7 +15,7 @@ import {
   WorkflowNameNotFoundError,
   WorkflowGroupOnlyError,
   type ResolvedWorkflowTarget,
-} from "../runtime/workflow-runner.js";
+} from "../runtime/workflow-discovery.js";
 import { isWorkflowSavedName } from "../runtime/workflow-saved-name.js";
 
 const WORKFLOW_BUSY_MESSAGE =

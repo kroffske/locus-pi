@@ -25,16 +25,18 @@ import {
 import {
   createWorkflowJournalSink,
   readWorkflowRunJournalState,
+} from "../../extensions/workflows/runtime/workflow-journal.js";
+import {
   applyWorkflowJournalLineToAgentLiveStore,
   resetWorkflowLiveExecutions,
   workflowAgentLiveRowId,
-} from "../../extensions/workflows/runtime/workflow-journal.js";
+} from "../../extensions/workflows/runtime/workflow-live.js";
 import {
   createAgentSdkSessionExecutor,
-  agentLiveStore,
   type SdkAgentSessionLike,
   type SdkAgentSessionEventLike,
 } from "../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { AgentRunRequest } from "../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   workflowRecoveryInputHash,

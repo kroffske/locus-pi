@@ -1549,7 +1549,11 @@ preserves a qualified child's complete saved name in the generated workspace
 leaf; an invoked child still shares its parent's selected workspace. The
 runtime creates its absolute path before the first child and
 names it exactly once in every child task. Agent files keep their exact names;
-the runtime does not rename, move, or clean them. Confined absolute paths are
+the runtime does not rename, move, or clean them. Each child task also says that
+pre-existing workspace files are owned state: the child may replace only its
+assigned filename and must preserve the active `.locus-pi-workflow.lock`,
+`style.md`, and sibling handoffs. A lane instruction to write no other artifact
+forbids extra writes; it never authorizes cleanup. Confined absolute paths are
 accepted. `./path` resolves from the agent working directory. Traversal outside
 the project, whitespace tricks, backslashes, out-of-project working directories,
 and symlink escapes fail before a child starts.

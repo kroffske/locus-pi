@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildWorkflowCatalogModel } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
 import { copyWorkflowNamespace } from "../../../../extensions/workflows/catalog/workflow-copy.js";
-import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { resolveWorkflowTarget } from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 
 const roots: string[] = [];
 const originalHome = process.env.HOME;

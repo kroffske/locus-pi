@@ -12,7 +12,7 @@ import {
   type WorkflowTargetIdentity,
 } from "./workflow-saved-name.js";
 import { isWorkflowPathWithinRoot } from "./workflow-output.js";
-import { projectWorkflowDisposition } from "./workflow-result.js";
+import { projectWorkflowDisposition } from "./workflow-outcome.js";
 import {
   assertWorkflowRunId,
   readWorkflowRunFile,

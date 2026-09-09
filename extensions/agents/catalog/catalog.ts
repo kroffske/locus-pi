@@ -1,15 +1,29 @@
 /**
  * extensions/agents/catalog/catalog.ts — the agent catalog.
  *
- * Owns discovery refresh into `catalog-state.ts`, the `TaskParams` schema whose
+ * Owns the resolved agent catalog and its discovery refresh, the `TaskParams` schema whose
  * `agent` parameter description IS the published catalog (see writeAgentCatalogHint),
  * exact name resolution, and the flat catalog projections the
  * unknown-agent report reads.
  */
 import { Type } from "@sinclair/typebox";
 import { discoverAgentDefinitions, formatAgentCatalogHint } from "../../_shared/agent-runtime/agents.js";
-import { agentCatalog } from "./catalog-state.js";
 import type { AgentDefinition } from "../../_shared/agent-runtime/agents.js";
+
+/**
+ * The resolved agent catalog this extension refreshes from disk, keyed by agent name.
+ *
+ * `refreshAgents` below is the only writer: it clears and repopulates the map on every
+ * discovery pass, and `before_agent_start` runs one pass per turn. This module and
+ * `command-router.ts` are the only readers, which is why the map sits inside this extension
+ * rather than in a shared directory.
+ *
+ * It is a per-entrypoint projection of `.agents/agents/`, never a process-wide registry: this
+ * binding does not survive Pi's cache-disabled entrypoint loading, so each loaded entrypoint
+ * gets its own copy. Nothing may rely on a write made through one entrypoint being visible
+ * from another.
+ */
+export const agentCatalog = new Map<string, AgentDefinition>();
 
 const AGENT_PARAM_BASE_DESCRIPTION =
   "Optional project/user agent catalog name. Omit to run a clean child session without a role profile.";

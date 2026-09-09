@@ -1,7 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { packagedExamplesDir, packagedWorkflowPath } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import {
+  packagedExamplesDir,
+  packagedWorkflowPath,
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 
 /**
  * Diagrams used to be a generated triple — an `@kroffske/excalidraw-diagrams`
@@ -125,8 +128,11 @@ describe("curated workflow diagrams", () => {
     expect(scope).toContain("must be proven to exist in the reviewed tree");
     expect(scope).toContain("false provenance anchor");
     expect(scope).toContain("reviewed-tree path plus head object id");
+    expect(scope).toContain("base tree, reviewed target tree, or live descendant");
+    expect(scope).toContain("Never attribute live-only descendant content to the reviewed target");
 
     expect(boundaries).toContain("B-Q-001");
+    expect(boundaries).toContain("exact reviewed target tree");
 
     expect(simplicity).toContain("Invert the burden of proof");
     expect(simplicity).toContain("Search production and");
@@ -141,6 +147,7 @@ describe("curated workflow diagrams", () => {
     expect(contracts).toContain("C-Q-001");
     expect(contracts).toContain("concrete silent-drift failure");
     expect(contracts).toContain("stale derived documentation changed by the PR");
+    expect(contracts).toContain("exact reviewed target tree");
 
     expect(style).toContain("Read review-scope.md there first, then read style.md");
     expect(style).toContain("an empty file means that the operator supplied no additional style criteria");
@@ -164,6 +171,8 @@ describe("curated workflow diagrams", () => {
     expect(necessity).toContain("REFRAME");
     expect(necessity).toContain("REJECT");
     expect(necessity).toContain("BLOCKED");
+    expect(necessity).toContain("exact reviewed target tree");
+    expect(necessity).toContain("descendant repaired, moved, or admitted it");
 
     expect(synthesis).toContain("The necessity challenge is an admission gate, not another vote");
     expect(synthesis).toContain("must not restore a proposal that the necessity challenge rejected");
@@ -183,6 +192,8 @@ describe("curated workflow diagrams", () => {
     expect(synthesis).toContain("Impact: high, medium, or low");
     expect(synthesis).toContain("illustrative fix snippet");
     expect(synthesis).toContain("Do not include a snippet");
+    expect(synthesis).toContain("positive evidence, accepted boundary, and NO_ACTION architecture claim");
+    expect(synthesis).toContain("live-only descendant policy is current context, not target evidence");
     expect(synthesis).toContain("/workflows run implement");
 
     expect(readme).toContain("assign the portable `smol` role through `/model-roles`");

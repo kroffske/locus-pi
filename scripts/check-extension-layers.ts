@@ -17,11 +17,18 @@
  *      owner, and new mutable exported containers under `_shared` fail closed.
  *   6. Feature-internal facades. A declared feature-internal module may be
  *      imported from another feature only through its declared read facade.
+ *   7. Pure modules. A declared pure module's transitive VALUE-import closure
+ *      may not reach a host-bound Node builtin (`node:fs`, `node:path`, and the
+ *      rest of `PURE_MODULE_FORBIDDEN_BUILTINS`).
  *
  * Registry and feature-import sweeps cover executable source under
  * `extensions/**`; tests are intentionally out of scope. Imports are read from
  * the TypeScript AST, including static imports, re-exports, import types, and
- * literal dynamic imports. Type-only edges still encode ownership.
+ * literal dynamic imports. Rules 1-3 and 6 enforce type-only edges too, because
+ * a type-only edge still encodes ownership; rule 7 is the one rule that follows
+ * value edges only, since it is about what actually loads at runtime. Type-only
+ * is read per specifier, so `import { a, type B }` is a value edge while
+ * `import { type A, type B }` is not.
  */
 
 import type { Dirent } from "node:fs";
@@ -86,7 +93,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
   /** `runtime-capabilities` constructs and reports on the session store, so runtime owns it. */
   runtime: ["session-core", "artifacts", "event-bus", "runtime-capabilities"],
   model: ["model-settings", "live-model-display", "workflow-model-resolve"],
-  project: ["goal-mode", "prompt-command-store", "tasks-store", "task-bridge", "todo-state"],
+  project: ["goal-mode", "prompt-command-store", "tasks-store"],
   "agent-runtime": [
     "agents",
     "agent-context-extras",
@@ -95,7 +102,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     /** The closed failure-cause list is value-imported by workflow runtime; keep this module import-free. */
     "agent-failure-cause",
     "agent-live-panel",
-    "agent-live-tick",
+    "agent-live-store",
     "agent-live-transcript",
     "agent-names",
     "agent-read-only-policy",
@@ -129,7 +136,52 @@ const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,
     reason:
-      "the journal owns run layout, append/write operations and live-row retention; outside consumers receive only the read operations exposed by the workflow facade.",
+      "the journal owns run layout and append/write operations; outside consumers receive only the read operations exposed by the workflow facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-live.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module owns the process-global live-executions registry and the journal-to-live-row projection; outside consumers get only row-id reads through the workflow facade.",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Pure modules (rule 7)
+// ---------------------------------------------------------------------------
+
+interface PureModuleEntry {
+  readonly module: string;
+  readonly reason: string;
+}
+
+/** Host-bound builtins a declared pure module may not reach through value imports. */
+const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
+  "node:fs",
+  "node:fs/promises",
+  "node:child_process",
+  "node:path",
+  "node:os",
+  "node:process",
+]);
+
+/** Modules whose purity claim is load-bearing, and the reason it is. */
+const PURE_MODULES: readonly PureModuleEntry[] = [
+  {
+    module: "extensions/workflows/runtime/workflow-runtime.ts",
+    reason:
+      "the DSL core reaches agents only through an injected runner, so it stays host-agnostic and unit-testable in isolation.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-handoff-contract.ts",
+    reason:
+      "operator handoff declarations are normalized inside that core, so the declaration half stays separable from the durable envelope and claim sidecar in workflow-handoff.ts.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-outcome.ts",
+    reason:
+      "what a result means — JSON detachment, disposition and classification — is decided inside that core, so it stays separable from result.json persistence in workflow-result.ts.",
   },
 ];
 
@@ -144,8 +196,8 @@ interface RegistryEntry {
 
 /** Symbol string -> the one executable module allowed to name it. */
 const REGISTRIES: readonly RegistryEntry[] = [
-  { symbol: "locus-pi.agent-live-store.v5", owner: "extensions/_shared/agent-runtime/agent-sdk-host.ts" },
-  { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-journal.ts" },
+  { symbol: "locus-pi.agent-live-store.v5", owner: "extensions/_shared/agent-runtime/agent-live-store.ts" },
+  { symbol: "locus-pi.workflow-live-executions.v1", owner: "extensions/workflows/runtime/workflow-live.ts" },
   { symbol: "locus-pi.fleet-menu-state.v3", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.fleet-viewed-row.v1", owner: "extensions/_shared/agent-runtime/fleet-menu.ts" },
   { symbol: "locus-pi.command-ui-lifecycle.v2", owner: "extensions/_shared/operator/command-ui.ts" },
@@ -169,12 +221,12 @@ interface MutableStateEntry {
 /** Plain mutable module bindings whose process semantics require an explicit owner. */
 const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
   {
-    file: "extensions/agents/catalog/catalog-state.ts",
+    file: "extensions/agents/catalog/catalog.ts",
     binding: "agentCatalog",
     note: "the resolved agent catalog; agents/catalog/catalog.ts#refreshAgents is the only writer and rebuilds it from disk on every discovery pass.",
   },
   {
-    file: "extensions/todo-context/state/todo-state-cache.ts",
+    file: "extensions/todo-context/state/phase-store.ts",
     binding: "todoStateCache",
     note: "a cache and fallback in front of the durable session store; todo-context/state/phase-store.ts is the only writer.",
   },
@@ -301,6 +353,7 @@ export async function checkExtensionLayers(root: string): Promise<void> {
 
   failures.push(...(await checkRegistries(root)));
   failures.push(...(await checkFeatureInternalModules(root)));
+  failures.push(...(await checkPureModules(root)));
 
   if (failures.length > 0) {
     console.error(`Extension layer check failed with ${failures.length} violation(s):\n\n${failures.join("\n\n")}`);
@@ -311,7 +364,8 @@ export async function checkExtensionLayers(root: string): Promise<void> {
   console.log(
     `Extension layers verified: ${sharedSources.length} shared source(s) across ${Object.keys(SHARED_LAYER_MEMBERS).length} declared layer(s), ` +
       `${REGISTRIES.length} process-global registries, ${MUTABLE_MODULE_STATE.length} mutable module bindings, ` +
-      `${FEATURE_INTERNAL_MODULES.length} feature-internal module(s) behind a facade.`,
+      `${FEATURE_INTERNAL_MODULES.length} feature-internal module(s) behind a facade, ` +
+      `${PURE_MODULES.length} pure module(s) free of host-bound builtins.`,
   );
 }
 
@@ -369,10 +423,14 @@ function collectImportEdges(source: ts.SourceFile): ImportEdge[] {
       edges.push({
         line: lineOf(source, node),
         specifier: node.moduleSpecifier.text,
-        typeOnly: node.importClause?.isTypeOnly === true,
+        typeOnly: importDeclarationTypeOnly(node),
       });
     } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
-      edges.push({ line: lineOf(source, node), specifier: node.moduleSpecifier.text, typeOnly: node.isTypeOnly });
+      edges.push({
+        line: lineOf(source, node),
+        specifier: node.moduleSpecifier.text,
+        typeOnly: exportDeclarationTypeOnly(node),
+      });
     } else if (
       ts.isImportTypeNode(node) &&
       ts.isLiteralTypeNode(node.argument) &&
@@ -395,6 +453,32 @@ function collectImportEdges(source: ts.SourceFile): ImportEdge[] {
   };
   ts.forEachChild(source, visit);
   return edges;
+}
+
+/**
+ * Type-only per SPECIFIER, not per clause. `import { a, type B }` still loads
+ * the module at runtime and is a value edge; `import { type A, type B }` does
+ * not and is type-only. A bare `import "x"` and a default or namespace import
+ * are always value edges.
+ */
+function importDeclarationTypeOnly(node: ts.ImportDeclaration): boolean {
+  const clause = node.importClause;
+  if (clause === undefined) return false;
+  if (clause.isTypeOnly) return true;
+  if (clause.name !== undefined) return false;
+  const bindings = clause.namedBindings;
+  if (bindings === undefined || !ts.isNamedImports(bindings)) return false;
+  if (bindings.elements.length === 0) return false;
+  return bindings.elements.every((element) => element.isTypeOnly);
+}
+
+/** The re-export mirror of `importDeclarationTypeOnly`. */
+function exportDeclarationTypeOnly(node: ts.ExportDeclaration): boolean {
+  if (node.isTypeOnly) return true;
+  const clause = node.exportClause;
+  if (clause === undefined || !ts.isNamedExports(clause)) return false;
+  if (clause.elements.length === 0) return false;
+  return clause.elements.every((element) => element.isTypeOnly);
 }
 
 interface MutableBinding {
@@ -594,6 +678,102 @@ async function locateBinding(root: string, entry: MutableStateEntry): Promise<bo
   };
   ts.forEachChild(source, visit);
   return found;
+}
+
+/**
+ * Rule 7: a declared pure module's transitive VALUE-import closure must not
+ * reach a host-bound builtin. Only value edges are followed, because the claim
+ * is about what actually loads at runtime; a type-only edge erases at compile
+ * time and is therefore allowed to cross into a durable module.
+ */
+async function checkPureModules(root: string): Promise<string[]> {
+  const failures: string[] = [];
+  const edgeCache = new Map<string, readonly ImportEdge[] | undefined>();
+
+  const readEdges = async (file: string): Promise<readonly ImportEdge[] | undefined> => {
+    const cached = edgeCache.get(file);
+    if (cached !== undefined || edgeCache.has(file)) return cached;
+    let text: string;
+    try {
+      text = await readFile(path.join(root, file), "utf8");
+    } catch {
+      edgeCache.set(file, undefined);
+      return undefined;
+    }
+    const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKindFor(file));
+    const edges = collectImportEdges(source);
+    edgeCache.set(file, edges);
+    return edges;
+  };
+
+  for (const entry of PURE_MODULES) {
+    if (!(await fileExists(path.join(root, entry.module)))) {
+      failures.push(
+        `rule 7 (pure modules): declared pure module ${entry.module} does not exist. Update PURE_MODULES in the same change that moves, renames, or removes it.`,
+      );
+      continue;
+    }
+    const chain = await findHostBoundImport(root, entry.module, readEdges);
+    if (chain === undefined) continue;
+    failures.push(
+      `rule 7 (pure modules): ${entry.module} reaches ${chain[chain.length - 1]} through value imports ` +
+        `(${chain.join(" -> ")}). ${entry.reason} Keep the host-bound half in its durable counterpart and ` +
+        `import it type-only, or move the pure half it needs into a module that has no host dependency.`,
+    );
+  }
+
+  return failures;
+}
+
+/** Breadth-first, so the reported chain is the shortest value path to the builtin. */
+async function findHostBoundImport(
+  root: string,
+  entryModule: string,
+  readEdges: (file: string) => Promise<readonly ImportEdge[] | undefined>,
+): Promise<string[] | undefined> {
+  const parents = new Map<string, string>();
+  const visited = new Set<string>([entryModule]);
+  const queue: string[] = [entryModule];
+
+  while (queue.length > 0) {
+    const file = queue.shift()!;
+    const edges = await readEdges(file);
+    if (edges === undefined) continue;
+    for (const edge of edges) {
+      if (edge.typeOnly) continue;
+      if (PURE_MODULE_FORBIDDEN_BUILTINS.has(edge.specifier)) {
+        return [...pathFromEntry(file, parents), edge.specifier];
+      }
+      if (!edge.specifier.startsWith(".")) continue; // Bare packages other than node:* are out of scope.
+      const target = await resolveSourceFile(root, resolveSpecifier(file, edge.specifier));
+      if (target === undefined || visited.has(target)) continue;
+      visited.add(target);
+      parents.set(target, file);
+      queue.push(target);
+    }
+  }
+
+  return undefined;
+}
+
+function pathFromEntry(file: string, parents: ReadonlyMap<string, string>): string[] {
+  const chain = [file];
+  let cursor = file;
+  for (;;) {
+    const parent = parents.get(cursor);
+    if (parent === undefined) return chain;
+    chain.unshift(parent);
+    cursor = parent;
+  }
+}
+
+/** Map one resolved ESM specifier onto the source file that actually holds it. */
+async function resolveSourceFile(root: string, resolved: string): Promise<string | undefined> {
+  const candidates = [resolved.replace(/\.(?:mjs|js)$/, ".ts"), resolved, `${resolved}.ts`, `${resolved}/index.ts`];
+  for (const candidate of candidates) {
+    if (await fileExists(path.join(root, candidate))) return candidate;
+  }
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------

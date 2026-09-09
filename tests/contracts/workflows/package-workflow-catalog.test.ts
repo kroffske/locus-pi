@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { packagedWorkflowNames } from "../../../extensions/workflows/runtime/workflow-runner.js";
+import { packagedWorkflowNames } from "../../../extensions/workflows/runtime/workflow-discovery.js";
 import { publicCatalogs, workflowDocs } from "../helpers/package-contract.js";
 
 describe("Package workflow catalog contract", () => {

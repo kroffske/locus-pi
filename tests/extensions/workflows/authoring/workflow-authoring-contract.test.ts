@@ -1,12 +1,12 @@
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { staticWorkflowMeta } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
+import { staticWorkflowMeta } from "../../../../extensions/workflows/catalog/workflow-meta.js";
 import { standardWorkflowSourceShapeErrors } from "../../../../extensions/workflows/tool/workflow-source-shape.js";
 import {
   packagedWorkflowNames,
   packagedWorkflowPath,
-} from "../../../../extensions/workflows/runtime/workflow-runner.js";
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 
 const root = process.cwd();
 
@@ -129,10 +129,12 @@ describe("design-first readable workflow authoring", () => {
     expect(source(relativePath)).toContain("workflow_check_source");
   });
 
-  it("makes workflow authoring source-checking fail closed through the Pi-native tool", () => {
+  it("makes workflow authoring source-checking fail closed through either supported route", () => {
     const text = source("skills/locus-pi-workflow-create/SKILL.md");
     expect(text).toContain("workflow_check_source");
-    expect(text).toMatch(/(?:unavailable tool|failed checker result)/iu);
+    expect(text).toContain("npm run check:workflow-source -- --mode orchestration-only <exact-path>");
+    expect(text).toMatch(/neither route is available/iu);
+    expect(text).toMatch(/selected validator fails/iu);
     expect(text).toMatch(/never (?:report|return).*successful Build/isu);
   });
 

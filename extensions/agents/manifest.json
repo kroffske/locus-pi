@@ -117,6 +117,7 @@
     "tests/extensions/agents/catalog/agent-catalog-hint.test.ts",
     "tests/shared/agent-runtime/agent-runner.test.ts",
     "tests/shared/agent-runtime/agent-sdk-host.test.ts",
+    "tests/shared/agent-runtime/agent-live-store.test.ts",
     "tests/shared/agent-runtime/agent-command-run.test.ts",
     "tests/extensions/agents/fleet/agent-observer.test.ts",
     "tests/extensions/agents/fleet/agent-drill.test.ts",

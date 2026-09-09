@@ -2,13 +2,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   listWorkflowCatalogTargets,
   packagedExamplesDir,
   resolveWorkflowTarget,
-  runWorkflowScript,
   WorkflowNameNotFoundError,
-} from "../../../../extensions/workflows/runtime/workflow-runner.js";
+} from "../../../../extensions/workflows/runtime/workflow-discovery.js";
 import {
   isPostCodeReviewTargetIdentity,
   isPostCodeReviewTargetProjection,

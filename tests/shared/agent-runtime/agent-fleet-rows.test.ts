@@ -10,7 +10,7 @@ import {
   formatTokenCount,
   statusMeta,
 } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
-import { agentLiveStore, type AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore, type AgentLiveRow } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 
 // T-191 (agent-fleet-visibility slice 1): the new fleet row grammar, petnames,
 // title, model badge, token counter, and transcript event lines. Each `it` maps

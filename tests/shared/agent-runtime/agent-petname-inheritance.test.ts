@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { PetnameRegistry, petname } from "../../../extensions/_shared/agent-runtime/agent-names.js";
-import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import { agentLiveStore } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
 
 // One petname per LOGICAL agent: the workflow journal anchor row and the SDK
 // executor row it spawns are the same actor, so the child adopts the parent's

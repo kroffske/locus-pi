@@ -42,7 +42,3 @@ export function validateParams<T extends TSchema>(
   }
   return { ok: true, value: params as Static<T> };
 }
-
-export function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
