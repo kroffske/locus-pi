@@ -4,6 +4,8 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-09
+
 ### Changed
 
 - Internal module ownership now matches the dependency graph, with no change to commands, tools, workflows, stored file formats, dependencies, or permissions. The workflow DSL core reaches operator-handoff and result semantics only through filesystem-free contract modules, the shared live agent store and the workflow live projection each own their module instead of living inside the SDK session executor and the durable run journal, and the bounded workflow metadata scanner is loadable without the catalog surface. A new repository check fails when a module declared filesystem-free regains such a dependency.
