@@ -30,6 +30,10 @@ The composite gates that bind them together:
 - `npm run check:fast` — manifests, layers, workflow source shape, typecheck,
   Pi host version, tests, and source audit. The inner loop while editing; it
   is not release-complete.
+- `npm run check:workflow-source -- --mode orchestration-only <path>` — apply
+  the same orchestration-only validator as `workflow_check_source` to one exact
+  workflow path without starting a Pi child session. Omit `--mode` for
+  compatibility validation.
 - `npm run check` — `check:fast` plus formatting, published Markdown links,
   the generated public catalogs, repository hygiene, and release
   metadata. The canonical gate:
@@ -60,6 +64,10 @@ Runs the standard source-shape validator over every workflow example the
 package ships (or over explicit paths passed as arguments, which must then
 declare the standard profile). Guards that shipped workflows keep passing the
 same static checks user-authored workflows go through.
+
+Pass `--mode orchestration-only` before explicit paths to enforce the narrower
+workflow-authoring subset. The command reads source text and never imports or
+runs the target.
 
 ### check-markdown-links.ts
 

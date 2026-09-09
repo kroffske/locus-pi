@@ -8,6 +8,13 @@ User-visible changes to the public package.
 
 - Internal module ownership now matches the dependency graph, with no change to commands, tools, workflows, stored file formats, dependencies, or permissions. The workflow DSL core reaches operator-handoff and result semantics only through filesystem-free contract modules, the shared live agent store and the workflow live projection each own their module instead of living inside the SDK session executor and the durable run journal, and the bounded workflow metadata scanner is loadable without the catalog surface. A new repository check fails when a module declared filesystem-free regains such a dependency.
 
+- The repository workflow source checker now accepts `--mode orchestration-only`
+  for exact workflow paths, exposing the same strict authoring validator outside
+  a Pi child session without importing or running the target. The workflow
+  authoring skill uses this command as its supported fallback when the Pi-native
+  `workflow_check_source` tool is unavailable and still fails Build when neither
+  route can run or validation fails.
+
 ## [0.7.1] - 2026-09-09
 
 ### Changed

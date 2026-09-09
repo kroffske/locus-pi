@@ -129,10 +129,12 @@ describe("design-first readable workflow authoring", () => {
     expect(source(relativePath)).toContain("workflow_check_source");
   });
 
-  it("makes workflow authoring source-checking fail closed through the Pi-native tool", () => {
+  it("makes workflow authoring source-checking fail closed through either supported route", () => {
     const text = source("skills/locus-pi-workflow-create/SKILL.md");
     expect(text).toContain("workflow_check_source");
-    expect(text).toMatch(/(?:unavailable tool|failed checker result)/iu);
+    expect(text).toContain("npm run check:workflow-source -- --mode orchestration-only <exact-path>");
+    expect(text).toMatch(/neither route is available/iu);
+    expect(text).toMatch(/selected validator fails/iu);
     expect(text).toMatch(/never (?:report|return).*successful Build/isu);
   });
 
