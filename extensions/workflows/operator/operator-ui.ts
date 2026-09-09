@@ -16,7 +16,7 @@ import {
   projectWorkflowDisposition,
   type WorkflowDispositionProjection,
   type WorkflowProjectedStatus,
-} from "../runtime/workflow-result.js";
+} from "../runtime/workflow-outcome.js";
 import { packagedWorkflowNames } from "../runtime/workflow-discovery.js";
 import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
 import type { WorkflowBackgroundStopResult } from "../run/background-run-registry.js";

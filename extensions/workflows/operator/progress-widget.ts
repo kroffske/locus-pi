@@ -29,8 +29,8 @@ import {
   projectWorkflowDisposition,
   type WorkflowDisposition,
   type WorkflowProjectedStatus,
-  type WorkflowResultPersistence,
-} from "../runtime/workflow-result.js";
+} from "../runtime/workflow-outcome.js";
+import type { WorkflowResultPersistence } from "../runtime/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../../_shared/operator/widget-render.js";
 import { clearViewerExternalRows, setViewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";

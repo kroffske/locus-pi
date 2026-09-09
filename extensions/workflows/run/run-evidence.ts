@@ -23,7 +23,7 @@ import {
   formatWorkflowResultDetail,
   projectWorkflowDisposition,
   type WorkflowDispositionProjection,
-} from "../runtime/workflow-result.js";
+} from "../runtime/workflow-outcome.js";
 import { assertWorkflowRunId } from "../runtime/workflow-run-layout.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 import {

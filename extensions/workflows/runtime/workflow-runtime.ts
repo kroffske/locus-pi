@@ -45,15 +45,19 @@ import {
   type WorkflowAwaitOperatorDeclaration,
   type WorkflowOperatorHandoffDeclaration,
   type WorkflowOperatorQuestion,
-} from "./workflow-handoff.js";
+} from "./workflow-handoff-contract.js";
 import type { EvidenceEvaluation } from "../../_shared/agent-runtime/agent-evidence-evaluator.js";
 import type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { WorkflowPrimaryFileReference } from "./workflow-output.js";
-import { classifyWorkflowReturnedFailure, prepareWorkflowResult } from "./workflow-result.js";
+import { classifyWorkflowReturnedFailure, prepareWorkflowResult } from "./workflow-outcome.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
 // `agent-failure-cause.ts`, a module with no imports at all. Reading it as a value here keeps
 // this core host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the
-// runtime — while still validating against one list rather than a second copy of it.
+// runtime — while still validating against one list rather than a second copy of it. For the
+// same reason the operator handoff and result values above come from `workflow-handoff-contract.ts`
+// and `workflow-outcome.ts`, the two fs-free contract modules, never from their durable
+// counterparts `workflow-handoff.ts` and `workflow-result.ts`; rule 7 of
+// `scripts/check-extension-layers.ts` proves the whole value closure stays free of `node:fs`.
 import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
 export type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 
@@ -67,7 +71,7 @@ export type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowOperatorHandoffDeclaration,
   WorkflowOperatorQuestion,
-} from "./workflow-handoff.js";
+} from "./workflow-handoff-contract.js";
 
 export class WorkflowRunWorkspaceRemovedError extends Error {
   readonly code = "WORKFLOW_RUN_WORKSPACE_REMOVED";
