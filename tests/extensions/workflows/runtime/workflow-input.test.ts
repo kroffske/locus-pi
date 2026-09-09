@@ -212,6 +212,7 @@ describe("string-only workflow input", () => {
       "Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name>",
     );
     expect(outputDirDescription).toContain("resume repeats the source workspace");
+    expect(outputDirDescription).toContain(".tasks/<task>/artifacts is a legal explicit workspace");
     expect(outputDirDescription).not.toMatch(/defaults to tmp\/<workflow-name> beneath the Pi working directory\.$/u);
 
     expect(Value.Check(schema, { name: "demo", outputDir: "outputs/demo" })).toBe(true);
@@ -222,6 +223,7 @@ describe("string-only workflow input", () => {
         outputDir: ".locus-pi/workspaces/20260819-120000-a1b2-task-draft",
       }),
     ).toBe(true);
+    expect(Value.Check(schema, { name: "demo", outputDir: ".tasks/T-144-2026-09-08-workflow/artifacts" })).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(199)}/${"b".repeat(200)}` })).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(200)}/${"b".repeat(200)}` })).toBe(false);
     for (const outputDir of ["/tmp/demo", "./demo", "../demo", "outputs/../demo"]) {

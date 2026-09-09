@@ -101,6 +101,7 @@
     { "name": "post-code-review/simplicity", "namespace": "post-code-review" },
     { "name": "post-code-review/style", "namespace": "post-code-review" },
     { "name": "post-code-review/synthesis", "namespace": "post-code-review" },
+    { "name": "stage-loop", "namespace": "stage-loop" },
     { "name": "task/draft", "namespace": "task" },
     { "name": "task/plan", "namespace": "task" }
   ]

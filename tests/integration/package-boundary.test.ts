@@ -58,6 +58,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review/simplicity",
   "post-code-review/style",
   "post-code-review/synthesis",
+  "stage-loop",
 ] as const;
 
 const PI_PACKAGES = [
@@ -78,6 +79,7 @@ const PACKAGE_WORKFLOW_PATHS = {
   "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
   "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
   "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
+  "stage-loop": "extensions/workflows/examples/stage-loop/stage-loop.workflow.mjs",
 } as const;
 
 function installedStandardSource(run: string, declarations = ""): string {
@@ -354,7 +356,9 @@ describe("npm public package boundary", () => {
     // skill gained the structured-results card.
     // 259 with the external-session skill and its interactive/JSON lifecycle references.
     // 260 with the agent viewer's workflow_return renderer.
-    expect(dryRun.files).toHaveLength(260);
+    // 254 after the create skill dropped six redirect cards and large-agent-runs.md,
+    // and the registry gained the stage-loop example.
+    expect(dryRun.files).toHaveLength(254);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
