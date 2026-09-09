@@ -38,20 +38,6 @@ import type {
   SdkSessionStatsLike,
 } from "./agent-live-store.js";
 
-// The live store this executor writes into is owned by `agent-live-store.ts`. These
-// re-exports keep the historical entry point for callers that need both the executor
-// and the live contract, so the split stays invisible at the import site.
-export { agentLiveStore } from "./agent-live-store.js";
-export type {
-  AgentLiveActivityState,
-  AgentLiveExecutionHandle,
-  AgentLiveGroupKind,
-  AgentLiveInputResult,
-  AgentLiveRow,
-  AgentLiveStatus,
-  SdkSessionStatsLike,
-} from "./agent-live-store.js";
-
 /**
  * The live agent executor: this is the one the product runs.
  *
