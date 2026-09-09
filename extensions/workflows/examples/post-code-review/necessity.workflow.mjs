@@ -13,6 +13,12 @@ ${input}
 
 Read review-scope.md, review-boundaries.md, review-simplicity.md, review-contracts.md, and review-style.md from the runtime-injected shared workflow output directory. Then inspect the live source, supported consumers, project contracts, specifications, decisions, tests, style conventions, and dependency documentation needed to evaluate the recommendations. Audit the proposed findings and required changes, not the codebase in general. Do not invent an additional review lane or reward agreement among lane reports as evidence.
 
+For a commit, range, diff, or PR target, verify each proposal's failure,
+introducedness, owner, and accepted boundary against the exact reviewed target tree and
+diff. Keep current descendant authority separately labelled. Do not reject a real target
+defect merely because a descendant repaired, moved, or admitted it, and do not retain a
+proposal by citing policy that did not exist in the target tree.
+
 For every proposed finding and required action, preserve its lane question id without renumbering and answer all four questions with concrete path:line, symbol, contract, or supported-consumer evidence:
 1. What real failure or violated contract is proven?
 2. Which component owns that guarantee?
