@@ -4,7 +4,11 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-09
+
 ### Changed
+
+- Workflow authoring now accepts a task folder as the durable root: `--output-dir .tasks/<task>/artifacts` is a valid workflow workspace, `AUTHORING.md` gains "Stage refusal and fix loops without throw" for a bounded gate that returns `{ ok: false, status }` instead of throwing, and records that rule as decision `D-2026-09-09` alongside the new `stage-loop` Package example.
 
 - Workflow guidance now keeps durable handoffs, final results, review evidence, and explicit resume inputs in the stable workflow workspace while disposable environments, dependency caches, test basetemp, transient renderer output, and staging use ordinary OS or tool temporary and cache locations. Final renderer assets are promoted before scratch expiry, existing Mac fn+Up / fn+Down history hints remain discoverable, and nested workflow_return string values stay readable without changing retained values.
 

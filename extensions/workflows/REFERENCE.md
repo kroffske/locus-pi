@@ -87,7 +87,7 @@ authoring handle; it is not enforced.
 | `post-code-review/necessity`  | **Fix-necessity challenge**: one required `smol:xhigh` role agent reads the scope and all four lane reports, preserves every stable question id, then proves behavioral or code-shape defect, guarantee owner, non-duplication, and simplest closure. It writes `review-necessity.md`; trusted external provider guarantees remain accepted boundaries unless the local component owns a stricter invariant or a supported consumer failure is proven. |
 | `post-code-review/synthesis`  | **Independent final verifier**: one required `smol:xhigh` role agent reads the scope, four lane reports, and necessity decisions, rechecks live source and consumers, requires one closed action per material question id, and writes the code-shape decision in `post-code-review.md`. This is not the final QA or merge verdict.                                                                                                                     |
 
-All eleven shipped names use the `standard` source profile. `/workflows info`
+All twelve shipped names use the `standard` source profile. `/workflows info`
 explains that this profile classifies source shape, not runtime behavior or model
 choice; catalog rows omit the internal label.
 
@@ -1553,6 +1553,10 @@ the runtime does not rename, move, or clean them. Confined absolute paths are
 accepted. `./path` resolves from the agent working directory. Traversal outside
 the project, whitespace tricks, backslashes, out-of-project working directories,
 and symlink escapes fail before a child starts.
+A task artifacts directory such as `.tasks/<task>/artifacts` is a legal
+`--output-dir`; running again into the same directory when it already holds
+durable workflow state fails closed through
+`assertFreshWorkflowOutputNamespace`.
 
 For `post-code-review`, the workspace is also a freshness boundary. Its
 generated default is unique. If a caller explicitly selects a workspace, fresh

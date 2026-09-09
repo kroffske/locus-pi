@@ -63,9 +63,9 @@ canonical [reconciliation path](../../../extensions/workflows/references/recover
 before editing source: it requires assessing current effects and any reusable
 prerequisites. Direct interrupted recovery does not admit an unfinished child.
 
-For a checkpoint between attempts, retain the step-entry baseline tar/manifest
-and follow that contract's separate content-versus-Git reconciliation. Review the
-whole step against its original baseline, not only the post-checkpoint Git diff.
+A stage ends with a commit, so its entry point is a commit too: review the whole
+stage as `git diff <stage-base>..HEAD`. Keep no baseline archive or content
+manifest beside it; the commit already carries that identity.
 
 When a verified terminal ancestor remains usable, keep its completed prefix and
 give the first fresh stage the accepted goal, current tree, preserved work and
@@ -78,36 +78,17 @@ for long execution; creating a workflow still does not launch it.
 
 ### Read-only review evidence
 
-Match the handoff to the reviewer's actual tools. An implementation report may
-already name a readable diff even when its original baseline is a tar archive.
-Open the report's evidence entrypoint and locators before declaring an archive
-or tool blocker. Reuse an existing complete, current text representation;
-materialize a missing or stale one with the tool-capable producer, not by
-granting shell access to a read-only reviewer.
+A stage ends with a commit. The reviewer reads `git diff <stage-base>..HEAD` with
+its own tools and accounts for every in-scope path in that diff — additions,
+deletions, renames, tests, docs and diagrams — before a favorable verdict.
+Current-source sampling is not complete change review, and a favorable verdict is
+invalid while required coverage is missing.
 
-The producer's handoff identifies the evidence root, exact baseline and current
-content identities, complete plain-text diff/baseline locators, and an inventory
-of every changed path. Include additions, deletions, renames, relevant untracked
-files, tests, docs and diagrams; name exclusions and non-text representations
-explicitly. Preserve the original step baseline across checkpoints. Keep these
-derived files inside the declared evidence workspace, outside product source.
-When the reader's actual line/result limits truncate evidence, provide a
-losslessly readable view or parts bound to the original bytes. Summaries and
-silently shortened long lines do not satisfy full-diff coverage.
-Record hashes and have the native gate verify the binding against the current
-tree; a Read/Glob/Grep reviewer must not claim it executed hash or test commands.
-
-The reviewer follows those locators and accounts for every in-scope inventory
-entry. It reports what was read and any missing, stale or unsupported evidence;
-current-source sampling is not complete change review. No favorable verdict is
-valid while required coverage is missing. After the producer repairs the
-handoff, rerun the incomplete review and its dependent suffix through ordinary
-resume, preserving the unaffected completed prefix and completeness gates.
-
-Observed failure: the reviewer cited an unreadable baseline tar while ignoring
-the diff locator in the implementation report, then reviewed docs and diagrams
-selectively. The repair is explicit evidence discovery and coverage, not a new
-response cap, repeated archive generation or weaker acceptance.
+The producer does not rebuild the change as a readable bundle: no evidence
+entrypoint, locator list, content manifest or tree hash. If the reviewer cannot
+read the diff, fix its tools or the stage boundary, not the handoff format. After
+a repair, rerun the incomplete review and its dependent suffix through ordinary
+resume, preserving the unaffected completed prefix.
 
 ### Unfinished implementation
 
@@ -170,17 +151,9 @@ for independently scheduled work units.
 
 ### Prefix and invocation limits
 
-The match is a strict completed prefix. The first miss — `no-record`, `unnamed-node`, `node-mismatch`, `key-mismatch`, `recorded-failure` or `side-effecting-call` — latches divergence, and every later call reports `diverged` even when its own prompt is unchanged.
-
-A call without a literal `label` cannot be located once the bytes changed: it misses with `unnamed-node` and takes the rest of the run with it. A recorded failure is re-run, never served back as an answer. A worktree or otherwise side-effecting call never replays.
-
-A `fusion()` group standing after the divergence point ends the run with `fusion resume cannot mix recorded and fresh agent calls`. This is a named limitation of the current runtime, not a bug to work around in generated source: split the panel out, or accept a fully fresh run.
-
-Replayed answers still spend the run's `totalAgents` invocation fuse: an attempt is charged to the counter whether its answer comes from the record or from a child. A continuation that would cross that fuse needs an explicit operator `budget.totalAgents` override on the structured `workflow` tool; never raise a default automatically.
-
-Parallel scheduling changes may reduce the usable recorded prefix, and independently completed branches are not recovered by business key. Stable `keys` prevent item mismatch; they create no per-item checkpoint.
-
-In the source repository, regression evidence for these limits lives in `tests/extensions/workflows/runtime/workflow-replay.test.ts` and `tests/extensions/workflows/runtime/workflow-fusion.test.ts`.
+Owned by [locus-pi-workflow-run](../../locus-pi-workflow-run/SKILL.md#declare-one-outcome-before-launching):
+strict prefix matching and its named misses, `unnamed-node`, the `fusion()`
+boundary, and the `totalAgents` fuse that replayed answers still spend.
 
 ## Do not promise stronger recovery
 

@@ -58,6 +58,7 @@ const EXPECTED_PACKAGE_WORKFLOW_NAMES = [
   "post-code-review/simplicity",
   "post-code-review/style",
   "post-code-review/synthesis",
+  "stage-loop",
 ] as const;
 
 const PI_PACKAGES = [
@@ -78,6 +79,7 @@ const PACKAGE_WORKFLOW_PATHS = {
   "post-code-review/simplicity": "extensions/workflows/examples/post-code-review/simplicity.workflow.mjs",
   "post-code-review/style": "extensions/workflows/examples/post-code-review/style.workflow.mjs",
   "post-code-review/synthesis": "extensions/workflows/examples/post-code-review/synthesis.workflow.mjs",
+  "stage-loop": "extensions/workflows/examples/stage-loop/stage-loop.workflow.mjs",
 } as const;
 
 function installedStandardSource(run: string, declarations = ""): string {
@@ -354,15 +356,13 @@ describe("npm public package boundary", () => {
     // skill gained the structured-results card.
     // 259 with the external-session skill and its interactive/JSON lifecycle references.
     // 260 with the agent viewer's workflow_return renderer.
-    // 257 since three one-export files merged into their sole writer (T-213).
-    // 258 since the bounded static metadata scanner became catalog/workflow-meta.ts (T-213).
-    // 260 since the fs-free runtime/workflow-handoff-contract.ts and runtime/workflow-outcome.ts
-    // took the declaration and result rules out of their durable counterparts (T-213).
-    // 261 since runtime/workflow-live.ts took the live registry and the journal-to-live-row
-    // projection out of the durable journal (T-213).
-    // 262 since _shared/agent-runtime/agent-live-store.ts took the shared live store out of
-    // the SDK executor host (T-213).
-    expect(dryRun.files).toHaveLength(262);
+    // 254 after the create skill dropped six redirect cards and large-agent-runs.md,
+    // and the registry gained the stage-loop example.
+    // 256 after T-213: three one-export files merged into their sole writer (-3), and five
+    // owner modules appeared — catalog/workflow-meta.ts, runtime/workflow-handoff-contract.ts,
+    // runtime/workflow-outcome.ts, runtime/workflow-live.ts and
+    // _shared/agent-runtime/agent-live-store.ts (+5).
+    expect(dryRun.files).toHaveLength(256);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
