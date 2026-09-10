@@ -117,6 +117,9 @@ export function agentRunBoundaryBlock(boundary: Awaited<ReturnType<typeof execut
     if (boundary.childSession.parentSessionId !== undefined)
       metadata.push(`parentSessionId: ${boundary.childSession.parentSessionId}`);
   }
+  if (boundary.errorLogPath !== undefined) metadata.push(`errors: ${boundary.errorLogPath}`);
+  if (boundary.errorLogWarning !== undefined) metadata.push(boundary.errorLogWarning);
+  if (boundary.failureCause !== undefined) metadata.push(`cause: ${boundary.failureCause}`);
   if (boundary.resultArtifact !== undefined) metadata.push(`resultArtifact: ${boundary.resultArtifact.path}`);
   if (boundary.childOutputStats !== undefined) {
     // T-188 W6 (fix-candidate #4): units + honest label. childToolCalls is the SDK's

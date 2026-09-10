@@ -6,6 +6,8 @@ User-visible changes to the public package.
 
 ### Changed
 
+- Agent and workflow failures now have a bounded project error index with exact evidence pointers. Failure cards and workflow receipts retain the actor, cause and diagnostics even after a handled failure or successful retry; workflow skills share a short diagnosis and repair route.
+
 - Added opt-in plain-text agent execution reports so eligible failed reviewers can reach an arbiter while fatal controls and replay failure records remain intact.
 - Separated specification and implementation authoring, clarified ambiguous workflow goals before building, and gave both adaptive references repeated correction with truthful remaining-work handoffs.
 

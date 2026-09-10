@@ -63,6 +63,7 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
   host: [
     "pi-api",
     "error-text",
+    "error-journal",
     "files",
     "validation",
     "redaction",

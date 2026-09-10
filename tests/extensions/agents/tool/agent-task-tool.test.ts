@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -157,7 +157,8 @@ describe("agent task tool execution", () => {
     const text = '{"status":"failed","summary":"model words only"}';
     mockSdkResult(text);
     const { default: agents } = await import("../../../../extensions/agents/index.js");
-    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
+    const root = tempRootWithTaskAgent();
+    const h = createHarness(root, { sessionId: "parent-session" });
     agents(h.pi);
 
     const result = await runTool(h, "spawn_agent", { task: "Return JSON-looking prose" });
@@ -165,6 +166,7 @@ describe("agent task tool execution", () => {
     expect(result.isError).not.toBe(true);
     expect(result.content).toEqual([{ type: "text", text }]);
     expect(result.details).toMatchObject({ status: "completed", taskCount: 1 });
+    expect(existsSync(path.join(root, ".locus-pi/logs/errors.jsonl"))).toBe(false);
   });
 
   it("returns isError when the child has no non-empty final text", async () => {
@@ -178,6 +180,18 @@ describe("agent task tool execution", () => {
     expect(result.isError).toBe(true);
     expect(result.content).toEqual([{ type: "text", text: "Agent result text is empty." }]);
     expect(result.details).toMatchObject({ status: "failed", taskCount: 1 });
+    const details = result.details as Record<string, unknown>;
+    const record = JSON.parse(readFileSync(details.errorLogPath as string, "utf8"));
+    expect(record).toMatchObject({
+      source: "agent",
+      status: "failed",
+      message: "Agent result text is empty.",
+      sessionId: "sdk-child",
+      callId: details.rowId,
+      resultPath: details.resultArtifact,
+    });
+    expect(record).not.toHaveProperty("runId");
+    expect(record).not.toHaveProperty("attempt");
   });
 
   it("stops progress and surfaces an error when the run boundary throws", async () => {
@@ -193,12 +207,16 @@ describe("agent task tool execution", () => {
       };
     });
     const { default: agents } = await import("../../../../extensions/agents/index.js");
-    const h = createHarness(tempRootWithTaskAgent(), { sessionId: "parent-session" });
+    const root = tempRootWithTaskAgent();
+    mkdirSync(path.join(root, ".locus-pi/logs/errors.jsonl"), { recursive: true });
+    const h = createHarness(root, { sessionId: "parent-session" });
     h.ctx.hasUI = true;
     agents(h.pi);
 
     await expect(runTool(h, "spawn_agent", { task: "explode" })).rejects.toThrow("simulated host crash mid-run");
 
+    expect(h.notifications.join("\n")).toContain("Error index unavailable");
+    expect(h.notifications.join("\n")).toContain("simulated host crash mid-run");
     const factory = h.widgetPayloads.get("agents");
     expect(typeof factory).toBe("function");
     const stubTui = { requestRender: () => {}, terminal: { rows: 30, columns: 100 } };

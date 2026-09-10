@@ -6,6 +6,7 @@
  * stays filesystem-free. Canonical path derivation lives in workflow-run-layout.ts.
  */
 
+import { appendProjectError, projectErrorJournalPath } from "../../_shared/host/error-journal.js";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
@@ -105,6 +106,7 @@ export function claimNewWorkflowRun(
   firstLine: (runId: string) => WorkflowJournalLine,
   now?: () => Date,
   location?: WorkflowRunLocation,
+  workflow?: string,
 ): ClaimedWorkflowRun {
   const runsRoot = workflowRunsRootDir(realpathSync(projectRoot));
   ensureWorkflowDirectoryNoSymlink(realpathSync(projectRoot), runsRoot);
@@ -131,7 +133,7 @@ export function claimNewWorkflowRun(
   }
   try {
     writeFileSync(descriptor, `${JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() })}\n`);
-    return claimRunUnderLock(projectRoot, firstLine, now, location);
+    return claimRunUnderLock(projectRoot, firstLine, now, location, workflow);
   } finally {
     const owned = fstatSync(descriptor);
     closeSync(descriptor);
@@ -145,6 +147,7 @@ function claimRunUnderLock(
   firstLine: (runId: string) => WorkflowJournalLine,
   now: (() => Date) | undefined,
   location: WorkflowRunLocation | undefined,
+  workflow: string | undefined,
 ): ClaimedWorkflowRun {
   let lastError: unknown;
   if (
@@ -168,7 +171,7 @@ function claimRunUnderLock(
       physicalRoot,
       path.join(physicalRoot, path.relative(path.resolve(projectRoot), parent)),
     );
-    const journal = createWorkflowJournalSink(projectRoot, runId, location);
+    const journal = createWorkflowJournalSink(projectRoot, runId, location, workflow);
     const line = firstLine(runId);
     try {
       mkdirSync(runDir);
@@ -201,6 +204,7 @@ export function createWorkflowJournalSink(
   projectRoot: string,
   runId: string,
   location?: WorkflowRunLocation,
+  workflow?: string,
 ): WorkflowJournalFileSink {
   const runDir = workflowRunDir(projectRoot, runId, location);
   const journalPath = workflowJournalFile(runDir);
@@ -216,14 +220,45 @@ export function createWorkflowJournalSink(
   return {
     initialize,
     write(line: WorkflowJournalLine): void {
+      const failed =
+        line.kind === "error" ||
+        (line.kind === "agent_end" && ["failed", "blocked", "cancelled"].includes(line.status ?? ""));
+      if (failed) line.errorLogPath = projectErrorJournalPath(projectRoot);
       try {
-        if (!initialized) {
-          initialize(line);
-          return;
-        }
-        appendWorkflowRunTextFile(runDir, journalPath, JSON.stringify(line) + "\n");
-      } catch {
-        // Never throw into the DSL.
+        if (!initialized) initialize(line);
+        else appendWorkflowRunTextFile(runDir, journalPath, JSON.stringify(line) + "\n");
+      } catch (error) {
+        // Keep the best-effort boundary, but do not claim a persisted source event.
+        if (failed) line.journalWarning = `Source journal write failed (${journalPath}): ${errorMessage(error)}`;
+      }
+      if (failed) {
+        const receipt = appendProjectError(projectRoot, {
+          ts: line.ts,
+          source: "workflow",
+          event: line.kind === "error" ? "error" : "agent_end",
+          message: line.message ?? "No failure message was recorded.",
+          workflow,
+          runId: line.runId,
+          status: line.status,
+          agent: line.agent,
+          displayName: line.displayName,
+          label: line.label,
+          title: line.title,
+          phase: line.phase,
+          callId: line.callId,
+          logicalCallId: line.logicalCallId,
+          attempt: line.attempt,
+          cause: line.failureCause,
+          sessionId: line.childSessionId,
+          replayed: line.replayed,
+          journalPath: line.journalWarning === undefined ? journalPath : undefined,
+          evidenceWarning: line.journalWarning,
+          resultPath: line.resultArtifact,
+          transcriptPath: line.childTrace?.path,
+        });
+        line.errorLogPath = receipt.path;
+        if (receipt.id !== undefined) line.errorId = receipt.id;
+        if (receipt.warning !== undefined) line.errorLogWarning = receipt.warning;
       }
     },
   };
@@ -585,6 +620,10 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
   const stringProblem = optionalFieldsProblem(
     value,
     [
+      "errorLogPath",
+      "errorLogWarning",
+      "journalWarning",
+      "errorId",
       "phase",
       "message",
       "groupId",
@@ -901,6 +940,11 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "capabilityMode",
   ],
   agent_end: [
+    "message",
+    "errorLogPath",
+    "errorLogWarning",
+    "journalWarning",
+    "errorId",
     "phase",
     "groupId",
     "groupKind",
@@ -945,6 +989,10 @@ const WORKFLOW_JOURNAL_FIELDS_BY_KIND = {
     "activeToolNames",
   ],
   error: [
+    "errorLogPath",
+    "errorLogWarning",
+    "journalWarning",
+    "errorId",
     "source",
     "phase",
     "message",
@@ -1598,10 +1646,12 @@ function isPersistedFailureDiagnostic(value: unknown): value is WorkflowFailureD
     "evidencePath",
     "journalPath",
     "repairRequest",
+    "errorLogPath",
+    "errorLogWarning",
   ];
   if (Object.keys(value).some((key) => !allowed.includes(key))) return false;
   if (parseWorkflowFailureDiagnostic(value) === undefined) return false;
-  return ["stage", "workflow", "scriptPath", "evidencePath"].every(
+  return ["stage", "workflow", "scriptPath", "evidencePath", "errorLogPath", "errorLogWarning"].every(
     (field) => !Object.prototype.hasOwnProperty.call(value, field) || typeof value[field] === "string",
   );
 }

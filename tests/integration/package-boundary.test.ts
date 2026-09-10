@@ -351,7 +351,8 @@ describe("npm public package boundary", () => {
     // `skills/.ignore` rides along under `skills/` and is counted here.
     // Adaptive authoring replaces the omnibus manual with focused references and
     // adds a public authoring guide, two runnable source examples and style cards.
-    expect(dryRun.files).toHaveLength(264);
+    // Error diagnostics add one shared writer and one shared diagnostic reference.
+    expect(dryRun.files).toHaveLength(266);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

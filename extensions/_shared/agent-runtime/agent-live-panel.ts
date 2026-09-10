@@ -308,6 +308,7 @@ function dropSubThresholdGroupRows(rows: AgentLiveRow[]): AgentLiveRow[] {
  * A workflow journal anchor and the SDK child it launches describe one logical
  * agent. Once the child exists, keep the child and splice it into the anchor's
  * place in the tree so every fleet/status surface shows that actor once.
+ * Keep failed anchors: host validation can reject an otherwise completed SDK child.
  */
 export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   const rowById = new Map(rows.map((row) => [row.id, row]));
@@ -315,7 +316,15 @@ export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] 
     rows.map((row) => row.parentRowId).filter((id): id is string => id !== undefined),
   );
   const collapsedParentIds = new Set(
-    rows.filter((row) => parentIdsWithChildren.has(row.id) && isWorkflowAgentParentRow(row)).map((row) => row.id),
+    rows
+      .filter(
+        (row) =>
+          parentIdsWithChildren.has(row.id) &&
+          isWorkflowAgentParentRow(row) &&
+          row.status !== "error" &&
+          row.status !== "cancelled",
+      )
+      .map((row) => row.id),
   );
   if (collapsedParentIds.size === 0) return rows;
 

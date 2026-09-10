@@ -30,6 +30,8 @@ import { resolveWorkflowModel } from "../../_shared/model/workflow-model-resolve
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
 import type { AgentDefinition } from "../../_shared/agent-runtime/agents.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
+import { appendProjectError } from "../../_shared/host/error-journal.js";
+import { getProjectRoot, getSessionId } from "../../_shared/host/pi-api.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../../workflows/operator/progress-widget.js";
 import { resolveAgentSelection } from "../catalog/catalog.js";
@@ -122,14 +124,14 @@ export async function runAgentLiveTask(
       errors: [tier.refusal],
       finalAnswer: tier.refusal,
     });
-    return {
+    return recordStandaloneFailure(input, {
       status: "failed",
       executionMode: "named",
       agentName: input.agent.name,
       reason: tier.refusal,
       diagnostics: [tier.refusal],
       lifecycleEntryIds: [],
-    };
+    });
   }
   const executor = createAgentSdkSessionExecutor({
     model: tier.model ?? (ctx as { model?: unknown }).model,
@@ -159,7 +161,19 @@ export async function runAgentLiveTask(
           modelRoleResolution: input.modelRoleResolution,
         })
       : createBareAgentRunRequest(input.task, requestInput);
-  const boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
+  let boundary: Awaited<ReturnType<typeof executeAgentRunBoundary>>;
+  try {
+    boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
+  } catch (err) {
+    recordStandaloneFailure(input, {
+      status: "failed",
+      reason: errorMessage(err),
+      diagnostics: [],
+      lifecycleEntryIds: [],
+    });
+    throw err;
+  }
+  if (boundary.status !== "completed") boundary = recordStandaloneFailure(input, boundary);
   const finishedRow = agentLiveStore.patchExecution(execution, {
     status: boundary.status === "completed" ? "done" : boundary.status === "cancelled" ? "cancelled" : "error",
     ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
@@ -168,11 +182,54 @@ export async function runAgentLiveTask(
     errors: boundary.status === "completed" ? [] : [boundary.reason, ...boundary.diagnostics],
   });
   // REQ-011: append-only transcript event line at completion (finished / error).
-  if (finishedRow !== undefined) {
-    const level = boundary.status === "completed" ? "info" : boundary.status === "cancelled" ? "warning" : "error";
-    emitAgentEventLine(ctx, formatAgentFinishedEventLine(finishedRow), level);
+  if (finishedRow !== undefined && boundary.status === "completed") {
+    emitAgentEventLine(ctx, formatAgentFinishedEventLine(finishedRow), "info");
   }
   return boundary;
+}
+
+/** Final standalone facts only. Workflow children are indexed by their own journal owner. */
+function recordStandaloneFailure(
+  input: AgentLiveTaskInput,
+  result: Awaited<ReturnType<typeof executeAgentRunBoundary>>,
+): Awaited<ReturnType<typeof executeAgentRunBoundary>> {
+  const row = agentLiveStore.rows.get(input.rowId);
+  const parentSessionId = getSessionId(input.ctx);
+  const receipt = appendProjectError(getProjectRoot(input.ctx), {
+    ts: new Date().toISOString(),
+    source: "agent",
+    event: "agent_result",
+    status: result.status,
+    message: result.reason,
+    cause: result.failureCause,
+    agent: result.agentName ?? input.resolvedAgent,
+    displayName: row?.displayName,
+    title: input.title,
+    callId: input.rowId,
+    sessionId: result.childSession?.id,
+    parentSessionId: parentSessionId === "unknown-session" ? undefined : parentSessionId,
+    resultPath: result.resultArtifact?.path,
+    transcriptPath: result.childTrace?.path,
+  });
+  const details = result.resultArtifact?.path ?? result.childTrace?.path;
+  emitAgentEventLine(
+    input.ctx,
+    [
+      `Agent ${row?.displayName ?? result.agentName ?? "(unnamed)"} ${result.status}: ${result.reason}`,
+      `task: ${input.title}`,
+      ...(result.failureCause === undefined ? [] : [`cause: ${result.failureCause}`]),
+      ...(details === undefined ? [] : [`details: ${details}`]),
+      `errors: ${receipt.path}`,
+      ...(receipt.warning === undefined ? [] : [receipt.warning]),
+    ].join("\n"),
+    result.status === "cancelled" ? "warning" : "error",
+  );
+  return {
+    ...result,
+    errorLogPath: receipt.path,
+    ...(receipt.id === undefined ? {} : { errorId: receipt.id }),
+    ...(receipt.warning === undefined ? {} : { errorLogWarning: receipt.warning }),
+  };
 }
 
 /**
