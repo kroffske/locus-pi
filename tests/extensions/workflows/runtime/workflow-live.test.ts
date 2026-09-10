@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { compactWorkflowParentRows } from "../../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import agents from "../../../../extensions/agents/index.js";
 import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import {
@@ -28,6 +29,41 @@ afterEach(() => {
 });
 
 describe("completed workflow live-row retention", () => {
+  it("retains host-rejected calls when the SDK child itself completed", () => {
+    const start: WorkflowJournalLine = {
+      ts: "start",
+      runId: "rejected",
+      executionMode: "bare",
+      callId: "call-1",
+      kind: "agent_start",
+      label: "review",
+    };
+    applyWorkflowJournalLineToAgentLiveStore(start);
+    const parentId = workflowAgentLiveRowId(start);
+    const child = agentLiveStore.begin({
+      parentRowId: parentId,
+      agentName: "reviewer",
+      label: "SDK child",
+      isolated: false,
+      noMcp: false,
+    });
+    agentLiveStore.patch(child.id, { status: "done" });
+    applyWorkflowJournalLineToAgentLiveStore({
+      ...start,
+      kind: "agent_end",
+      status: "failed",
+      message: "Answer exceeded the host limit",
+      errorLogPath: "/project/.locus-pi/logs/errors.jsonl",
+    });
+    const rows = compactWorkflowParentRows([...agentLiveStore.rows.values()]);
+    expect(rows.map((row) => row.id)).toEqual([parentId, child.id]);
+    expect(rows[0]).toMatchObject({
+      status: "error",
+      errors: ["Answer exceeded the host limit", "errors: /project/.locus-pi/logs/errors.jsonl"],
+    });
+    expect(rows[1]?.status).toBe("done");
+  });
+
   it("binds group completion to the exact journal-start execution across replacement and reset", () => {
     const runId = "20260712-234108-group-authority";
     const start: WorkflowJournalLine = {

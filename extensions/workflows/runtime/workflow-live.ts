@@ -105,7 +105,13 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       const patch = {
         status: "error" as const,
         finalAnswer: message,
-        errors: current.errors.includes(message) ? current.errors : [...current.errors, message],
+        errors: [
+          ...current.errors,
+          ...(current.errors.includes(message) ? [] : [message]),
+          ...(line.errorLogPath === undefined ? [] : [`errors: ${line.errorLogPath}`]),
+          ...(line.errorLogWarning === undefined ? [] : [line.errorLogWarning]),
+          ...(line.journalWarning === undefined ? [] : [line.journalWarning]),
+        ],
         ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
         currentTools: [],
       };
@@ -152,6 +158,20 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
     const neverExecuted = terminal && line.executedModel === undefined;
     const patch = {
       status,
+      ...(status === "error" || status === "cancelled" || replayContextError !== undefined
+        ? {
+            errors: [
+              ...current.errors,
+              ...(line.message === undefined ? [] : [line.message]),
+              ...(line.errorLogPath === undefined ? [] : [`errors: ${line.errorLogPath}`]),
+              ...(line.errorLogWarning === undefined ? [] : [line.errorLogWarning]),
+              ...(line.journalWarning === undefined ? [] : [line.journalWarning]),
+              ...(replayContextError === undefined || current.errors.includes(replayContextError)
+                ? []
+                : [replayContextError]),
+            ],
+          }
+        : {}),
       // Slot round on the anchor row (REQ-009): cosmetic while the executor row carries it, but
       // load-bearing in the degraded fallback where no executor row exists (host unavailable).
       ...(line.slotKey !== undefined ? { slotKey: line.slotKey } : {}),
@@ -159,13 +179,6 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       ...(line.worktreePath !== undefined ? { currentPath: line.worktreePath } : {}),
       ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
       ...(status !== "working" ? { currentTools: [] } : {}),
-      ...(replayContextError !== undefined
-        ? {
-            errors: current.errors.includes(replayContextError)
-              ? current.errors
-              : [...current.errors, replayContextError],
-          }
-        : {}),
     };
     if (neverExecuted) agentLiveStore.patchExecutionWithoutModel(execution, patch);
     else

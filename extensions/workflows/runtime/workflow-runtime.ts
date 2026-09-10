@@ -875,6 +875,11 @@ export interface WorkflowChoiceDecision {
 }
 
 export interface WorkflowJournalLine {
+  /** Optional project error-index projection, supplied by the journal sink. */
+  errorLogPath?: string;
+  errorLogWarning?: string;
+  journalWarning?: string;
+  errorId?: string;
   outputAcceptance?: AgentOutputAcceptance;
   choiceDecision?: WorkflowChoiceDecision;
   ts: string;
@@ -2862,6 +2867,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(req.capabilityMode !== undefined ? { capabilityMode: req.capabilityMode } : {}),
       ...(finalResult.activeToolNames !== undefined ? { activeToolNames: finalResult.activeToolNames } : {}),
       status: finalResult.status,
+      ...(finalResult.status !== "completed" ? { message: finalResult.summary } : {}),
       // Machine-readable cause on every non-completed call, so a reader never has to
       // match on `summary` prose to tell a timeout from a cancellation.
       ...(finalResult.status !== "completed" ? { failureCause: workflowAgentFailureCause(finalResult) } : {}),

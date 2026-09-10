@@ -14,6 +14,15 @@ Workflow JavaScript is trusted code with full Node.js access in the Pi host. It
 is not sandboxed. Project approval is a broad Pi trust decision, not approval of
 one workflow file.
 
+## Diagnose before restarting
+
+Workflow not working → open `.locus-pi/logs/errors.jsonl` → follow the exact
+journal/result pointer → repair the responsible layer. Read the shared
+[error diagnostics and jq examples](../../extensions/workflows/references/error-diagnostics.md).
+Captured failures remain there even after success; successful review findings
+are not execution failures. If the index is unavailable, use the evidence path
+and warning in the failure message.
+
 ## Preserve completed work before starting over
 
 For a stopped workflow the normal recovery goal is to avoid dispatching matching

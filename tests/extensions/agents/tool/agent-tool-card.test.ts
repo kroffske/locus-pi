@@ -169,6 +169,37 @@ describe("spawn_agent tool card", () => {
     expect(lines.join("\n")).not.toContain("▌");
   });
 
+  it("keeps exact evidence paths and the index warning in collapsed failures", () => {
+    const index = "/a-long-project-directory/with-a-long-workspace-name/.locus-pi/logs/errors.jsonl";
+    const resultPath = "/a-long-project-directory/.locus-pi/runs/a-child-session/runtime/result.json";
+    const lines = render(
+      spawnAgentTool(),
+      {
+        content: [{ type: "text", text: "Provider quota exhausted" }],
+        isError: true,
+        details: {
+          status: "failed",
+          displayName: "Wren",
+          title: "Review design",
+          failureCause: "provider-error",
+          errorLogPath: index,
+          errorLogWarning: "Error index unavailable: busy",
+          resultArtifact: resultPath,
+        },
+      },
+      { expanded: false, isPartial: false },
+      60,
+    );
+    expect(lines.every((line) => visibleWidth(line) <= 60)).toBe(true);
+    const text = plain(lines)
+      .map((line) => line.replace(/^│ /u, ""))
+      .join("");
+    expect(text).toContain(index);
+    expect(text).toContain(resultPath);
+    expect(text).toContain("provider-error");
+    expect(text).toContain("Error index unavailable: busy");
+  });
+
   it("stays inside narrow widths without losing identity or state", () => {
     const width = 30;
     const lines = render(

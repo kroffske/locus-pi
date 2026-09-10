@@ -2768,6 +2768,14 @@ reports the rules but never resolves them into a claimed future execution graph.
 `/workflows` command and `workflow` tool are available without manual loading.
 See [Architecture and repository boundaries](../../docs/architecture.md) for the package status and publication boundary.
 
+## Error diagnostics
+
+The project error index at `.locus-pi/logs/errors.jsonl` links failed calls,
+including captured reports and unsuccessful retries, to their exact evidence.
+Completion messages distinguish execution failures from the workflow outcome.
+See [error diagnostics](references/error-diagnostics.md) for coverage, optional
+identity fields, `jq` examples, bounded retention and write-failure behavior.
+
 ## Agent execution reports
 
 `await dsl.agent(prompt, { result: "report", label: "review" })` returns opaque host-rendered text. The child still writes ordinary narrative. A successful report includes its exact accepted answer and execution status. A captured failure includes the declared cause, summary, diagnostics and available artifact/trace pointers, without inventing an agent answer. This is an observation of a call, not acceptance of its findings or proof of task completion.

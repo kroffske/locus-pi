@@ -5,6 +5,7 @@
  * the `task`/`spawn_agent` tool, `/agent run`, and `/agent inspect`.
  */
 import { relative } from "node:path";
+import { appendProjectError } from "../../_shared/host/error-journal.js";
 import { createRuntimeArtifactStore } from "../../_shared/runtime/artifacts.js";
 import type { OperatorBlock } from "../../_shared/operator/operator-ui.js";
 import type { ExtensionContext } from "../../_shared/host/pi-api.js";
@@ -28,7 +29,22 @@ export function createUnknownAgentReport(
   const requestedAgent = normalizeRequestedAgentName(agentName) ?? "(empty)";
   const availableAgents = listAvailableAgents();
   const artifact = writeUnknownAgentArtifact(ctx, requestedSurface, requestedAgent, availableAgents);
+  const parentSessionId = getSessionId(ctx);
+  const receipt = appendProjectError(getProjectRoot(ctx), {
+    ts: new Date().toISOString(),
+    source: "agent",
+    event: "catalog_error",
+    status: "blocked",
+    agent: normalizeRequestedAgentName(agentName),
+    label: requestedSurface,
+    cause: "unknown-agent",
+    message: `Unknown agent: ${requestedAgent}`,
+    parentSessionId: parentSessionId === "unknown-session" ? undefined : parentSessionId,
+    resultPath: artifact.ok ? artifact.path : undefined,
+  });
   const details: Record<string, unknown> = {
+    errorLogPath: receipt.path,
+    errorLogWarning: receipt.warning,
     owner: "agents-catalog",
     requestedSurface,
     status: "blocked",
@@ -39,15 +55,22 @@ export function createUnknownAgentReport(
   };
   if (artifact.ok) details.artifactPath = artifact.path;
   else details.artifactError = artifact.reason;
+  const block = unknownAgentBlock(
+    requestedAgent,
+    availableAgents,
+    artifact,
+    getProjectRoot(ctx),
+    ctx.mode === "tui" ? 5 : 2,
+  );
+  block.hint = [
+    ...(block.hint ?? []),
+    `errors: ${receipt.path}`,
+    ...(receipt.warning === undefined ? [] : [receipt.warning]),
+  ];
   return {
-    text: formatUnknownAgentMessage(requestedAgent, availableAgents, artifact, getProjectRoot(ctx)),
-    block: unknownAgentBlock(
-      requestedAgent,
-      availableAgents,
-      artifact,
-      getProjectRoot(ctx),
-      ctx.mode === "tui" ? 5 : 2,
-    ),
+    text: `${formatUnknownAgentMessage(requestedAgent, availableAgents, artifact, getProjectRoot(ctx))}\nerrors: ${receipt.path}${receipt.warning === undefined ? "" : `\n${receipt.warning}`}`,
+
+    block,
     details,
     ...(artifact.ok ? { artifactPath: artifact.path } : {}),
   };

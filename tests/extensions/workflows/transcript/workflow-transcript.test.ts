@@ -205,7 +205,9 @@ describe("workflow persistent transcript", () => {
     expect(completion.digest).toContain("Acceptance remains open");
     expect(completion.digest).toContain("R-CODE, R-GIT");
     expect(completion.digest).not.toContain("unknown error");
-    expect(completion.digest).not.toContain("intermediate child error");
+    expect(completion.digest).toContain("Execution failures (1");
+    expect(completion.digest).toContain("intermediate child error");
+    expect(completion.digest.split("\n")[1]).toContain("Acceptance remains open");
   });
 
   it("uses a journal error only as fallback when no final semantic diagnostic exists", () => {

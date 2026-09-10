@@ -35,6 +35,14 @@
 
 The catalog follows project -> user precedence: project `.agents/agents/`, then user `~/.agents/agents/`. The package ships no profiles.
 
+## Failure diagnostics
+
+Failed standalone calls and workflow agents point to the project-wide
+`.locus-pi/logs/errors.jsonl`. Failure cards retain the cause and complete evidence
+paths even when collapsed. Follow [error diagnostics](../workflows/references/error-diagnostics.md)
+for `jq` queries, rotation, missing facts and logging warnings. Host-rejected
+workflow calls remain visible even when their SDK child completed successfully.
+
 ## Implementation
 
 - Entrypoint: `extensions/agents/index.ts`

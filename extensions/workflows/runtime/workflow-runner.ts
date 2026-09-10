@@ -13,6 +13,7 @@
  *   (b) lexical + physical path-escape checks; (c) docs plainly state author scripts are trusted input.
  *   Hard VM/worker isolation is a pending seam — see TODO(trust-model) marker below.
  */
+import { appendProjectError } from "../../_shared/host/error-journal.js";
 
 import {
   readInterruptedWorkflowResumeBinding,
@@ -1044,6 +1045,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       storageResolutionError = error;
     }
   }
+  const requestedWorkflow = opts.targetBinding?.ref ?? opts.name ?? opts.scriptPath;
   const {
     runId,
     runDir,
@@ -1060,6 +1062,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     }),
     undefined,
     storageLocation,
+    requestedWorkflow,
   );
   const storageRootRunId = storageLocation?.storageRootRunId ?? runId;
   const runtimeDir = workflowRunRuntimeDir(runDir);
@@ -1564,9 +1567,25 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     } catch {
       // An unreadable artifact index costs the evidence pointer, never the verdict.
     }
+    const prior = fields.failureDiagnostic;
+    const errorIndex =
+      prior?.errorLogPath === undefined
+        ? appendProjectError(projectRoot, {
+            ts: new Date().toISOString(),
+            source: "workflow",
+            event: "workflow_result",
+            status: "failed",
+            runId,
+            workflow: requestedWorkflow,
+            message: fields.error,
+            journalPath: workflowJournalFile(runDir),
+          })
+        : { path: prior.errorLogPath, warning: prior.errorLogWarning };
     return {
       ...fields,
       failureDiagnostic: buildWorkflowFailureDiagnostic({
+        errorLogPath: errorIndex.path,
+        ...(errorIndex.warning === undefined ? {} : { errorLogWarning: errorIndex.warning }),
         projectRoot,
         runDir,
         journalPath: workflowJournalFile(runDir),

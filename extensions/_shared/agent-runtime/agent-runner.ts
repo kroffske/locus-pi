@@ -100,6 +100,9 @@ export type AgentRunRequestInput = Partial<Omit<AgentRunRequestBase, "task" | "p
 export const EXECUTED_MODEL_UNAVAILABLE = "unavailable";
 
 export interface AgentRunResult {
+  errorLogPath?: string;
+  errorLogWarning?: string;
+  errorId?: string;
   outputAcceptance?: AgentOutputAcceptance;
   status: AgentRunStatus;
   executionMode?: AgentExecutionMode;

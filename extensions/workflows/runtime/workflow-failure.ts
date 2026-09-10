@@ -21,6 +21,8 @@ import type { WorkflowJournalLine } from "./workflow-runtime.js";
 export type WorkflowFailureOrigin = "script" | "runtime";
 
 export interface WorkflowFailureDiagnostic {
+  errorLogPath?: string;
+  errorLogWarning?: string;
   origin: WorkflowFailureOrigin;
   /** Compacted failure sentence — the thrown message, never a guess. */
   message: string;
@@ -39,6 +41,8 @@ export interface WorkflowFailureDiagnostic {
 }
 
 export interface BuildWorkflowFailureDiagnosticInput {
+  errorLogPath?: string;
+  errorLogWarning?: string;
   projectRoot: string;
   runDir: string;
   /** The run's journal file, owned by the runtime layout (never guessed here). */
@@ -83,6 +87,8 @@ export function buildWorkflowFailureDiagnostic(input: BuildWorkflowFailureDiagno
   );
   const journalPath = relativizePath(input.projectRoot, input.journalPath) ?? input.journalPath;
   return {
+    ...(input.errorLogPath === undefined ? {} : { errorLogPath: input.errorLogPath }),
+    ...(input.errorLogWarning === undefined ? {} : { errorLogWarning: input.errorLogWarning }),
     origin,
     message,
     ...(stage === undefined ? {} : { stage }),
@@ -114,6 +120,8 @@ export function formatWorkflowFailureDiagnosticLines(
     ...(head.length === 0 ? [] : [head.join(" · ")]),
     ...(diagnostic.evidencePath === undefined ? [] : [`evidence: ${diagnostic.evidencePath}`]),
     `journal: ${diagnostic.journalPath}`,
+    ...(diagnostic.errorLogPath === undefined ? [] : [`errors: ${diagnostic.errorLogPath}`]),
+    ...(diagnostic.errorLogWarning === undefined ? [] : [diagnostic.errorLogWarning]),
     ...(options.repairRequest === true ? [`copy: ${diagnostic.repairRequest}`] : []),
   ];
 }
@@ -141,6 +149,12 @@ export function parseWorkflowFailureDiagnostic(value: unknown): WorkflowFailureD
     ...(scriptPath === undefined ? {} : { scriptPath }),
     ...(evidencePath === undefined ? {} : { evidencePath }),
     journalPath,
+    ...(nonEmptyString(record.errorLogPath) === undefined
+      ? {}
+      : { errorLogPath: nonEmptyString(record.errorLogPath)! }),
+    ...(nonEmptyString(record.errorLogWarning) === undefined
+      ? {}
+      : { errorLogWarning: nonEmptyString(record.errorLogWarning)! }),
     repairRequest,
   };
 }
