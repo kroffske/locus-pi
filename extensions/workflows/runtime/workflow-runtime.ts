@@ -424,6 +424,8 @@ export interface WorkflowUsage {
 }
 
 export interface WorkflowDsl {
+  /** Observe an exact answer or an eligible terminal failure as opaque host-rendered text. */
+  agent(prompt: string, opts: WorkflowAgentReportOptions): Promise<string>;
   /** Run one child agent under a small runtime-owned exact-choice contract. */
   agent<const Choices extends readonly [string, string, ...string[]]>(
     prompt: string,
@@ -520,6 +522,8 @@ export interface WorkflowSavedChildResult {
 export type WorkflowSavedChildRunner = (input: WorkflowSavedChildInvocation) => Promise<WorkflowSavedChildResult>;
 
 export interface WorkflowAgentOptions {
+  /** Report mode has its own plain-text overload. */
+  result?: never;
   /** Opt-in accepted tool value for a choice, a closed string output, handoffs or a schema.
    *  Ordinary exact text and fresh-session schema repair are unchanged. */
   returnVia?: "tool";
@@ -690,8 +694,23 @@ export interface WorkflowAgentSchemaOptions extends Omit<
   validate?: WorkflowAgentValidate;
 }
 
+/** Host observation, not review or task acceptance. Shaped outputs are deliberately excluded. */
+export interface WorkflowAgentReportOptions extends Omit<
+  WorkflowAgentOptions,
+  "result" | "returnVia" | "output" | "repair"
+> {
+  result: "report";
+  returnVia?: never;
+  output?: never;
+  repair?: never;
+}
+
 type WorkflowAgentAnyOptions =
-  WorkflowAgentOptions | WorkflowAgentChoiceOptions | WorkflowAgentHandoffOptions | WorkflowAgentSchemaOptions;
+  | WorkflowAgentOptions
+  | WorkflowAgentReportOptions
+  | WorkflowAgentChoiceOptions
+  | WorkflowAgentHandoffOptions
+  | WorkflowAgentSchemaOptions;
 
 const FUSION_INVOCATION_RESERVATION = Symbol("fusion-invocation-reservation");
 const FUSION_REPLAY_REQUIRED = Symbol("fusion-replay-required");
@@ -1689,6 +1708,43 @@ interface AgentSchemaCheck {
   value?: unknown;
 }
 
+/** Only terminal, classified failures with no uncertain child shutdown are observations. */
+function isReportableAgentFailure(result: WorkflowAgentResult): boolean {
+  return (
+    (result.status === "failed" || result.status === "blocked") &&
+    ["provider-error", "empty-answer", "answer-too-long"].includes(workflowAgentFailureCause(result))
+  );
+}
+
+function renderAgentReport(req: WorkflowAgentRequest, value: string | WorkflowAgentResult): string {
+  const header = [
+    "Workflow agent execution report",
+    `Label: ${req.label ?? "unnamed"}`,
+    ...(req.title === undefined ? [] : [`Title: ${req.title}`]),
+  ];
+  if (typeof value === "string") {
+    // Re-rendered from raw replay text: no volatile identity or live-only metadata here.
+    return [
+      ...header,
+      "Execution: completed",
+      "This records an answer, not verified task completion.",
+      "",
+      "Agent answer:",
+      value,
+    ].join("\n");
+  }
+  return [
+    ...header,
+    `Execution: ${value.status}`,
+    `Cause: ${workflowAgentFailureCause(value)}`,
+    `Summary: ${value.summary}`,
+    "No accepted agent answer. This call did not complete successfully.",
+    ...value.diagnostics.map((diagnostic) => `Diagnostic: ${diagnostic}`),
+    ...(value.resultArtifact === undefined ? [] : [`Result artifact: ${value.resultArtifact}`]),
+    ...(value.childTrace === undefined ? [] : [`Child trace: ${value.childTrace.path}`]),
+  ].join("\n");
+}
+
 /** Result of ONE child execution: the exact child text plus, for a shaped call, its verdict. */
 interface AgentAttemptOutcome {
   text: string;
@@ -1701,7 +1757,8 @@ interface AgentAttemptOutcome {
 /** What one PHYSICAL child execution hands back to its logical call. A failure is returned,
  *  not thrown, so the logical call can read its cause and decide whether it may repeat. */
 type PhysicalAgentAttempt =
-  { ok: true; text: string; outcome: AgentAttemptOutcome } | { ok: false; result: WorkflowAgentResult };
+  | { ok: true; text: string; outcome: AgentAttemptOutcome }
+  | { ok: false; result: WorkflowAgentResult; callId: string; replayed: boolean };
 
 interface PhysicalAgentAttemptInput {
   /** The fully resolved request, minus the per-attempt `callId`. */
@@ -2436,7 +2493,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       }
       const replayedText = lookup?.replayed === true ? lookup.text : undefined;
 
-      let lastFailure: WorkflowAgentResult | undefined;
+      let lastFailure: Extract<PhysicalAgentAttempt, { ok: false }> | undefined;
       for (let attempt = 1; ; attempt++) {
         let physical: PhysicalAgentAttempt;
         try {
@@ -2463,9 +2520,11 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           // This run writes its OWN complete record, replayed entries included, so a
           // resume of a resume still has an unbroken prefix to work from.
           options.replay?.recordAgentAttempt(replayCall, { ok: true, text: physical.text });
-          return physical.outcome;
+          return opts?.result === "report"
+            ? { ...physical.outcome, text: renderAgentReport(req, physical.text) }
+            : physical.outcome;
         }
-        lastFailure = physical.result;
+        lastFailure = physical;
         if (attempt >= attempts || !isTransportRetryableFailure(physical.result)) break;
         // `log` carries no agent identity of its own (`workflow-journal.ts` rejects one), so the
         // agent is named in the message; the attempt's own agent_end already holds the rest.
@@ -2479,7 +2538,19 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         });
       }
       options.replay?.recordAgentAttempt(replayCall, { ok: false });
-      throw new WorkflowAgentExecutionError(lastFailure!);
+      const failed = lastFailure!;
+      if (opts?.result === "report" && !failed.replayed && isReportableAgentFailure(failed.result)) {
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          message: `[workflow:report] ${req.label ?? workflowAgentDisplayName(req)}: captured ${workflowAgentFailureCause(failed.result)}; child remains ${failed.result.status}`,
+        });
+        return { text: renderAgentReport(req, failed.result), callId: failed.callId, replayed: false };
+      }
+      throw new WorkflowAgentExecutionError(failed.result);
     } finally {
       // Released on every exit — answer, transport exhaustion, thrown host failure, abort and
       // run deadline alike. A claim that outlived its call would refuse the next round of the
@@ -2830,7 +2901,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       durationMs,
     });
     if (!finalResult.ok || finalResult.status !== "completed" || finalResult.text === undefined) {
-      return { ok: false, result: finalResult };
+      return { ok: false, result: finalResult, callId, replayed };
     }
     return {
       ok: true,
@@ -3028,8 +3099,24 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   function agentDsl(prompt: string, opts: WorkflowAgentChoiceOptions): Promise<string>;
   function agentDsl(prompt: string, opts: WorkflowAgentHandoffOptions): Promise<string[]>;
   function agentDsl(prompt: string, opts: WorkflowAgentSchemaOptions): Promise<unknown>;
+  function agentDsl(prompt: string, opts: WorkflowAgentReportOptions): Promise<string>;
   function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
+    if (opts?.result !== undefined) {
+      if (opts.result !== "report") throw new Error("agent result must be report when supplied");
+      for (const key of [
+        "choice",
+        "choiceFallback",
+        "handoffs",
+        "schema",
+        "validate",
+        "returnVia",
+        "output",
+        "repair",
+      ] as const) {
+        if (opts[key] !== undefined) throw new Error(`agent result: report cannot be combined with ${key}`);
+      }
+    }
     const schema = opts?.schema;
     const declaredChoice = opts?.choice;
     const declaredChoiceFallback = opts?.choiceFallback;

@@ -13,6 +13,12 @@ Build useful graphs of LLM agents. Do not optimize for deterministic re-executio
 
 When the request is to fix a stopped workflow, read [Repair + Continue](references/repair-and-continue.md) first. Repair the same source and preserve the unaffected completed prefix, including literal labels, prompts, order and workspace assumptions. Do not rebuild the graph from scratch merely because execution stopped. Validate the exact repaired source, then hand the result to the run skill; authoring still does not launch it.
 
+## Establish the requested deliverable
+
+Before authoring, inspect the request and supplied documents. If the purpose is unclear, ask one focused question: create a specification, revise an existing specification, or implement a selected design? Clarify which specification/documentation directory is authoritative and whether an unresolved product choice changes the intended outcome. Do not ask again when the user already specified this. A specification need not be flawless to support authorized implementation; ordinary technical defects become assigned work.
+
+These are two independently authored workflows. The first produces the task specification and its review history. After the user examines it and asks to implement, author the second workflow against that actual artifact. At that point define initial slices, references to the specification and documentation directory, and the concrete completion outcome of each phase. The implementation queue may later be re-cut while preserving verified work and unmet requirements. Do not prebuild or automatically launch implementation merely because specification authoring finished. The workflow's own `.design.md` describes its graph; it is not the task specification.
+
 ## Select the graph before loading details
 
 Read [the pattern index](references/INDEX.md), then only the selected card. Default to adaptive slices for substantive implementation: owner cut → implement one slice → review → addressed correction → recheck → owner re-cut. Choose a fixed graph for genuinely fixed work or an explicit request. Claude Code is not a control plane or a required dependency.
@@ -27,12 +33,8 @@ Build-only requests remain `Build design: <exact path>` and `Build approved desi
 
 ## Agent briefs and returns
 
-Give each agent a coherent task, relevant context and a clear completion
-condition. These are ingredients, not mandatory headings. State each fact once;
-do not restate the task under a second "definition of done" section.
-Let the agent choose how to inspect, implement and verify.
-Add procedural instructions only for a concrete repository constraint or known
-failure; do not script tool sequences or repeat a general policy in every node. For a code slice, the reviewer reads the actual complete diff, including uncommitted work. End with a commit only when commit authority exists; never invent it to make review easier. Require coverage of that diff before a favorable verdict.
+Give each agent a coherent task, relevant context and clear completion condition. State each fact once; leave inspection, implementation and verification methods to the agent.
+Add procedural instructions only for a concrete repository constraint or known failure; do not script tool sequences or repeat a general policy in every node. For a code slice, the reviewer reads the actual complete diff, including uncommitted work. End with a commit only when commit authority exists; never invent it to make review easier. Require coverage of that diff before a favorable verdict.
 
 Implementation briefs and templates must distinguish completion from preparation:
 after an authorized environment repair, continue the accepted implementation and
@@ -48,7 +50,9 @@ author-guessed length target. Use `choice` when code branches on a decision and
 array must not become a report envelope or a success signal.
 A stage refusal uses an explicit `choice` identity and `{ ok: false, status }`. Runtime failure statuses are `failed`, `blocked` and `cancelled`; a domain label such as `needs_owner` needs `ok: false` to mark refusal.
 Do not use an empty queue or a success fallback to conceal missing work.
-Use bounded correction and recheck; `throw` is for execution errors, not a routine review decision.
+For substantive review, use an arbiter that evaluates findings and may accept or reject them with evidence, request correction, retry review or disclose a limitation. Reviewer output is input to judgment, not an automatic veto. Preserve the complete inventory of completed, failed, missing and skipped checks. Do not claim a check ran when it did not.
+
+Use `agent(prompt, { result: "report" })` for plain-text calls whose eligible terminal failure must reach that arbiter. Forward the entire host-rendered report. It includes actual answer or failure facts; it is not task acceptance. It cannot combine with shaped output or `returnVia`. Ordinary calls and fatal execution failures still throw; see [report mode](../../extensions/workflows/REFERENCE.md#agent-execution-reports). Use bounded correction and fresh review after every change; allow residual findings to return to the author while progress/resources permit. On exhaustion preserve the latest reviewed artifact, unmet criteria, reason and next action. An incomplete required outcome stays non-successful; a real user question includes options and consequences. `throw` is for execution errors, not a routine review decision.
 
 Add an output bound or per-call budget only for an explicit user requirement,
 an actual consumer contract or a measured failure at that boundary. Name that

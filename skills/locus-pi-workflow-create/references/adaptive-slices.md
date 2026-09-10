@@ -1,38 +1,34 @@
-# Adaptive slices — default implementation pattern
+# Specification and adaptive implementation
 
-Use for substantive implementation whose remaining work can change after a reviewed slice. The owner agent revises the queue; the source visibly schedules it. Do not replace the queue with a fixed roster renamed “dynamic”. Use a fixed graph when work is genuinely fixed or explicitly requested.
+Author these workflows separately. First create a workflow that develops a specification. After its run, the user examines the result and asks to implement. Only then author the implementation workflow against the actual specification and documentation directory. Its initial slice briefs identify a goal, source context, concrete completion outcome, evidence and constraints. The task specification and the workflow graph's `.design.md` are different documents.
 
-Design and implementation are separate entries and separate runs. The owner accepts the task-change design in `artifacts/design.md`, not the authoring `.design.md` that describes the workflow graph.
+If the requested deliverable or authoritative specification is unclear, clarify it before authoring. A clear implementation request is authorization; a special acceptance file is not required. A generated document alone is not authorization. Ordinary omissions and correctable technical defects enter the implementation queue.
 
-Graph: accepted task-change design → baseline → owner cut → scope decision → implement one slice → independent review → route → optional addressed correction → independent recheck → record progress → owner re-cut. An empty queue goes through completion evidence and required final QA. A scope change returns to the human owner.
+## Graphs and judgment
 
-## Queue and brief contracts
+Specification: author → independent reported review → substantive arbiter → correction or review retry → fresh review. The arbiter can accept or reject findings with evidence, return an indispensable product question, or stop with a concrete reason. A completed proposal remains distinct from independently reviewed work and implemented behavior.
 
-Pi supports raw schemas in compatibility workflows. Standard authoring uses the existing `handoffs` array of complete text briefs and `choice` identities. No JSON parsing, domain schema or new queue API is needed: JavaScript consumes array order and length, while agents consume each brief's meaning.
+Implementation: scope intake → baseline → remaining queue → scope decision → implement one slice → reported review → arbiter → correction/review retry → fresh review → record progress → re-cut. After completion evidence, final checks and a final arbiter assess delivery. Fixed graphs and stricter reviewer-gated refinement remain explicit alternatives when the task calls for them.
 
-Each slice includes its stable identity, goal, source context, acceptance evidence and essential constraints. The owner receives the previous complete queue, accepted progress and live source evidence. It may reorder, merge, shrink or replace remaining work within the accepted design. Only the first item runs before the next re-cut. Done work is never silently reintroduced; unmet work is never dropped to make the list fit.
+Use capable agents with outcome-led briefs under existing user routing. Leave inspection and implementation methods to them. Procedural detail is a separate choice for an actual constraint or observed failure, not the definition of an adaptive graph.
 
-Carry the whole queue in a `let` initialized with `[]` inside a finite literal `for` loop. Items stay opaque. Forward `queue[0]` whole to an agent; do not parse fields, mutate the array or truncate it. Source-side validation belongs to the existing checker, shape acceptance to `handoffs`, semantic completeness to the reviewing agents.
+## Queue and continuation
+
+Use `handoffs` for complete text briefs and `choice` for graph edges. Source consumes order/length and forwards opaque values; agents own meaning. The queue owner sees the previous whole queue, verified progress and live source. It may reorder, merge, shrink or replace remaining work within scope. Never silently drop unmet requirements or repeat verified slices.
+
+Carry the queue in a `let` initialized with `[]` before a finite literal `for` loop. Forward each whole item; do not parse or truncate it. Carry narrative history through agent-owned reports/artifacts, preserving all execution outcomes and finding dispositions. No source-side semantic accumulator or parser is needed.
 
 ## Bounds and evidence
 
-Derive the total slice allowance and correction rounds from the actual task. Count implemented slices cumulatively across every re-cut. A per-response `maxItems` is transport shape, not the total allowance. The teaching example permits three slices and one correction per slice; its `maxItems: 100` uses the existing response ceiling so an oversized remaining queue can be reported rather than silently sliced away. Neither number is a default for new tasks.
+Derive limits from the task. The teaching references allow three specification reviews (two corrections), and three implementation slices with three reviews per slice (two corrections). Review retries consume the same review allowance. A last allowed review may accept work; no unreviewed last-minute correction follows it. The implementation graph's longest path is 57 logical calls; transport/output clarification resources remain separate. These are teaching allowances, not defaults for new tasks. `maxItems: 100` is the existing response ceiling, not a total slice allowance.
 
-After the final allowed slice, permit a completion/re-cut check but no additional implementation. Return the remaining queue on exhaustion. An empty queue cannot itself establish success; a separate evidence-based scope decision and required QA still run. The example's maximum is 31 logical agent calls: 2 initial + 4 cuts/scopes (8) + 3 slice cycles with correction (18) + 3 final QA/verdict calls. Output clarification attempts are separate runtime resources.
+New residual findings after verified repairs are not proof of stagnation. Stop for no progress only with repeated evidence that the same criteria remain unresolved. At an allowance limit return the latest reviewed artifact, full remaining queue, unresolved criteria and next action. Exhaustion alone does not require a product decision. An incomplete required outcome remains non-successful.
 
-Do not filter failed or missing QA branches. Pi's `parallel` barrier preserves sibling evidence and rejects failed required branches. Every adverse report reaches the closing decision. Review and recheck inspect the real diff, actual tests and original criteria. A favorable agent decision is still model judgment; source shape alone cannot prove acceptance quality.
+`result: "report"` lets eligible terminal reviewer failures reach the arbiter. Keep failed/missing/skipped checks in its input and final handoff. A failed review is never a completed review. The arbiter can retry or accept a disclosed limitation when the required outcome is otherwise evidenced; it cannot invent evidence or waive the user's scope. Cancellation, global limits, uncertain child shutdown and persistence failures remain fatal. Ordinary `parallel()` still fails closed. See the runtime reference for the narrow capture list.
 
 ## Executable references
 
-- [Design and owner pause](../../../extensions/workflows/references/examples/adaptive-design.workflow.mjs) returns the reviewed proposal and manual next command. It completes the design run successfully but does not approve, implement or launch the next workflow.
-- [Adaptive implementation](../../../extensions/workflows/references/examples/adaptive-slices.workflow.mjs) accepts a task directory, verifies actual owner acceptance, re-cuts the queue and handles adverse exits.
+- [Specification refinement](../../../extensions/workflows/references/examples/adaptive-design.workflow.mjs) publishes the specification and review/disposition history. Its next action is to author implementation after the user's request, not launch a prebuilt command.
+- [Adaptive implementation](../../../extensions/workflows/references/examples/adaptive-slices.workflow.mjs) consumes the selected specification, repairs ordinary omissions, re-cuts remaining work and reports verified/unverified/remaining outcomes.
 
-These are packaged source references, not registered commands. Copy them into a reviewed project workflow folder and set matching `meta.name` values before using the shown commands. Customize task-derived limits, roles, criteria and output location in the design. Baseline preparation is not a slice. Commit only when the task already authorizes it.
-
-For a host-managed operator UI use [human continuation](human-continuation.md). Manual cross-workflow handoff and host continuation are distinct choices; never simulate approval with a nonempty path or `next_command` string.
-
-## Owner acceptance convention
-
-The design entry writes `artifacts/design.md` under the task directory. The owner records acceptance in `artifacts/design-acceptance.md`, naming the exact design revision or content identity and accepted scope. A note written by the designer or a reviewer is not owner acceptance. The implementation entry checks the actual record and current design before doing work; it does not manufacture a human decision. This is an example convention, not a second host continuation protocol. If copied with different entry names, update the manual next command to match those names.
-
-Implementation refusals such as `needs_owner` return `ok: false` and are non-successful runs. The design entry returns `ok: true` because its proposal deliverable is complete; its `needs_owner` field describes the manual next step, not an automatic host pause or authorization.
+These are packaged references, not registered commands. Copy/adapt a selected source into a reviewed project workflow folder, name its entry, set task-specific initial slices, criteria, resource bounds and artifact locations, then validate. The source never launches its counterpart. Baseline preparation is not implementation. Commit only when authorized. Headless product questions return readable questions/options and artifact paths, not an unavailable interactive pause.

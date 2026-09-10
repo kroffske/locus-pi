@@ -2767,3 +2767,17 @@ reports the rules but never resolves them into a claimed future execution graph.
 `workflows` is registered in `package.json#pi.extensions` and loads by default; the
 `/workflows` command and `workflow` tool are available without manual loading.
 See [Architecture and repository boundaries](../../docs/architecture.md) for the package status and publication boundary.
+
+## Agent execution reports
+
+`await dsl.agent(prompt, { result: "report", label: "review" })` returns opaque host-rendered text. The child still writes ordinary narrative. A successful report includes its exact accepted answer and execution status. A captured failure includes the declared cause, summary, diagnostics and available artifact/trace pointers, without inventing an agent answer. This is an observation of a call, not acceptance of its findings or proof of task completion.
+
+Use it when a substantive arbiter should receive a failed reviewer alongside successful checks. Forward whole reports in prompts. The arbiter evaluates findings, evidence and missing coverage, then recommends correction, another review, a disclosed limitation or a concrete stop. Preserve every failed/missing/skipped check in the downstream handoff. Ordinary `agent()` still returns exact text or throws; ordinary `parallel()` remains fail-closed. A parallel group of report-mode calls can return all eligible observations without dropping a failed sibling.
+
+The initial capture set is deliberately narrow: terminal `failed`/`blocked` outcomes classified as `provider-error`, `empty-answer` or `answer-too-long`. Provider errors are observed on the first attempt; the transport retry option does not retry them. Inspect possible side effects before requesting another worker. A failed review was not completed, even if a downstream arbiter delivers a useful artifact.
+
+Cancellation, unclassified/raw thrown errors, uncertain timeout/shutdown, global invocation/deadline limits, workspace/permission/operator failures, unavailable SDK, output protocol failures and persistence errors propagate. Failures classified on replayed answers also propagate: tightening the current answer bound cannot silently turn a previously successful review into a failure report and rerun the suffix.
+
+`result` accepts only `"report"` or omission. It cannot combine with `choice`, `choiceFallback`, `handoffs`, `schema`, `validate`, `returnVia`, `output` or `repair`. Invalid declarations fail before child execution. `maxAnswerChars` applies to the actual answer before the host wraps it; report mode does not impose an output schema or a new answer limit. Author the option as the literal `result: "report"`. The source checker validates directly declared option pairs and keeps returned text opaque; it does not resolve option objects reached through variables or spreads. Runtime validation applies to every call.
+
+The real child status and raw answer remain in journal/artifact/replay records. Captured failures remain replay `ok:false`, so resume reruns that call and the following suffix. Successful reports omit volatile run/call ids and live-only metadata, keeping their rendered bytes stable when the raw answer is replayed. A runtime log records when a failed child was captured as an observation. Reports do not change result/partial semantics or `consumeTextArtifact` admission: the latter still requires a successful source run and verified artifact provenance, not completed independent review.

@@ -4,6 +4,11 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- Added opt-in plain-text agent execution reports so eligible failed reviewers can reach an arbiter while fatal controls and replay failure records remain intact.
+- Separated specification and implementation authoring, clarified ambiguous workflow goals before building, and gave both adaptive references repeated correction with truthful remaining-work handoffs.
+
 ## [0.7.3] - 2026-09-10
 
 ### Changed

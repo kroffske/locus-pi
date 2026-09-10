@@ -113,12 +113,7 @@ independence. Configure routes through `/model-roles` or `~/.pi/agent/model-role
 
 ### Return a result and continue
 
-A workflow returns its result and evidence. A `next_command` field is a manual
-suggestion; it does not execute another workflow or authorize implementation.
-The design reference returns the reviewed proposal to the owner. The owner
-accepts that exact design revision before starting the implementation entry.
-A nonempty acceptance path is insufficient; the first implementation agent reads
-and checks the actual acceptance evidence.
+A specification workflow returns its artifact and review history. After the user examines it and asks to implement, author a separate implementation workflow against that actual specification and documentation directory. Define initial slices and completion outcomes during that authoring step. A next-action field is guidance, not execution or authorization; no special acceptance-file ceremony is required. Ordinary technical omissions can be repaired in scope by the implementation workflow.
 
 For a host-managed question, `awaitOperator` declares a pause and the source
 returns immediately. The host starts a new run after a real answer and verifies
@@ -127,13 +122,9 @@ and from `invokeWorkflow`, which actually invokes a saved child with runtime-own
 checkpoint semantics. Choose the mechanism needed by the design; never run a
 child across an unresolved owner decision. See [continuation](../extensions/workflows/references/recovery-and-continuation.md).
 
-## Planned: specification and implementation as independent workflows
+## Specification and implementation as independent workflows
 
-This is the accepted direction for the next authoring revision. The current
-adaptive references do not yet implement the full correction behavior below.
-In particular, the design example stops after one reconciliation, and the
-implementation example still uses an acceptance-file convention and one
-correction per slice.
+Before authoring, clarify the intended deliverable if the request is ambiguous: create a specification, revise one, or implement the selected design. Identify the authoritative specification and unresolved product choices. Preserve a clear user instruction; a specification need not be flawless to begin authorized implementation.
 
 ### Produce the specification first
 
@@ -141,8 +132,7 @@ Author and run a workflow whose deliverable is the task specification. Its
 agents investigate the task, write the specification, review it and correct
 findings. The specification records intended behavior, scope, responsibilities,
 constraints, acceptance scenarios, assumptions and unresolved work. A fresh
-review follows each correction. Evidence-backed rejection of a finding also
-receives independent review.
+review follows each correction. A substantive arbiter can accept or reject findings with evidence. Reviewers assess prior dispositions on subsequent rounds; a final arbiter decision remains an explicitly attributed judgment.
 
 ### Author implementation from the actual specification
 
@@ -176,20 +166,16 @@ must grant new permission.
 
 Every result distinguishes delivered and verified work, unverified work and
 remaining work. A partial implementation is not a completed feature. Existing
-runtime failure and partial-result rules remain unchanged; this plan adds no
+runtime failure and partial-result rules remain unchanged; this behavior adds no
 global retry scheduler, status system or automatic cross-workflow launcher.
 
-### Planned implementation and proof
+### Review failure and remaining work
 
-Update the workflow-create guidance and both adaptive examples together. Reuse
-the existing bounded-refinement primitives for correction and fresh review.
-Extend the actual-example tests to cover residual findings after a second
-review, implementation from an imperfect specification, repeated corrections,
-real owner decisions, resource stops and failed required reviews. Finally,
-exercise two separately authored workflows on disposable local content,
-creating the implementation source only after reading the first artifact.
-Scripted-child tests prove routing; a live run is still needed to demonstrate
-real agent behavior.
+The default uses outcome-led briefs for capable agents and substantive arbitration. Fixed graphs and procedural detail remain separate task-dependent choices; no model route is changed automatically.
+
+An opted-in `agent(prompt, { result: "report" })` returns the actual answer or eligible host-observed failure facts for the next agent. Preserve full reports from completed, failed, missing and skipped checks. An arbiter may reject a finding, request correction, retry a review or continue with a disclosed limitation when the requested outcome is evidenced. A failed check is never described as completed. Cancellation, global limits, uncertain shutdown and persistence failures remain fatal. See [the exact report contract](../extensions/workflows/REFERENCE.md#agent-execution-reports).
+
+Both adaptive references allow new residuals to return to the author after the second review. Teaching limits allow two corrections with fresh reviews; actual resource limits come from the task. On exhaustion they return the latest reviewed artifact and remaining criteria with a continuation action. Scripted-child regression tests prove graph routing and failure/replay boundaries; they do not certify model judgment, the user's feature or a previously stopped project run.
 
 ## Authoring references
 

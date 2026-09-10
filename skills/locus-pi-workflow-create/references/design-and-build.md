@@ -138,3 +138,7 @@ For adaptive slices, name the queue owner, cumulative slice allowance, correctio
 Budget values and failure dispositions belong to the [runtime reference](../../../extensions/workflows/REFERENCE.md); source provenance, mutation and permitted DSL methods belong to [source contract](../../../extensions/workflows/references/source-shape.md#machine-enforced-standard-source-shape). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
 
 A standard source check is not live proof. Report the exact checks executed and any unavailable native checker, dependency, host or model route. Do not report successful Build after a skipped gate.
+
+## Task specification versus workflow design
+
+Before writing this graph design, resolve whether the user wants specification creation, specification revision or implementation. Ask only when the request and supplied documents leave that ambiguous. For implementation, identify the actual selected specification and documentation directory, then define initial slices and the completion outcome of every phase. A `.design.md` here describes the workflow graph; it does not replace the task specification. Author the implementation workflow after the user has seen the specification and requested implementation, not as an automatic companion to the specification workflow.
