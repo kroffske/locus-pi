@@ -1,6 +1,6 @@
 # Workflow runtime and DSL reference
 
-This is the advanced implementation reference for the `workflows` extension. New operators should start with [`README.md`](README.md) and [`../../docs/workflows.md`](../../docs/workflows.md); workflow authors should start with [`AUTHORING.md`](AUTHORING.md).
+This is the advanced implementation reference for the `workflows` extension. New operators should start with [`README.md`](README.md) and [`../../docs/workflows.md`](../../docs/workflows.md); workflow authors should start with [Authoring guide](../../docs/locus-pi-workflows.md).
 
 ## Read only the required contract
 
@@ -14,8 +14,8 @@ and numeric defaults. New, separately owned extensions are:
 - [Recovery and continuation](references/recovery-and-continuation.md): explicit
   conservative interrupted recovery and the separate split-run human lifecycle.
 
-Authors select one of four [pattern cards](../../skills/locus-pi-workflow-create/references/INDEX.md).
-The canonical source grammar remains [AUTHORING.md](AUTHORING.md#machine-enforced-standard-source-shape).
+Authors select one of the [pattern cards](../../skills/locus-pi-workflow-create/references/INDEX.md).
+The canonical source grammar remains [Workflow source contract](references/source-shape.md#machine-enforced-standard-source-shape).
 The complete manual is not a prerequisite for authoring a fixed chain. Existing
 section anchors remain stable; a new field's detailed contract is not duplicated
 in the short skill router.
@@ -1219,7 +1219,7 @@ export default async function runWorkflow(dsl, input) {
 
 This example passes the machine-enforced `standard` grammar. The complete rule
 list is in
-[`extensions/workflows/AUTHORING.md`](AUTHORING.md#machine-enforced-standard-source-shape).
+[Workflow source contract](references/source-shape.md#machine-enforced-standard-source-shape).
 Inside Pi, Build checks an authored file by calling `workflow_check_source`
 with:
 
@@ -1358,6 +1358,10 @@ Titles exactly equal the literal `phase()` arguments they describe. Every
 packaged workflow with a non-empty declaration is regression-tested against its
 own unique literal calls in first-source order; workflows without a declaration
 remain valid.
+
+Do not reconstruct evidence paths from a single run id. Use the returned `runDir`
+and the status/result commands; grouped children and resume attempts have their
+own locations.
 
 ### Workflow input and host continuation
 
@@ -1609,6 +1613,9 @@ canonical path and source hash, so a higher-precedence shadow fails closed rathe
 than replacing the installed child.
 The root and children share cancellation, global concurrency, one physical-call
 counter, one 24-hour emergency deadline, and one fenced workflow-workspace lease.
+The lease excludes concurrent runs on the same namespace and prevents a stale
+owner from committing a checkpoint after takeover. Keys are compact stable
+identities, not payloads.
 Saved children cannot invoke saved grandchildren; direct or source-identity
 cycles fail before model work.
 

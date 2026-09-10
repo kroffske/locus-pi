@@ -45,7 +45,10 @@ Purpose: <one sentence>
 Input: <semantic text or none>
 Primary output: `<name>.md`
 Evidence boundary: <semantic input, caller items, author-known prompt material, or child inspection>
-Pattern: <catalog pattern, or why none fits>
+Pattern: <adaptive-slices by default for implementation, or reason for another pattern>
+Brief detail: <outcome-led by default, or procedural with reason>
+Context: <repository checkout, task directory, output location; agents discover files>
+Executors: <responsibility roles and verified model routes; no unverified engine names>
 
 Namespace: `runnable root` (include the `<name>` entry below) or `group-only`
 (omit the root entry; children remain directly runnable)
@@ -81,8 +84,8 @@ really decomposes into more coherent subtasks.
 Review whether each brief gives the agent enough to complete its task. Remove
 mechanical headings, repeated completion criteria, tool choreography and
 general policy that add no task-specific information.
-For a review edge, end the reviewed stage with a commit and let the reviewer read
-`git diff <stage-base>..HEAD` with its own tools; require it to account for every
+For a review edge, let the reviewer inspect the full current diff with its own tools.
+Commit only within existing task authorization; require it to account for every
 in-scope path in that diff before a favorable verdict. Do not have the producer
 rebuild the change as an evidence bundle for the reviewer to read.
 For each shaped result or author-selected limit, identify the consuming edge
@@ -130,8 +133,8 @@ copyable launch command `/workflows run <name>` (or the qualified child ref).
 
 ## Pattern-specific design decisions
 
-For fixed graphs, do not add a judge or semantic retry that the request did not require. For refinement, record the completion authority, immutable criteria, measured evidence, literal round cap, no-progress rule, exact handoff and terminal outcomes. For decomposition, record local concurrency, global budget and key ownership. Human continuation names two runs and a verified artifact handoff, never a suspended JavaScript stack.
+For adaptive slices, name the queue owner, cumulative slice allowance, correction/recheck edge, scope-change exit and required final QA. Re-cut after each accepted slice, including the apparent last one, so an empty queue cannot hide unmet requirements. For fixed graphs, do not add a judge or semantic retry that the request did not require. For refinement, record the completion authority, immutable criteria, measured evidence, literal round cap, no-progress rule, exact handoff and terminal outcomes. For decomposition, record local concurrency, global budget and key ownership. Human continuation names two runs and a verified artifact handoff, never a suspended JavaScript stack.
 
-Budget values and failure dispositions belong to the [runtime reference](../../../extensions/workflows/REFERENCE.md); source provenance, mutation and permitted DSL methods belong to [AUTHORING.md](../../../extensions/workflows/AUTHORING.md). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
+Budget values and failure dispositions belong to the [runtime reference](../../../extensions/workflows/REFERENCE.md); source provenance, mutation and permitted DSL methods belong to [source contract](../../../extensions/workflows/references/source-shape.md#machine-enforced-standard-source-shape). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
 
 A standard source check is not live proof. Report the exact checks executed and any unavailable native checker, dependency, host or model route. Do not report successful Build after a skipped gate.

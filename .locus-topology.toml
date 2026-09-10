@@ -208,3 +208,11 @@ ceiling = 813
 owner = "npm package boundary tests"
 reason = "One comment line documents the single added viewer renderer beside the existing package inventory assertion."
 trigger = "Further growth above 813 lines requires a package-boundary test responsibility-split review."
+
+[[exceptions]]
+path = "extensions/workflows/tool/workflow-source-shape.ts"
+rule = "code-lines"
+ceiling = 2465
+owner = "workflow source checker"
+reason = "Thirteen lines for bounded whole-list carry and nested list prompt joins reuse the existing provenance analysis; extracting a separate queue checker would duplicate its binding and alias authority."
+trigger = "Any growth above 2465 lines or a second independent provenance policy requires an owner-preserving checker split review."

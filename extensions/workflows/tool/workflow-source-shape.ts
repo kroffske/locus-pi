@@ -193,7 +193,7 @@ export function standardWorkflowSourceShapeDiagnostics(source: string): Workflow
     root,
     runEntry,
     dslBindings,
-    bindingModel.collections,
+    bindingModel,
     diagnostics.sink(WORKFLOW_SOURCE_DIAGNOSTIC_CODES.call, runEntry ?? root),
   );
   validateStandardValueUses(
@@ -962,9 +962,14 @@ function validateStandardCalls(
   root: SgNode,
   runEntry: SgNode | undefined,
   dslBindings: ReadonlySet<string>,
-  collectionBindings: StandardCollectionBindings,
+  bindingModel: StandardBindingModel,
   errors: WorkflowSourceDiagnosticSink,
 ): void {
+  const collectionBindings = bindingModel.collections;
+  const visibleCollections = new Set([
+    ...collectionBindings.names,
+    ...[...bindingModel.provenance].filter(([, value]) => value.kind === "opaque-list").map(([name]) => name),
+  ]);
   validateStandardBindingShadows(root, runEntry, dslBindings, collectionBindings, errors);
   for (const call of root.findAll({ rule: { kind: "call_expression" } })) {
     const callee = unwrapStandardParentheses(callCallee(call));
@@ -976,7 +981,7 @@ function validateStandardCalls(
     const directDsl = directStandardDslCall(callee, dslBindings);
     if (
       directDsl === undefined &&
-      !isVisibleCollectionCall(call, collectionBindings.names, dslBindings) &&
+      !isVisibleCollectionCall(call, visibleCollections, dslBindings) &&
       !isBoundaryInputNormalization(call)
     ) {
       errors.add("standard profile calls only direct DSL primitives and visible map/prompt-join operations", call);
@@ -1510,7 +1515,11 @@ function collectStandardBoundedCarry(
       declaration.range().start.index >= loop.range().start.index
     )
       continue;
-    if (staticStringValue(declaration.field("value") ?? undefined) === undefined) continue;
+    const seed = declaration.field("value") ?? undefined;
+    const listSeed =
+      seed?.kind() === "array" &&
+      seed.children().every((child) => ["[", "]", "comment"].includes(String(child.kind())));
+    if (!listSeed && staticStringValue(seed) === undefined) continue;
     const callee = right.kind() === "call_expression" ? unwrapStandardParentheses(callCallee(right)) : undefined;
     if (
       right.kind() !== "identifier" &&
@@ -1518,7 +1527,9 @@ function collectStandardBoundedCarry(
     )
       continue;
     const value = standardExpressionProvenance(right, provenance, dslBindings);
-    if (value?.kind !== "opaque-value" && value?.kind !== "runtime-control") continue;
+    if (value === undefined) continue;
+    if (listSeed ? value?.kind !== "opaque-list" : value?.kind !== "opaque-value" && value?.kind !== "runtime-control")
+      continue;
     const priorKind = carriedKinds.get(target.text());
     if (priorKind !== undefined && priorKind !== value.kind) {
       errors.add("standard bounded carry does not mix opaque text with runtime control", assignment);
@@ -1553,6 +1564,9 @@ function standardValueProvenance(
       duplicateNames.add(name);
       return;
     }
+    // An empty array seed cannot erase a carried model list on the alias fixed-point pass.
+    if (priorOwner === ownerId && provenance.get(name)?.kind === "opaque-list" && value.kind === "known-collection")
+      return;
     owners.set(name, ownerId);
     provenance.set(name, value);
   };
@@ -1576,18 +1590,6 @@ function standardValueProvenance(
     }
   }
 
-  for (const loop of runEntry.findAll({ rule: { kind: "for_in_statement" } })) {
-    const list = standardExpressionProvenance(loop.field("right") ?? undefined, provenance, dslBindings);
-    if (list?.kind !== "opaque-list" && list?.kind !== "known-collection") continue;
-    const left = loop.field("left") ?? undefined;
-    if (left?.kind() !== "identifier" || !["const", "let"].includes(loop.field("kind")?.text() ?? "")) {
-      errors.add("standard profile binds each opaque loop item to one unchanged identifier", left ?? loop);
-    }
-    for (const name of standardLoopBindingNames(left)) {
-      reserve(name, { kind: list.kind === "opaque-list" ? "opaque-value" : "known-value" }, left?.id() ?? loop.id());
-    }
-  }
-
   classifyStandardCallbackParameters(root, runEntry, provenance, dslBindings, reserve, errors);
 
   collectStandardDeclarationProvenance(root, provenance, dslBindings, errors, reserve);
@@ -1597,6 +1599,17 @@ function standardValueProvenance(
   const declarationCount = root.findAll({ rule: { kind: "variable_declarator" } }).length;
   for (let pass = 0; pass < declarationCount; pass += 1) {
     const before = JSON.stringify([...provenance]);
+    for (const loop of runEntry.findAll({ rule: { kind: "for_in_statement" } })) {
+      const list = standardExpressionProvenance(loop.field("right") ?? undefined, provenance, dslBindings);
+      if (list?.kind !== "opaque-list" && list?.kind !== "known-collection") continue;
+      const left = loop.field("left") ?? undefined;
+      if (left?.kind() !== "identifier" || !["const", "let"].includes(loop.field("kind")?.text() ?? "")) {
+        errors.add("standard profile binds each opaque loop item to one unchanged identifier", left ?? loop);
+      }
+      for (const name of standardLoopBindingNames(left)) {
+        reserve(name, { kind: list.kind === "opaque-list" ? "opaque-value" : "known-value" }, left?.id() ?? loop.id());
+      }
+    }
     collectStandardDeclarationProvenance(root, provenance, dslBindings, errors, reserve);
     classifyStandardCallbackParameters(root, runEntry, provenance, dslBindings, reserve, errors);
     if (JSON.stringify([...provenance]) === before) break;

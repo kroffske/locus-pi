@@ -3,7 +3,7 @@
 Start with plain `agent()` text for a report, review or narrative handoff. Running
 commands or writing files does not by itself require structured output. Add a
 contract only when the next consumer needs one: `choice` for code branching,
-`handoffs` for independently scheduled discovered work units, or `output` for an
+`handoffs` for discovered work units, sequential or independent, or `output` for an
 actual string-format requirement. Raw `schema` remains compatibility-only.
 
 When a structured result follows commands or file writes, use
@@ -38,3 +38,5 @@ runtime owner, and never silently truncate complete work to pass validation.
 Extend the existing workflow_return path, not a second return tool. Format clarification stays in the same child session and uses bounded attempts and cumulative resources. Semantic improvement is a fresh worker with the original goal and exact feedback. A successful proposal followed by cancellation/provider failure is not an accepted result.
 
 Shape validity does not prove factual correctness. A required verifier remains required. An unknown field is not a verified absence; a missing verifier is not a clean decision. Reused answers are marked as reused, not given invented new child receipts. See the canonical [output acceptance contract](../../../extensions/workflows/references/output-acceptance.md) for currently supported combinations and exact limits.
+
+For a revisable slice queue use [adaptive slices](adaptive-slices.md): the structured result is an array of complete text briefs. The queue owner interprets each brief; source forwards items unchanged. A domain object schema is unnecessary when no source edge consumes its individual fields.

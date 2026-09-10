@@ -77,7 +77,7 @@ function dslReturnSource(call: string, body: string): string {
 describe("design-first readable workflow authoring", () => {
   const authoringSurfaces = [
     "skills/locus-pi-workflow-create/SKILL.md",
-    "extensions/workflows/AUTHORING.md",
+    "skills/locus-pi-workflow-create/references/design-and-build.md",
     "extensions/workflows/REFERENCE.md",
     "extensions/workflows/tool/workflow-tool.ts",
     "extensions/workflows/manifest.json",
@@ -107,7 +107,7 @@ describe("design-first readable workflow authoring", () => {
       "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]";
     for (const relativePath of [
       "skills/locus-pi-workflow-run/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
+      "extensions/workflows/REFERENCE.md",
       "extensions/workflows/references/patterns.md",
     ]) {
       expect(source(relativePath)).toContain(canonical);
@@ -123,7 +123,7 @@ describe("design-first readable workflow authoring", () => {
 
   it.each([
     "skills/locus-pi-workflow-create/SKILL.md",
-    "extensions/workflows/AUTHORING.md",
+    "extensions/workflows/references/source-shape.md",
     "extensions/workflows/REFERENCE.md",
   ])("publishes the runnable standard source gate on %s", (relativePath) => {
     expect(source(relativePath)).toContain("workflow_check_source");
@@ -146,7 +146,8 @@ describe("design-first readable workflow authoring", () => {
 
   it("runs every public declared-standard documentation snippet through the source checker", () => {
     const documents = [
-      "extensions/workflows/AUTHORING.md",
+      "extensions/workflows/references/source-shape.md",
+      "skills/locus-pi-workflow-create/references/source-boundary.md",
       "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/REFERENCE.md",
       "extensions/workflows/examples/README.md",
@@ -163,7 +164,8 @@ describe("design-first readable workflow authoring", () => {
 
   it("keeps standard teaching free of author-side capability and answer engineering", () => {
     const documents = [
-      "extensions/workflows/AUTHORING.md",
+      "extensions/workflows/references/source-shape.md",
+      "skills/locus-pi-workflow-create/references/source-boundary.md",
       "skills/locus-pi-workflow-create/SKILL.md",
       "extensions/workflows/REFERENCE.md",
       "extensions/workflows/examples/README.md",
@@ -177,7 +179,7 @@ describe("design-first readable workflow authoring", () => {
   });
 
   it("teaches one project-local workflow workspace separate from two-zone run evidence", () => {
-    for (const relativePath of ["extensions/workflows/AUTHORING.md", "docs/workflows.md"]) {
+    for (const relativePath of ["skills/locus-pi-workflow-create/references/source-boundary.md", "docs/workflows.md"]) {
       const text = source(relativePath);
       expect(text).toContain(".locus-pi/workspaces/<generated-run-name>");
       expect(text).not.toContain("outputs/<workflow-name>");
@@ -197,7 +199,7 @@ describe("design-first readable workflow authoring", () => {
   it("teaches durable workflow files separately from disposable scratch", () => {
     for (const relativePath of [
       "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/AUTHORING.md",
+      "skills/locus-pi-workflow-create/references/source-boundary.md",
       "extensions/workflows/REFERENCE.md",
       "docs/workflows.md",
     ]) {
@@ -214,9 +216,9 @@ describe("design-first readable workflow authoring", () => {
   });
 
   it("checks canonical AUTHORING fragments while keeping the installed router code-free", () => {
-    const authoring = javascriptDocSnippets("extensions/workflows/AUTHORING.md");
+    const authoring = javascriptDocSnippets("extensions/workflows/references/source-shape.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
-    expect(authoring).toHaveLength(6);
+    expect(authoring).toHaveLength(3);
     expect(skill).toHaveLength(0); // Entrypoint routes to tested complete examples; it duplicates no harness.
 
     const fragments = [
@@ -245,7 +247,10 @@ ${authoring[1] ?? ""}
   });
 
   it("keeps unused acknowledgement protocols review-owned instead of parsing prompt English", () => {
-    for (const relativePath of ["extensions/workflows/AUTHORING.md", "extensions/workflows/REFERENCE.md"]) {
+    for (const relativePath of [
+      "extensions/workflows/references/source-shape.md",
+      "extensions/workflows/REFERENCE.md",
+    ]) {
       const text = source(relativePath);
       expect(text).toMatch(/acknowledgement/iu);
       expect(text).toMatch(/review/iu);
@@ -505,7 +510,7 @@ ${authoring[1] ?? ""}
     const design = source("skills/locus-pi-workflow-create/references/design-and-build.md");
     expect(router).toContain("This skill owns authoring only.");
     expect(router).toContain("references/design-and-build.md");
-    expect(router).toContain("AUTHORING.md#machine-enforced-standard-source-shape");
+    expect(router).toContain("source-shape.md#machine-enforced-standard-source-shape");
     expect(router).toContain("REFERENCE.md");
     expect(router).toContain("Build does not run");
     expect(router).toContain("exact copyable launch command");
@@ -520,7 +525,9 @@ ${authoring[1] ?? ""}
   });
 
   it("keeps source grammar, labels, output and failure authority in canonical references", () => {
-    const authoring = source("extensions/workflows/AUTHORING.md");
+    const authoring =
+      source("extensions/workflows/references/source-shape.md") +
+      source("skills/locus-pi-workflow-create/references/source-boundary.md");
     const manual = source("extensions/workflows/REFERENCE.md");
     const output = source("extensions/workflows/references/output-acceptance.md");
     expect(authoring).toContain("exact text");
@@ -530,7 +537,7 @@ ${authoring[1] ?? ""}
     expect(authoring).toContain("provenance");
     expect(authoring).toContain("Markdown/table/report renderers");
     expect(authoring).toContain("raw `schema`");
-    expect(authoring).toContain("dsl.items()");
+    expect(manual).toContain("dsl.items()");
     expect(manual).toContain("10,000 physical attempts/run");
     expect(manual).toContain("output-acceptance.md");
     expect(manual).toContain("execution-controls.md");
@@ -594,7 +601,7 @@ ${authoring[1] ?? ""}
     expect(callerItems).toContain("requires caller-supplied items");
   });
 
-  it("ships four pattern cards and keeps no empty redirect cards beside them", () => {
+  it("ships the graph cards and focused authoring references without empty redirects", () => {
     const base = "skills/locus-pi-workflow-create/references";
     const cards = ["fixed-graph.md", "bounded-refinement.md", "decomposition.md", "human-continuation.md"];
     const index = source(`${base}/INDEX.md`);
@@ -618,12 +625,17 @@ ${authoring[1] ?? ""}
     ];
     expect(readdirSync(path.join(root, base)).sort()).toEqual([
       "INDEX.md",
+      "adaptive-slices.md",
+      "authoring-decisions.md",
+      "authoring-styles.md",
       "bounded-refinement.md",
       "decomposition.md",
       "design-and-build.md",
       "fixed-graph.md",
       "human-continuation.md",
+      "procedural-briefs.md",
       "repair-and-continue.md",
+      "source-boundary.md",
       "structured-results.md",
     ]);
     for (const name of retired) expect(index, name).not.toContain(name);
@@ -644,7 +656,7 @@ ${authoring[1] ?? ""}
     expect(card).toContain("prefix");
     expect(card).toContain("keys");
     expect(card).not.toContain("intentionally non-resumable");
-    expect(source("extensions/workflows/AUTHORING.md")).toContain("Never derive resumable positional");
+    expect(card).toContain("Never derive resumable positional");
   });
 
   it("classifies every existing Package registry entry", () => {

@@ -11,7 +11,7 @@ const bounded = (body: string) =>
     `let carry = ""; for (let round = 1; round <= 3; round += 1) { const answer = await dsl.agent(input, { label: "work" }); ${body} } return carry;`,
   );
 describe("standard bounded carry and author-owned records; requires native ast-grep", () => {
-  it.each(["fixed", "refinement", "decomposition"])(
+  it.each(["fixed", "refinement", "decomposition", "adaptive-slices", "adaptive-design"])(
     "checks the actual %s example source, not a rewritten fixture",
     (name: string) => {
       const source = readFileSync(
@@ -21,6 +21,41 @@ describe("standard bounded carry and author-owned records; requires native ast-g
       expect(errors(source)).toEqual([]);
     },
   );
+  it("carries a complete discovered queue without making its items author-known", () => {
+    const queueSource = (use: string) =>
+      wrap(`let queue = []; for (let i = 0; i < 3; i++) {
+      const next = await dsl.agent(input, { label: "cut", handoffs: { maxItems: 100 } });
+      queue = next; ${use}
+    } return queue;`);
+    expect(errors(queueSource('const item = queue[0]; await dsl.agent(item, { label: "work" });'))).toEqual([]);
+    expect(errors(queueSource('for (const item of queue) { await dsl.agent(item, { label: "work" }); }'))).toEqual([]);
+    for (const use of [
+      "const item = queue[0]; if (item.done) return item;",
+      "const alias = queue; for (const item of alias) { if (item.done) return item; }",
+      'await dsl.parallel(queue.map((item) => () => dsl.agent(item.title, { label: "work" })));',
+      "queue = [];",
+      'queue.push("fabricated");',
+      "queue = next.slice(0, 1);",
+      "await dsl.parallel([async () => { queue = next; return next; }]);",
+    ])
+      expect(errors(queueSource(use)).length, use).toBeGreaterThan(0);
+  });
+  it("allows prompt joins of nested runtime lists but not opaque text", () => {
+    expect(
+      errors(
+        wrap(
+          'for (let i = 0; i < 2; i++) { const queue = await dsl.agent(input, { label: "cut", handoffs: { maxItems: 3 } }); await dsl.agent(`Queue: ${queue.join("\\n---\\n")}`, { label: "work" }); }',
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      errors(
+        wrap(
+          'for (let i = 0; i < 2; i++) { const report = await dsl.agent(input, { label: "read" }); await dsl.agent(`Report: ${report.join("\\n")}`, { label: "work" }); }',
+        ),
+      ).length,
+    ).toBeGreaterThan(0);
+  });
   it("allows whole-answer carry and exact runtime control, including ++ bounds", () => {
     expect(errors(bounded("carry = answer;"))).toEqual([]);
     expect(
