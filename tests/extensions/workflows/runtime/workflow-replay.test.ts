@@ -1447,7 +1447,7 @@ export default async function runWorkflow(dsl) {
     // the model that produced the answer. Remap `smol` and the stale answer is served
     // under an unchanged key. Closing this means moving model resolution out of the
     // bridge and into the runtime; until then, a roles-table change invalidates
-    // recorded runs BY HAND, and AUTHORING.md says so.
+    // recorded runs BY HAND, and the source-shape reference says so.
     const root = temporaryProject();
     writeWorkflow(
       root,

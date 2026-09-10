@@ -22,3 +22,11 @@ only through the normal reviewed-workflow path.
 Both workflow scripts are orchestration-only. Child agents may inspect the live
 project when their prompt requires it. The JavaScript does not read project or
 artifact files.
+
+## Default authoring style
+
+Substantive implementation briefs default to adaptive slices: the owner revises
+remaining work after each reviewed slice. Briefs state the role, expected result,
+sources and essential constraints. Fixed graphs and procedural detail remain
+explicit alternatives. See the [workflow guide](../../../../docs/locus-pi-workflows.md#create-a-workflow)
+for folder-level inputs, style/size choices and design-to-implementation handoff.

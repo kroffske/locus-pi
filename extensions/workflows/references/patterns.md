@@ -12,17 +12,17 @@ running it. Workflow JavaScript executes with full Node.js host access and is no
 sandboxed.
 
 The Package workflows are whatever `extensions/workflows/examples/` holds —
-currently `live-smoke`, `post-code-review` and its children, plus `task/draft`
+currently `live-smoke`, `post-code-review` and its children, `stage-loop`, plus `task/draft`
 and `task/plan`. A skeleton copied out of this catalog becomes one by being
 saved there, with the package-surface review that implies; saved anywhere else
 it stays yours.
 
-## New authoring: four forms
+## New authoring: choose the graph
 
 Use the [current pattern index](../../../skills/locus-pi-workflow-create/references/INDEX.md):
-fixed graph, reviewer-gated bounded refinement, bounded decomposition or
-human-gated continuation. Full runnable examples live in [the refinement example](examples/refinement.workflow.mjs).
-Recovery is a runtime capability, not a fifth algorithm, and generated source
+adaptive slices by default for substantive implementation, fixed graphs for fixed work,
+reviewer-gated bounded refinement, bounded decomposition or human-gated continuation. Full runnable examples live in [the refinement example](examples/refinement.workflow.mjs).
+Recovery is a runtime capability, not another graph pattern, and generated source
 is an authoring lifecycle. The historical recipes below remain compatibility
 material, not additional standard patterns or a second source grammar.
 
