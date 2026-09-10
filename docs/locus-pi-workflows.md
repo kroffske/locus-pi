@@ -127,6 +127,70 @@ and from `invokeWorkflow`, which actually invokes a saved child with runtime-own
 checkpoint semantics. Choose the mechanism needed by the design; never run a
 child across an unresolved owner decision. See [continuation](../extensions/workflows/references/recovery-and-continuation.md).
 
+## Planned: specification and implementation as independent workflows
+
+This is the accepted direction for the next authoring revision. The current
+adaptive references do not yet implement the full correction behavior below.
+In particular, the design example stops after one reconciliation, and the
+implementation example still uses an acceptance-file convention and one
+correction per slice.
+
+### Produce the specification first
+
+Author and run a workflow whose deliverable is the task specification. Its
+agents investigate the task, write the specification, review it and correct
+findings. The specification records intended behavior, scope, responsibilities,
+constraints, acceptance scenarios, assumptions and unresolved work. A fresh
+review follows each correction. Evidence-backed rejection of a finding also
+receives independent review.
+
+### Author implementation from the actual specification
+
+After the first workflow returns its artifact, author the implementation
+workflow in the target repository using that specification and current source.
+Then launch it separately under the user's implementation request. A reusable
+template may exist beforehand; the task-specific graph and initial work must
+come from the actual specification.
+
+The implementation workflow assigns reviewable slices to implementers,
+reviewers and correction agents. It preserves verified work and revises the
+remaining queue. An ordinary technical omission in the specification becomes
+in-scope clarification or correction work, followed by review. It does not
+require restarting the specification workflow or manufacturing another owner
+acceptance event. Explicit user acceptance requirements still apply when the
+user has requested them.
+
+### Keep unfinished work distinct from a blocker
+
+A useful specification or implementation may still have defects. Route those
+findings to the responsible agent while progress and the declared resources
+permit. Findings after a second review must have a correction path. Do not
+require a flawless artifact or a successful previous run merely to inspect and
+use its output.
+
+A real product decision presents options, consequences and a recommendation.
+An external obstacle names the missing prerequisite and continuation condition.
+Resource exhaustion and repeated lack of verified progress preserve the current
+artifact, remaining criteria and next action. None alone proves that a user
+must grant new permission.
+
+Every result distinguishes delivered and verified work, unverified work and
+remaining work. A partial implementation is not a completed feature. Existing
+runtime failure and partial-result rules remain unchanged; this plan adds no
+global retry scheduler, status system or automatic cross-workflow launcher.
+
+### Planned implementation and proof
+
+Update the workflow-create guidance and both adaptive examples together. Reuse
+the existing bounded-refinement primitives for correction and fresh review.
+Extend the actual-example tests to cover residual findings after a second
+review, implementation from an imperfect specification, repeated corrections,
+real owner decisions, resource stops and failed required reviews. Finally,
+exercise two separately authored workflows on disposable local content,
+creating the implementation source only after reading the first artifact.
+Scripted-child tests prove routing; a live run is still needed to demonstrate
+real agent behavior.
+
 ## Authoring references
 
 The installed [workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md) owns Design → review → Build. The [workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md) owns execution and recovery. Read the [source boundary](../skills/locus-pi-workflow-create/references/source-boundary.md) before building and the [exact source contract](../extensions/workflows/references/source-shape.md) when resolving checker diagnostics.
