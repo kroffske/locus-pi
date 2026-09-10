@@ -15,6 +15,8 @@ tags: [workflows, guide]
 
 The `workflows` extension discovers trusted JavaScript workflow modules, runs them through Pi child sessions, and persists execution groups under `.locus-pi/runs/<storageRootRunId>/`.
 
+To create or revise a workflow, start with [Locus Pi workflows: authoring and styles](locus-pi-workflows.md).
+
 ## Package catalog
 
 `extensions/workflows/examples/` is the shipped registry.
@@ -152,7 +154,7 @@ Pi approvals remain the enforcement owner. Source hashes, confined output paths,
 
 ## Authoring
 
-- [Readable workflow authoring contract](../extensions/workflows/AUTHORING.md)
+- [Readable workflow authoring contract](locus-pi-workflows.md)
 - [Advanced runtime and DSL reference](../extensions/workflows/REFERENCE.md)
 - [Packaged examples](../extensions/workflows/examples/README.md)
 - [Workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md)
@@ -160,11 +162,7 @@ Pi approvals remain the enforcement owner. Source hashes, confined output paths,
 - [External Locus Pi: interactive session from Codex or Claude Code](../skills/external-locus-pi/SKILL.md)
 - [Skill host matrix and installation](../skills/README.md)
 
-Two authoring sections answer the questions this runtime is asked most often:
-[stage refusal and fix loops without throw](../extensions/workflows/AUTHORING.md#stage-refusal-and-fix-loops-without-throw)
-for a gate that must report "not ready" without aborting the run, and
-[Decisions](../extensions/workflows/AUTHORING.md#decisions) for dated authoring
-rules that changed because a real run failed.
+Read the [source boundary](../skills/locus-pi-workflow-create/references/source-boundary.md) before building source. The [authoring history](../skills/locus-pi-workflow-create/references/authoring-decisions.md) explains why repeated process instructions were removed.
 
 Inside Pi, validate a standard-profile workflow source with the
 `workflow_check_source` tool:

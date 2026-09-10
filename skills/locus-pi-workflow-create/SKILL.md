@@ -1,6 +1,6 @@
 ---
 name: locus-pi-workflow-create
-description: Create or revise an orchestration-only locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Generated source contains prompts and agent/DSL edges, not file-reading logic. Never run the workflow.
+description: Create or revise an adaptive slice-first locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Generated source contains prompts and agent/DSL edges, not file-reading logic. Never run the workflow.
 ---
 
 # Create a locus-pi workflow
@@ -15,14 +15,9 @@ When the request is to fix a stopped workflow, read [Repair + Continue](referenc
 
 ## Select the graph before loading details
 
-Read [the pattern index](references/INDEX.md), then only the selected card. Default to a fixed graph; choose adaptation when the requirement needs evidence-gated additional work. Claude Code is not a control plane or a required dependency.
+Read [the pattern index](references/INDEX.md), then only the selected card. Default to adaptive slices for substantive implementation: owner cut → implement one slice → review → addressed correction → recheck → owner re-cut. Choose a fixed graph for genuinely fixed work or an explicit request. Claude Code is not a control plane or a required dependency.
 
-| Requirement                                                     | Read                                                   |
-| --------------------------------------------------------------- | ------------------------------------------------------ |
-| Known stages and a fixed number of calls                        | [Fixed graph](references/fixed-graph.md)               |
-| Incomplete output must go to a fresh worker with exact feedback | [Bounded refinement](references/bounded-refinement.md) |
-| Independent work units are discovered at runtime                | [Bounded decomposition](references/decomposition.md)   |
-| A decision or authorization is missing                          | [Human continuation](references/human-continuation.md) |
+Read [authoring styles](references/authoring-styles.md) for explicit graph/detail choices, folder-level task input, executor selection and the Claude size setting. Default brief detail is outcome-led; procedural detail is an explicit alternative. These are authoring instructions, not new runtime options.
 
 ## Design → review → Build
 
@@ -37,7 +32,7 @@ condition. These are ingredients, not mandatory headings. State each fact once;
 do not restate the task under a second "definition of done" section.
 Let the agent choose how to inspect, implement and verify.
 Add procedural instructions only for a concrete repository constraint or known
-failure; do not script tool sequences or repeat a general policy in every node. A stage ends with a commit, so a reviewer reads `git diff <stage-base>..HEAD` with its own tools instead of receiving a rebuilt copy of the change; require coverage of that diff before a favorable verdict.
+failure; do not script tool sequences or repeat a general policy in every node. For a code slice, the reviewer reads the actual complete diff, including uncommitted work. End with a commit only when commit authority exists; never invent it to make review easier. Require coverage of that diff before a favorable verdict.
 
 Implementation briefs and templates must distinguish completion from preparation:
 after an authorized environment repair, continue the accepted implementation and
@@ -49,9 +44,11 @@ failure, read [Repair + Continue](references/repair-and-continue.md#unfinished-i
 Choose the return shape from its consumer. Ordinary reports and intermediate
 narrative use plain `agent()` text, without `output`, `schema`, `handoffs` or an
 author-guessed length target. Use `choice` when code branches on a decision and
-`handoffs` when it schedules independent discovered work units. A singleton
+`handoffs` when it schedules discovered work units, including a sequential slice queue. A singleton
 array must not become a report envelope or a success signal.
-Two mistakes from a real run. The 32,000 in [output acceptance](../../extensions/workflows/references/output-acceptance.md) is a runtime allowance threshold, not a node contract: never write `maxItemChars: 32000` or "exactly one item" into a call because that number exists somewhere. And `[]` is not a blocked signal: a refusing stage returns a `choice` identity plus `{ ok: false, status }` — see [stage refusal](../../extensions/workflows/AUTHORING.md#stage-refusal-and-fix-loops-without-throw).
+A stage refusal uses an explicit `choice` identity and `{ ok: false, status }`. Runtime failure statuses are `failed`, `blocked` and `cancelled`; a domain label such as `needs_owner` needs `ok: false` to mark refusal.
+Do not use an empty queue or a success fallback to conceal missing work.
+Use bounded correction and recheck; `throw` is for execution errors, not a routine review decision.
 
 Add an output bound or per-call budget only for an explicit user requirement,
 an actual consumer contract or a measured failure at that boundary. Name that
@@ -81,7 +78,7 @@ well as the final answer: work may have finished before answer validation failed
 
 ## Source and evidence boundary
 
-Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [AUTHORING.md](../../extensions/workflows/AUTHORING.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe. Where files belong is owned by [AUTHORING.md](../../extensions/workflows/AUTHORING.md#target-source-shape): durable handoffs, final results, review evidence and explicit resume inputs in the workflow workspace — or in `.tasks/<task>/artifacts/<stage>/` when the workflow carries one task; disposable environments, dependency caches, test basetemp, transient renderer output and staging in ordinary OS or tool temporary and cache locations. Explicit authored placement remains authoritative.
+Workflow source is orchestration only: explicit prompts, visible DSL edges and whole-value handoffs. Agents own interpretation, any source inspection requested by their prompt, and complete reader-facing results. Read the canonical [Workflow source contract](../../extensions/workflows/references/source-shape.md#machine-enforced-standard-source-shape) for the permitted grammar; do not infer permission from a legacy recipe. Where files belong is owned by [source boundary](references/source-boundary.md#target-source-shape): durable handoffs, final results, review evidence and explicit resume inputs in the workflow workspace — or in `.tasks/<task>/artifacts/<stage>/` when the workflow carries one task; disposable environments, dependency caches, test basetemp, transient renderer output and staging in ordinary OS or tool temporary and cache locations. Explicit authored placement remains authoritative.
 
 Give every agent a concise human `title` describing its current work. In a
 `.map()`/`parallel()` list, derive it from the item and question so siblings are

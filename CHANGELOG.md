@@ -4,6 +4,12 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+### Changed
+
+- Substantive workflow authoring defaults to adaptive slices with outcome-led briefs, folder-level task context, cumulative slice bounds and independent correction checks. Design/implementation references and a procedural alternative show each style.
+- Workflow authoring is now discoverable in docs/locus-pi-workflows.md. The former AUTHORING.md is split into a short installed-skill boundary, a runtime source contract and a separate rationale reference.
+- Standard source checking permits whole handoff-list carry in bounded loops while preserving opaque item provenance. Scheduling, model routing and continuation APIs remain unchanged.
+
 ## [0.7.2] - 2026-09-09
 
 ### Changed

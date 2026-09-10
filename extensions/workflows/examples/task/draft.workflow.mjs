@@ -56,7 +56,9 @@ Context:
 Workflow direction:
 - Input: <semantic input or none>
 - Primary output: <one concrete result file or exact text>
-- Pattern: <sequential text | fixed fan-out/fan-in | bounded review loop | human gate | dynamic handoffs | justified combination>
+- Pattern: <adaptive slices | fixed graph | bounded refinement | decomposition | human continuation | justified combination>
+- Brief detail: <outcome-led by default; procedural only with a concrete reason>
+- Task context: <repository and task directory; agents discover relevant files>
 - Agents: <each coherent stage and responsibility>
 - Handoffs: <exact text passed between stages>
 - Reflection/review: <none, one corrected replacement, or an exact finite bound>
@@ -68,7 +70,11 @@ Draft direction:
 - Out of scope: <nearest tempting adjacent interpretation>
 
 Add Unclear: only for decisions the operator may need to edit before the
-next stage. Prefer the smallest graph that can produce the requested result.
+next stage. Default substantive implementation to an owner-managed slice queue:
+implement one slice, review, address defects, independently recheck, then re-cut
+remaining work. Keep a cumulative slice bound, explicit owner decisions and
+required final verification. A fixed graph fits predetermined work or an explicit
+request. Leave implementation methods to agents inside the essential constraints.
 Every agent must have a consumer. JavaScript will own only orchestration;
 agents own interpretation and any project inspection.
 

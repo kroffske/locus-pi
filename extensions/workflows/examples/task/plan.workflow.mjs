@@ -25,7 +25,14 @@ declares a literal label, and no two agent calls share one, so a stopped run can
 be repaired in place and continued. Do not use imports,
 consumeTextArtifact, continuationArtifacts, outputDir, projectRoot, promptFile,
 publishPrimaryFile, workspace, now, random, parsers, renderers, custom retries,
-or hidden agent wrappers.`;
+or hidden agent wrappers. Follow the packaged locus-pi-workflow-create pattern index:
+substantive implementation defaults to adaptive slices, with an owner re-cutting
+the remaining handoffs queue after each accepted slice. Use choice for routing,
+a cumulative slice bound, addressed correction and independent recheck, and
+required final QA. Fixed graphs remain valid for fixed work or explicit selection.
+Prompts default to role, outcome, SOURCES and essential constraints; leave the
+method to the worker. Task context starts at a directory, not a forced task.md
+argument. Keep explicit owner acceptance between design and implementation.`;
 
 /**
  * @param {import("../../runtime/workflow-runtime.js").WorkflowDsl} dsl

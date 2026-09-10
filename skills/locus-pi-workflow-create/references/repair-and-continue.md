@@ -63,9 +63,9 @@ canonical [reconciliation path](../../../extensions/workflows/references/recover
 before editing source: it requires assessing current effects and any reusable
 prerequisites. Direct interrupted recovery does not admit an unfinished child.
 
-A stage ends with a commit, so its entry point is a commit too: review the whole
-stage as `git diff <stage-base>..HEAD`. Keep no baseline archive or content
-manifest beside it; the commit already carries that identity.
+Review the whole stage from its recorded base through committed and uncommitted
+changes. Commit only under the task's existing authorization. Do not create a
+baseline archive or content manifest merely to reconstruct the diff.
 
 When a verified terminal ancestor remains usable, keep its completed prefix and
 give the first fresh stage the accepted goal, current tree, preserved work and
@@ -78,8 +78,8 @@ for long execution; creating a workflow still does not launch it.
 
 ### Read-only review evidence
 
-A stage ends with a commit. The reviewer reads `git diff <stage-base>..HEAD` with
-its own tools and accounts for every in-scope path in that diff — additions,
+The reviewer inspects the full stage diff with its own tools, including any
+uncommitted changes, and accounts for every in-scope path — additions,
 deletions, renames, tests, docs and diagrams — before a favorable verdict.
 Current-source sampling is not complete change review, and a favorable verdict is
 invalid while required coverage is missing.
@@ -147,7 +147,7 @@ owns current values and timer constraints.
 Ordinary narrative still uses plain text. A singleton `handoffs` report that
 exceeds a guessed character limit is a separate authoring defect; increasing
 turns does not fix it. Use `choice` for a routing decision and `handoffs` only
-for independently scheduled work units.
+for discovered work units, including sequential slice queues.
 
 ### Prefix and invocation limits
 

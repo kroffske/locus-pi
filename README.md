@@ -28,7 +28,8 @@ Remove the package with `pi remove npm:@kroffske/locus-pi`.
 
 - [Getting started](docs/getting-started.md)
 - [Extensions](docs/extensions.md)
-- [Workflows](docs/workflows.md)
+- [Create workflows and choose a style](docs/locus-pi-workflows.md)
+- [Run and inspect workflows](docs/workflows.md)
 - [TUI visual language](docs/tui-design.md)
 - [Architecture](docs/architecture.md)
 

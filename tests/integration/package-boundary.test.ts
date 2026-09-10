@@ -349,20 +349,9 @@ describe("npm public package boundary", () => {
     ]);
     // Directory-owned means the dotfiles inside a listed directory ship with it:
     // `skills/.ignore` rides along under `skills/` and is counted here.
-    // 252 since output acceptance and interrupted recovery added two runtime modules,
-    // three workflow reference pages, four runnable examples and five skill cards.
-    // 254 since the create skill gained the Repair + Continue and large-agent-runs cards.
-    // 256 since the shared schema validator became its own runtime module and the create
-    // skill gained the structured-results card.
-    // 259 with the external-session skill and its interactive/JSON lifecycle references.
-    // 260 with the agent viewer's workflow_return renderer.
-    // 254 after the create skill dropped six redirect cards and large-agent-runs.md,
-    // and the registry gained the stage-loop example.
-    // 256 after T-213: three one-export files merged into their sole writer (-3), and five
-    // owner modules appeared — catalog/workflow-meta.ts, runtime/workflow-handoff-contract.ts,
-    // runtime/workflow-outcome.ts, runtime/workflow-live.ts and
-    // _shared/agent-runtime/agent-live-store.ts (+5).
-    expect(dryRun.files).toHaveLength(256);
+    // Adaptive authoring replaces the omnibus manual with focused references and
+    // adds a public authoring guide, two runnable source examples and style cards.
+    expect(dryRun.files).toHaveLength(264);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
