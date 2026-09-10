@@ -11,11 +11,11 @@ These are design-time choices written in the reviewed design. They are not new f
 
 Example authoring requests:
 
-> Create a workflow for task directory `.tasks/example`. Use adaptive slices and outcome-led briefs. Preserve owner acceptance between design and implementation. Build the source; do not run it.
+> Create a workflow for task directory `.tasks/example`. Use adaptive slices and outcome-led briefs. Implement the user-selected specification; define initial slices and completion outcomes while authoring. Build the source; do not run it.
 
 > Create a fixed workflow for this exact three-stage export. Use procedural briefs because the importer requires the documented command order. Do not run it.
 
-Outcome-led briefs state role, expected result, SOURCES and essential constraints. They give the agent enough context and leave method selection to it. Use headings when helpful, not as a repeated template. Never remove acceptance criteria or unresolved risks to shorten a prompt. [Procedural briefs](procedural-briefs.md) is the separate detail reference; graph style remains an independent choice.
+The default assumes capable models making substantive decisions, including arbitration of review findings. Preserve existing session/user routing; this is not permission to change models or billing routes. Outcome-led briefs state role, expected result, SOURCES and essential constraints. They give the agent enough context and leave method selection to it. Use headings when helpful, not as a repeated template. Never remove acceptance criteria or unresolved risks to shorten a prompt. [Procedural briefs](procedural-briefs.md) is the separate detail reference; graph style remains an independent choice.
 
 ## Folder-level context
 

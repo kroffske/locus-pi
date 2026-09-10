@@ -714,6 +714,27 @@ function validateStandardOwnedPolicy(
   runEntry: SgNode | undefined,
   errors: WorkflowSourceDiagnosticSink,
 ): void {
+  const dslBindings = standardDslBindings(runEntry);
+  for (const call of root.findAll({ rule: { kind: "call_expression" } })) {
+    const callee = unwrapStandardParentheses(callCallee(call));
+    if (callee === undefined || directStandardDslCall(callee, dslBindings) !== "agent") continue;
+    const pairs =
+      standardCallArguments(call)[1]
+        ?.children()
+        .filter((child) => child.kind() === "pair") ?? [];
+    const report = pairs.find((pair) => staticObjectKey(pair.field("key")) === "result");
+    if (report === undefined) continue;
+    if (staticStringValue(unwrapStandardParentheses(report.field("value") ?? undefined)) !== "report")
+      errors.add('agent result must be the static literal "report"', report);
+    for (const pair of pairs) {
+      const key = staticObjectKey(pair.field("key"));
+      if (
+        key !== undefined &&
+        ["choice", "choiceFallback", "handoffs", "schema", "validate", "returnVia", "output", "repair"].includes(key)
+      )
+        errors.add(`agent result: report cannot be combined with ${key}`, pair);
+    }
+  }
   for (const statement of root.findAll({ rule: { kind: "try_statement" } })) {
     errors.add("standard profile owns no try/catch recovery", statement);
   }

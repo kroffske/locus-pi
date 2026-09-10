@@ -212,7 +212,7 @@ trigger = "Further growth above 813 lines requires a package-boundary test respo
 [[exceptions]]
 path = "extensions/workflows/tool/workflow-source-shape.ts"
 rule = "code-lines"
-ceiling = 2465
+ceiling = 2486
 owner = "workflow source checker"
-reason = "Thirteen lines for bounded whole-list carry and nested list prompt joins reuse the existing provenance analysis; extracting a separate queue checker would duplicate its binding and alias authority."
-trigger = "Any growth above 2465 lines or a second independent provenance policy requires an owner-preserving checker split review."
+reason = "Report-option literal and combination checks reuse this owner's DSL binding and syntax analysis; extracting a separate checker would duplicate that authority. Reviewed with the explicit report-mode change."
+trigger = "Any growth above 2486 lines or a second independent provenance policy requires an owner-preserving checker split review."

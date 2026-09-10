@@ -353,3 +353,7 @@ aliases; declare the downgrade honestly.
 Before handoff, run `assessWorkflowSourceIdentity()` against exact source bytes,
 then import the module and require `meta.name` plus a default function. Static
 validation is not evidence that the workflow ran.
+
+### Explicit execution observations
+
+Plain-text `agent(prompt, { result: "report", label: "review" })` produces opaque text for the next agent. Author the static literal `result: "report"`; it cannot combine with shaped outputs or `returnVia`. The checker validates direct option pairs, not the contents of variable or spread option objects; runtime validation covers every call. Source must not branch on, parse or inspect report content. An arbiter interprets full reports; a separate `choice` call can translate its recommendation into an edge. Runtime eligibility and fatal boundaries are defined in [agent execution reports](../REFERENCE.md#agent-execution-reports). No `try/catch` exception is added to the standard grammar.

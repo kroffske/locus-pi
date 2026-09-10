@@ -1,6 +1,6 @@
 # Choose a workflow shape
 
-Default substantive implementation to adaptive slices. Choose by the required control decision, not by agent count. Read one card, then [design-and-build.md](design-and-build.md).
+First resolve specification creation, specification revision or implementation; ask only if the request is ambiguous. Author implementation after the user examines the actual specification and asks for it. Default substantive implementation to adaptive slices. Choose by the required control decision, not by agent count. Read one card, then [design-and-build.md](design-and-build.md).
 
 | Form                                        | When                                   | Default call cost                                  |
 | ------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
