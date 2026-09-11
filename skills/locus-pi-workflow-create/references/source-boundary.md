@@ -56,7 +56,14 @@ The workflow orchestrates but does not interpret or format agent results:
 Every child receives the full tool surface through `tools: ["*"]`. Standard
 source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
-work by default. If repository evidence is needed, the child reads it because
+work by default. This is the Pi host contract; an external model adapter must
+also expose its own full tool surface. Claude Code repository-agent profiles use
+`--tools default --permission-mode bypassPermissions`; `*` is not Claude Code's
+all-tools selector, and `--allowedTools "*"` does not grant all permissions.
+Explicit tool-free profiles remain an intentional exception. A reviewer's
+read-only responsibility concerns product source: it may use shell/git, write
+reports, and repair authorized technical prerequisites. Host restrictions and
+external-action authorization still apply. If repository evidence is needed, the child reads it because
 its prompt asks for that work. Workflow JavaScript does not obtain paths or load
 file contents on the child's behalf.
 
