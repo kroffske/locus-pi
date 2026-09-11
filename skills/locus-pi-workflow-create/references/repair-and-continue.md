@@ -38,6 +38,16 @@ authorization. A further refusal stays a refusal with fresh diagnostics. This
 explicit continuation is not a hidden retry or an unbounded automatic loop.
 The read-only gate records findings; it does not become the correction owner.
 
+### Missing tools in an external child
+
+Inspect the actual child launch arguments and tool schema before changing the
+workflow. Pi `tools: ["*"]` cannot undo an adapter's restricted CLI tools. Repair
+the owning adapter or profile under existing authorization, then prove shell/git,
+read and temporary report writing through that same transport before retrying the
+review. Do not spend more review rounds on an unchanged technical obstacle.
+A reviewer may repair technical prerequisites without editing reviewed product
+source; product corrections still need fresh independent review.
+
 ### Provider admission failures
 
 Read the provider error and actual executed route before changing the workflow.
