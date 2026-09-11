@@ -75,8 +75,8 @@ success condition in the prompt, such as a confirmed command exit code.
 Never use a success fallback to conceal an unconfirmed result. An existing file
 does not prove the current command succeeded.
 
-Before authoring such a call, read [structured results](references/structured-results.md)
-for transport rules and the linked worked example of a schema-echo failure. Plain narrative agents
+Before any decision handoff, read [structured results](references/structured-results.md): the arbiter owns the decision; a translator copies it without new criteria or owner approval. A path or summary is not the full arbitration.
+That reference also covers transport rules and schema-echo repair. Plain narrative agents
 need no output contract. For a stopped run, inspect the command transcript as
 well as the final answer: work may have finished before answer validation failed.
 

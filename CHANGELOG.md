@@ -10,6 +10,7 @@ User-visible changes to the public package.
 
 - Added opt-in plain-text agent execution reports so eligible failed reviewers can reach an arbiter while fatal controls and replay failure records remain intact.
 - Separated specification and implementation authoring, clarified ambiguous workflow goals before building, and gave both adaptive references repeated correction with truthful remaining-work handoffs.
+- Clarified workflow decision ownership: an arbiter may return its branch directly; a separate translator copies its explicit decision without adding owner-approval conditions or treating missing context as a failed review.
 
 ## [0.7.3] - 2026-09-10
 

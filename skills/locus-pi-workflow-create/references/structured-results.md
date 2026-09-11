@@ -39,4 +39,35 @@ Extend the existing workflow_return path, not a second return tool. Format clari
 
 Shape validity does not prove factual correctness. A required verifier remains required. An unknown field is not a verified absence; a missing verifier is not a clean decision. Reused answers are marked as reused, not given invented new child receipts. See the canonical [output acceptance contract](../../../extensions/workflows/references/output-acceptance.md) for currently supported combinations and exact limits.
 
+When code branches on an arbiter's judgement, prefer that arbiter returning the
+`choice` directly through `returnVia: "tool"`. The call returns the branch, not
+its explanatory prose. If a later round needs that explanation, save it in a
+named workflow-workspace file before returning and tell the next consumer to
+read it. This keeps the decision with its evidence; it does not let the producer
+approve its own work or remove required review.
+
+If a separate translator is useful, give it the stated branch and its meaning.
+It extracts that decision rather than applying acceptance criteria again. Child
+sessions do not automatically inherit JavaScript variables or earlier agents'
+conversations: pass needed context explicitly. A translator must not add owner
+approval when `complete` only means a document is ready for owner discussion.
+
+Bad: "Return complete only if criteria, owner decision and review are explicitly
+confirmed" asks a second judge to decide from a summary. A translator's brief is:
+
+```text
+Copy the one branch explicitly selected in the arbitration below; do not rejudge
+its evidence. Here complete means ready for owner discussion, not owner approval
+or permission to implement. A stated failed remains failed. If no single branch
+is stated, use the designated non-success branch for an unresolved decision,
+without claiming a
+review failed. Arbitration: <actual decision text>
+```
+
+A filename or short final reply is not the full artifact. Pass the text the
+consumer needs, or explicitly ask a consumer with read access to read the named file. If it only copies
+an explicit decision, do not make it repeat the underlying research. Attribute a
+terminal branch to its decision maker; a negative routing value alone does not
+prove that review failed or that the specification is incomplete.
+
 For a revisable slice queue use [adaptive slices](adaptive-slices.md): the structured result is an array of complete text briefs. The queue owner interprets each brief; source forwards items unchanged. A domain object schema is unnecessary when no source edge consumes its individual fields.

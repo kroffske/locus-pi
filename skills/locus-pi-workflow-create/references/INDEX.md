@@ -12,7 +12,7 @@ First resolve specification creation, specification revision or implementation; 
 
 Crash replay is a runtime capability, not another graph pattern. Generated source is a way to obtain a graph, not semantic continuation. Candidate search, councils and fixed fan-out are fixed-graph techniques unless the design explicitly adds refinement. No universal judge is injected.
 
-[Structured results](structured-results.md) covers a same-agent shaped answer — choice, closed string, handoffs or compatibility schema through `returnVia: "tool"`. It is an output contract inside a card's graph, not a fifth graph form.
+[Structured results](structured-results.md) covers a same-agent shaped answer — choice, closed string, handoffs or compatibility schema through `returnVia: "tool"`. Read it before handing an arbiter decision to a router: it covers decision ownership and the evidence the next agent actually receives. It is an output contract inside a card's graph, not a fifth graph form.
 
 ## Start from the user's current problem
 
