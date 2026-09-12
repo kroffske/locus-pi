@@ -3,11 +3,24 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { it } from "vitest";
 import { createHarness } from "../../../test-harness.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { workflowLaunchBindingFile } from "../../../../extensions/workflows/runtime/workflow-launch-binding.js";
+import { createWorkflowRuntime } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import {
+  createWorkflowReplayController,
+  readWorkflowReplayLog,
+} from "../../../../extensions/workflows/runtime/workflow-replay.js";
+import { readWorkflowRunJournalState } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import {
+  workflowRecoveryInputHash,
+  readInterruptedWorkflowResumeBinding,
+} from "../../../../extensions/workflows/runtime/workflow-interrupted-recovery.js";
+import { completed, tempRun, temporary } from "../../../fixtures/scripted-agent-runtime.js";
 it("new ordinary roots preserve launch-binding projections for ordinary resume and opt-in interrupted recovery", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "locus-interrupted-admission-"));
   const previousRolesHome = process.env.PI_MODEL_ROLES_HOME;
@@ -79,3 +92,78 @@ it("new ordinary roots preserve launch-binding projections for ordinary resume a
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it("interrupted recovery fingerprints exact inputs and refuses missing authority without creating a result", async () =>
+  temporary(async (root) => {
+    const a = workflowRecoveryInputHash({ input: "goal", items: ["a", "b"], budget: { totalAgents: 9 } });
+    assert.notEqual(a, workflowRecoveryInputHash({ input: "goal", items: ["b", "a"], budget: { totalAgents: 9 } }));
+    assert.notEqual(a, workflowRecoveryInputHash({ input: "goal ", items: ["a", "b"], budget: { totalAgents: 9 } }));
+    const dir = tempRun(root, "interrupted");
+    assert.throws(() =>
+      readInterruptedWorkflowResumeBinding(root, "interrupted", {
+        target: { kind: "path", ref: "example.workflow.mjs", source: "project" } as never,
+        scriptSha256: "0".repeat(64),
+        recoveryInputSha256: a,
+      }),
+    );
+    assert.throws(() => readFileSync(path.join(dir, "result.json")), /ENOENT/u);
+  }));
+
+it("SIGKILL after a confirmed prefix leaves no terminal result and replay does not repeat its effect", async () =>
+  temporary(async (root) => {
+    const loader = process.env.LOCUS_TEST_TS_LOADER;
+    const args = loader === undefined ? ["--import", "tsx"] : ["--loader", loader];
+    const child = spawn(
+      process.execPath,
+      [...args, path.resolve(import.meta.dirname, "../../../fixtures/workflow-confirmed-prefix-child.mjs"), root],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    child.stderr!.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    const closed = once(child, "close");
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let output = "";
+        child.stdout!.on("data", (chunk) => {
+          output += String(chunk);
+          if (output.includes("CONFIRMED_PREFIX")) resolve();
+        });
+        child.once("error", reject);
+        child.once("exit", (code) => reject(new Error(`child exited before checkpoint: ${code}; ${stderr}`)));
+        timer = setTimeout(() => reject(new Error(`checkpoint timeout: ${stderr}`)), 10000);
+      });
+      child.kill("SIGKILL");
+      const [code, signal] = await closed;
+      assert.equal(code, null);
+      assert.equal(signal, "SIGKILL");
+      const recorded = readWorkflowReplayLog(root, "killed-prefix");
+      assert.equal(recorded.length, 1);
+      const journal = readWorkflowRunJournalState(root, "killed-prefix");
+      assert.deepEqual(journal.diagnostics, []);
+      assert.equal(journal.lines.filter((line) => line.kind === "agent_end").length, 1);
+      assert.throws(() => readFileSync(path.join(root, ".locus-pi/runs/killed-prefix/runtime/result.json")), /ENOENT/u);
+      let repeated = 0;
+      const resumed = createWorkflowRuntime({
+        runId: "after-kill",
+        replay: createWorkflowReplayController({
+          runDir: tempRun(root, "after-kill"),
+          recorded,
+          requireRecordedPrefix: true,
+        }),
+        agentRunner: async (req) => {
+          repeated += 1;
+          return completed(req, "must not run");
+        },
+      });
+      assert.equal(await resumed.dsl.agent("goal", { label: "worker" }), "confirmed");
+      assert.equal(repeated, 0);
+      assert.equal(readFileSync(path.join(root, "effect-count.txt"), "utf8"), "1");
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await closed;
+    }
+  }));

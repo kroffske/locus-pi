@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 import {
   SchemaValidationError,
@@ -260,5 +261,40 @@ describe("the deleted text dialects of an exact-choice answer", () => {
   it("accepts the member submitted as the value itself", async () => {
     const { dsl } = scriptedRuntime("agent-choice-exact", ['"completed"']);
     await expect(dsl.agent("Route.", { choice: ["completed", "failed"] })).resolves.toBe("completed");
+  });
+});
+
+describe("the choice fallback as recorded provenance", () => {
+  it("fallback has structured provenance and never masks provider failures", async () => {
+    for (const failureCause of ["output-contract-exhausted", "provider-error", "output-contract-conflict"] as const) {
+      const runtime = createWorkflowRuntime({
+        runId: `fallback-${failureCause}`,
+        agentRunner: async () => ({
+          ok: false,
+          status: "failed",
+          summary: failureCause,
+          diagnostics: [],
+          failureCause,
+        }),
+      });
+      const call = runtime.dsl.agent("Classify", {
+        label: "route",
+        choice: ["yes", "no", "unresolved"],
+        choiceFallback: "unresolved",
+      });
+      if (failureCause !== "output-contract-exhausted") {
+        await assert.rejects(call);
+        assert.equal(runtime.getJournal().filter((line) => line.choiceDecision !== undefined).length, 0);
+      } else {
+        assert.equal(await call, "unresolved");
+        assert.deepEqual(runtime.getJournal().find((line) => line.choiceDecision)?.choiceDecision, {
+          value: "unresolved",
+          source: "fallback",
+          returnVia: "tool",
+          attempts: 2,
+          reason: "output-contract-exhausted",
+        });
+      }
+    }
   });
 });

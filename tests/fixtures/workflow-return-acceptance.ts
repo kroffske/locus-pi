@@ -1,6 +1,25 @@
 import type { AgentOutputAcceptance, AgentRunRequest } from "../../extensions/_shared/agent-runtime/agent-runner.js";
 
 /**
+ * One shaped answer, reused by every suite that needs a non-trivial `workflow_return`
+ * contract: an author-declared object with a closed property set, and a record that
+ * satisfies it. Kept in one place so a repair case and a replay case argue about the
+ * SAME schema rather than two look-alikes.
+ */
+export const SHAPED_RESULT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decision", "summary"],
+  properties: {
+    decision: { type: "string", enum: ["complete", "needs-work", "unknown"] },
+    summary: { type: "string", minLength: 1, maxLength: 4000 },
+  },
+};
+
+/** The value that satisfies `SHAPED_RESULT_SCHEMA`. */
+export const SHAPED_RESULT_RECORD = { decision: "complete", summary: "ok" };
+
+/**
  * Minimal stand-in for the SDK host's same-session acceptance loop, for tests that
  * supply their own `AgentExecutor` and therefore never reach `agent-sdk-host.ts`.
  *
