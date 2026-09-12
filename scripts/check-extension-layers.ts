@@ -230,6 +230,17 @@ const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
  * and `workflow-schema.ts`, both of which are already fs-free. `workflow-agent-bridge.ts`
  * reads the contract directly rather than the core — so the host side of a call never
  * pulls the DSL composition root in behind it.
+ *
+ * `workflow-fusion.ts` is in that same closure and needs no entry of its own for the same
+ * reason: the core value-imports it, and rule 7 walks the closure transitively. A Fusion
+ * panel is a COMPOSITION of ordinary `agent()` calls — it value-imports the contract, the
+ * shaped-output owner and `workflow-execution-state.ts`, all already proven fs-free here,
+ * and it reaches the artifact store, the replay controller and the group scheduler only as
+ * types or as injected ports, so nothing durable enters behind it. The host `/fusion`
+ * surface is the other direction: `fusion/config.ts` and `fusion/runner.ts` read the Fusion
+ * vocabulary from that module and the run machinery from their own fs-bound imports, so the
+ * DSL owner never pulls a host module in behind it. Nothing outside `extensions/workflows/`
+ * reaches it, so no cross-feature facade rule applies.
  */
 const PURE_MODULES: readonly PureModuleEntry[] = [
   {

@@ -16,7 +16,7 @@ import {
   WORKFLOW_FUSION_MIN_MEMBERS,
   type WorkflowFusionMember,
   type WorkflowFusionMode,
-} from "../runtime/workflow-runtime.js";
+} from "../runtime/workflow-fusion.js";
 
 export const FUSION_TOOL_NAME = "fusion";
 export const FUSION_CONFIG_VERSION = 2;

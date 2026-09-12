@@ -26,13 +26,12 @@ import {
   type WorkflowResultPersistence,
 } from "../runtime/workflow-result.js";
 import {
-  createWorkflowRuntime,
   type WorkflowFusionContext,
   type WorkflowFusionJudge,
   type WorkflowFusionMember,
   type WorkflowFusionMode,
-  type WorkflowJournalLine,
-} from "../runtime/workflow-runtime.js";
+} from "../runtime/workflow-fusion.js";
+import { createWorkflowRuntime, type WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 
 /**
  * A direct `/fusion` declares no budget, so every stop axis is unbounded and only
