@@ -13,8 +13,6 @@
  *   (b) lexical + physical path-escape checks; (c) docs plainly state author scripts are trusted input.
  *   Hard VM/worker isolation is a pending seam — see TODO(trust-model) marker below.
  */
-import { appendProjectError } from "../../_shared/host/error-journal.js";
-
 import {
   readInterruptedWorkflowResumeBinding,
   workflowRecoveryInputHash,
@@ -36,7 +34,6 @@ import {
   formatWorkflowBudgetPrelude,
   formatWorkflowBudgetRaise,
   resolveWorkflowBudget,
-  workflowBudgetEnvelope,
   type WorkflowBudget,
 } from "./workflow-budget.js";
 import {
@@ -57,24 +54,14 @@ import {
   type WorkflowAgentBridgeOptions,
 } from "./workflow-agent-bridge.js";
 import {
-  buildWorkflowFailureDiagnostic,
-  type WorkflowFailureDiagnostic,
-  type WorkflowFailureOrigin,
-} from "./workflow-failure.js";
-import {
   claimNewWorkflowRun,
-  workflowJournalFile,
   readWorkflowRunResult,
   readWorkflowRunSummary,
   workflowPersistedResultInvalidity,
 } from "./workflow-journal.js";
 import type { WorkflowRunResultEnvelope, WorkflowRunSummary } from "./workflow-journal.js";
 import type { ResolvedWorkflowTarget } from "./workflow-discovery.js";
-import {
-  createWorkflowReplayController,
-  type WorkflowReplayController,
-  type WorkflowReplayEnvelope,
-} from "./workflow-replay.js";
+import { createWorkflowReplayController, type WorkflowReplayController } from "./workflow-replay.js";
 import { admitWorkflowRun } from "./workflow-run-admission.js";
 import {
   describeWorkflowReplayPlan,
@@ -86,20 +73,7 @@ import {
   type WorkflowResumeSourceBinding,
   type WorkflowResumeWorkspaceIdentity,
 } from "./workflow-run-resume.js";
-import {
-  prepareWorkflowResult,
-  isWorkflowResultExplicitFailure,
-  workflowFinalizationError,
-  workflowDispositionForCompletion,
-  workflowResultFile,
-  workflowResultText,
-  writeWorkflowResultJson,
-  writeWorkflowResultText,
-  type WorkflowDisposition,
-  type WorkflowFinalizationError,
-  type WorkflowResultDiagnosticSentinel,
-  type WorkflowResultPersistence,
-} from "./workflow-result.js";
+import { prepareWorkflowResult, isWorkflowResultExplicitFailure } from "./workflow-result.js";
 import {
   sha256WorkflowBytes,
   verifyWorkflowScriptSnapshot,
@@ -108,30 +82,18 @@ import {
 } from "./workflow-script-identity.js";
 import {
   acquireWorkflowRootLease,
-  assertWorkflowRootLease,
   referenceWorkflowPrimaryFile,
-  releaseWorkflowRootLease,
   type WorkflowOutputDirectory,
   type WorkflowPrimaryFileReference,
   type WorkflowRootLease,
 } from "./workflow-output.js";
-import {
-  createWorkflowResourceLoader,
-  type WorkflowResourceEvidence,
-  type WorkflowResourceLoader,
-} from "./workflow-resources.js";
-import {
-  createWorkflowWorkspaceManager,
-  type WorkflowWorkspaceEvidence,
-  type WorkflowWorkspaceManager,
-} from "./workflow-worktree.js";
-import { workflowArtifactRef } from "./workflow-artifact-format.js";
+import { createWorkflowResourceLoader, type WorkflowResourceLoader } from "./workflow-resources.js";
+import { createWorkflowWorkspaceManager, type WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import {
   assertWorkflowContinuation,
   consumeWorkflowContinuation,
   continuationJournalProjection,
   createWorkflowArtifactStore,
-  type WorkflowArtifactRef,
   type WorkflowArtifactStore,
   type WorkflowBoundContinuation,
   type WorkflowContinuation,
@@ -144,15 +106,12 @@ import {
   workflowStorageRootRunId,
   type WorkflowRunLocation,
 } from "./workflow-run-layout.js";
-import { workflowReportDir, writeWorkflowRunReport, writeWorkflowRunGroupReport } from "./workflow-run-report.js";
+import { writeWorkflowRunGroupReport } from "./workflow-run-report.js";
 import {
   assertWorkflowHandoffClaimEligibility,
   assertWorkflowHandoffClaimForContinuation,
   bindWorkflowHandoffClaim,
-  createWorkflowOperatorHandoffEnvelope,
-  releaseWorkflowHandoffClaim,
   type WorkflowHandoffClaimLease,
-  type WorkflowOperatorHandoffEnvelope,
 } from "./workflow-handoff.js";
 
 import {
@@ -162,8 +121,13 @@ import {
   type WorkflowRunLineage,
   type WorkflowRunnerCoordination,
 } from "./workflow-saved-child.js";
+import { createWorkflowRunFinalizer, type RunWorkflowScriptResult } from "./workflow-run-finalization.js";
 
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
+// The terminal sequence moved out whole (T-218 W14). The shape a run returns keeps
+// its public identity HERE: every caller asks the runner for a run and gets this
+// back, so the name stays exported from the module they already import.
+export type { RunWorkflowScriptResult } from "./workflow-run-finalization.js";
 // The saved-child owner moved out whole. Its public names stay importable here
 // so existing callers keep one import for a run and its child evidence.
 export type { WorkflowChildRunEvidence, WorkflowRunLineage } from "./workflow-saved-child.js";
@@ -254,65 +218,6 @@ export interface RunWorkflowScriptOptions {
   onEvent?: (line: WorkflowJournalLine) => void;
   [RUN_COORDINATION]?: WorkflowRunnerCoordination;
 }
-
-export interface RunWorkflowScriptResult {
-  runId: string;
-  runDir: string;
-  storageRootRunId?: string;
-  ok: boolean;
-  /** Runtime-owned terminal meaning. Optional only for legacy/test envelopes. */
-  disposition?: WorkflowDisposition;
-  result: unknown; // detached JSON value or explicit diagnostic sentinel
-  resultDiagnostic?: WorkflowResultDiagnosticSentinel;
-  resultPersistence: WorkflowResultPersistence;
-  /** Path of the verbatim text copy of a prose result, when the run produced one. */
-  resultTextPath?: string;
-  /** Semantic named document whose newest revision equals the terminal prose. */
-  primaryOutputPath?: string;
-  /** Project-local workflow workspace, distinct from run evidence. */
-  workspaceDir?: string;
-  workspaceDirRelative?: string;
-  /** Canonical physical workspace identity, project-relative and portable. */
-  workspacePhysicalIdentity?: string;
-  workspacePhysicalIdentitySchemaVersion?: 1;
-  /** Whether the caller supplied outputDir instead of accepting the default. */
-  workspaceDirExplicit?: boolean;
-  /** Exact semantic input identity, persisted for the owner-specific resume contract. */
-  semanticInputPresent?: boolean;
-  semanticInputSha256?: string;
-  /** @deprecated Use workspaceDir. */
-  stableOutputDir?: string;
-  /** @deprecated Use workspaceDirRelative. */
-  stableOutputDirRelative?: string;
-  primaryFile?: WorkflowPrimaryFileReference;
-  lineage?: WorkflowRunLineage;
-  childRuns?: WorkflowChildRunEvidence[];
-  journal: WorkflowJournalLine[];
-  error?: string;
-  /** Who failed, when the run failed. Presentation-only; wording, not truth. */
-  failureOrigin?: WorkflowFailureOrigin;
-  /** Actionable projection of a failed run: stage, script, evidence, repair request. */
-  failureDiagnostic?: WorkflowFailureDiagnostic;
-  target?: ResolvedWorkflowTarget;
-  scriptIdentity?: WorkflowScriptIdentity;
-  resourceEvidence?: WorkflowResourceEvidence[];
-  workspaceEvidence?: WorkflowWorkspaceEvidence[];
-  /** Bounded reader-facing output refs (answers and workflow-published text),
-   *  newest slice when a run produced more than the projection limit. */
-  artifactRefs?: WorkflowArtifactRef[];
-  artifactRefsOmitted?: number;
-  /** Bounded late failures persisted independently from the best-effort journal sink. */
-  finalizationErrors?: WorkflowFinalizationError[];
-  resumeFromRunId?: string;
-  resumeSourceRunSummary?: WorkflowRunSummary | null;
-  continuation?: WorkflowContinuationJournal;
-  operatorHandoff?: WorkflowOperatorHandoffEnvelope;
-  /** What this run did about recorded-call replay. Absent only when the run
-   *  failed before its script identity was established. */
-  replay?: WorkflowReplayEnvelope;
-}
-
-const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
 
 // ---------------------------------------------------------------------------
 // Script loader
@@ -409,7 +314,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   );
   const storageRootRunId = storageLocation?.storageRootRunId ?? runId;
   const runtimeDir = workflowRunRuntimeDir(runDir);
-  const outputDir = workflowReportDir(projectRoot, runId);
   // Inherited coordination is the only authority for children: a saved child
   // can neither drop nor introduce the mode, exactly like `budget`.
   const noOperator =
@@ -564,389 +468,34 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     ...preludeLines,
     ...(runtime?.getJournal() ?? []),
   ];
-  type RunResultFields = Omit<RunWorkflowScriptResult, "runId" | "runDir" | "resultPersistence">;
   let failedChildResult: Pick<WorkflowAgentResult, "childTrace" | "resultArtifact"> | undefined;
   let unhandledGroupFailure = false;
-  const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
-    let primaryOutputPath: string | undefined;
-    const finalizationErrors: WorkflowFinalizationError[] = [];
-    // Complete published/primary identity set for this run; the operator handoff is
-    // admitted from this, never from the display projection below.
-    let allOutputRefs: WorkflowArtifactRef[] = [];
-    let enrichedFields: RunResultFields = {
-      ...fields,
-      ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
-      ...(replayPlan === undefined ? {} : { replay: workflowReplayEnvelope(replayPlan, replayController) }),
-    };
-    if (inheritedCoordination === undefined && rootLease !== undefined) {
-      try {
-        assertWorkflowRootLease(rootLease);
-      } catch (error) {
-        leaseReleased = true;
-        enrichedFields = {
-          ...enrichedFields,
-          ok: false,
-          error: enrichedFields.error ?? (error instanceof Error ? error.message : String(error)),
-        };
-      }
-    }
-    if (workspaceManager !== undefined) {
-      try {
-        enrichedFields = { ...enrichedFields, workspaceEvidence: workspaceManager.evidence() };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        enrichedFields = {
-          ...enrichedFields,
-          ok: false,
-          error: enrichedFields.error ?? message,
-        };
-      }
-    }
-    if (artifactStore !== undefined) {
-      try {
-        const outputRecords = artifactStore
-          .list()
-          .filter((record) => record.kind === "published" || record.kind === "primary");
-        // The COMPLETE verified output set. It is what the operator handoff is built
-        // from, so a run that published more than the display projection shows can
-        // still hand every one of its artifacts to a continuation.
-        allOutputRefs = outputRecords.map((record) => workflowArtifactRef(record));
-        // Display projection only: the newest few, with `artifactRefsOmitted` saying
-        // how many the summary did not print. It admits nothing and gates nothing —
-        // `consumeText` resolves any artifact through the source run's full index.
-        const artifactRefs = allOutputRefs.slice(-MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS);
-        enrichedFields = {
-          ...enrichedFields,
-          ...(artifactRefs.length > 0 ? { artifactRefs } : {}),
-          ...(outputRecords.length > artifactRefs.length
-            ? { artifactRefsOmitted: outputRecords.length - artifactRefs.length }
-            : {}),
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        enrichedFields = {
-          ...enrichedFields,
-          ok: false,
-          error: enrichedFields.error ?? message,
-        };
-      }
-    }
-    if (awaitOperatorDeclaration?.operatorHandoff !== undefined && enrichedFields.ok) {
-      try {
-        if (enrichedFields.target === undefined || enrichedFields.scriptIdentity === undefined) {
-          throw new Error("Workflow operator handoff requires persisted target and script identity.");
-        }
-        enrichedFields = {
-          ...enrichedFields,
-          operatorHandoff: createWorkflowOperatorHandoffEnvelope({
-            declaration: awaitOperatorDeclaration.operatorHandoff,
-            runId,
-            target: enrichedFields.target,
-            scriptIdentity: enrichedFields.scriptIdentity,
-            terminalArtifactRefs: allOutputRefs,
-          }),
-        };
-      } catch (error) {
-        enrichedFields = {
-          ...enrichedFields,
-          ok: false,
-          error: enrichedFields.error ?? (error instanceof Error ? error.message : String(error)),
-        };
-      }
-    }
-    const disposition = workflowDispositionForCompletion({
-      ok: enrichedFields.ok,
-      aborted: opts.signal.aborted,
-      ...(opts.signal.aborted ? { abortReason: opts.signal.reason } : {}),
-      ...(awaitOperatorDeclaration !== undefined ? { awaitOperatorReason: awaitOperatorDeclaration.reason } : {}),
-    });
-    if (disposition.status === "cancelled") {
-      const cancellationMessage = `[workflow:cancelled] reason=${disposition.reason}`;
-      const alreadyRecorded = enrichedFields.journal.some(
-        (line) => line.kind === "log" && line.source === "runtime" && line.message === cancellationMessage,
-      );
-      if (!alreadyRecorded) {
-        const cancellationLine: WorkflowJournalLine = {
-          ts: new Date().toISOString(),
-          runId,
-          kind: "log",
-          source: "runtime",
-          message: cancellationMessage,
-        };
-        journal.write(cancellationLine);
-        try {
-          opts.onEvent?.(cancellationLine);
-        } catch {
-          // Presentation callbacks cannot change durable cancellation truth.
-        }
-        enrichedFields = { ...enrichedFields, journal: [...enrichedFields.journal, cancellationLine] };
-      }
-    }
-    enrichedFields = {
-      ...enrichedFields,
-      ok: disposition.status === "completed" || disposition.status === "awaiting_operator",
-      disposition,
-    };
-    if (opts.operatorHandoffClaim !== undefined && !handoffClaimBound) {
-      try {
-        releaseWorkflowHandoffClaim(opts.operatorHandoffClaim);
-      } catch (error) {
-        enrichedFields = {
-          ...enrichedFields,
-          ok: false,
-          disposition: { status: "failed" },
-          error: enrichedFields.error ?? `Workflow handoff claim release failed: ${String(error)}`,
-        };
-      }
-    }
-    // One choke point for actionable failure text: every terminal route above
-    // funnels here, so the operator gets the same stage/script/evidence pointer
-    // whether the trusted script threw or the runtime around it did.
-    enrichedFields = withFailureDiagnostic(enrichedFields);
-    // Human-visible terminal prose is mandatory. Persist it once before the
-    // best-effort report so every later surface can point at one owned file.
-    const terminalText = workflowResultText(enrichedFields.result);
-    const resultTextPath = writeWorkflowResultText(runDir, enrichedFields.result);
-    if (terminalText !== undefined && resultTextPath === undefined) {
-      const message = `Workflow terminal output was not persisted under ${outputDir}.`;
-      const outputFailure: WorkflowJournalLine = {
-        ts: new Date().toISOString(),
-        runId,
-        kind: "error",
-        source: "runtime",
-        message,
-      };
-      journal.write(outputFailure);
-      finalizationErrors.push(workflowFinalizationError("terminal-output", message));
-      enrichedFields = withFailureDiagnostic({
-        ...enrichedFields,
-        ok: false,
-        disposition: { status: "failed" },
-        error: enrichedFields.error ?? message,
-        journal: [...enrichedFields.journal, outputFailure],
-      });
-    }
-    // No workflow-workspace mutation follows this point. Release before writing the
-    // run report/result envelope so a release failure becomes terminal evidence
-    // instead of escaping after a persisted success.
-    if (inheritedCoordination === undefined && rootLease !== undefined && !leaseReleased) {
-      try {
-        releaseWorkflowRootLease(rootLease);
-        leaseReleased = true;
-      } catch (error) {
-        const message = `Workflow workspace lease release failed: ${error instanceof Error ? error.message : String(error)}`;
-        const leaseFailure: WorkflowJournalLine = {
-          ts: new Date().toISOString(),
-          runId,
-          kind: "error",
-          source: "runtime",
-          message,
-        };
-        journal.write(leaseFailure);
-        finalizationErrors.push(workflowFinalizationError("lease-release", message));
-        leaseReleased = true;
-        enrichedFields = withFailureDiagnostic({
-          ...enrichedFields,
-          ok: false,
-          disposition: { status: "failed" },
-          error: enrichedFields.error ?? message,
-          journal: [...enrichedFields.journal, leaseFailure],
-        });
-      }
-    }
-    // The run's human outputs under <runDir>/outputs/: table of contents, task,
-    // result, budget-versus-spend, and workflow-published documents under their
-    // semantic names. Agent call answers remain evidence under runtime/ unless
-    // the workflow explicitly publishes one. Files agents wrote themselves stay
-    // under their own names in the separate project-local workflow workspace.
-    // The envelope below stays the durable truth, and a report failure never fails
-    // the run. It runs BEFORE result.json so a failed write can still enter the
-    // bounded finalizationErrors projection even if its journal append also fails.
-    if (artifactStore !== undefined) {
-      const reportOutcome = writeWorkflowRunReport(
-        {
-          projectRoot,
-          runId,
-          runDir,
-          ...(enrichedFields.workspaceDir === undefined ? {} : { workspaceDir: enrichedFields.workspaceDir }),
-          status: enrichedFields.disposition?.status ?? (enrichedFields.ok ? "completed" : "failed"),
-          ...(enrichedFields.target === undefined
-            ? {}
-            : {
-                target: {
-                  kind: enrichedFields.target.kind,
-                  ref: enrichedFields.target.ref,
-                  source: enrichedFields.target.source,
-                },
-              }),
-          result: enrichedFields.result,
-          ...(enrichedFields.error === undefined ? {} : { error: enrichedFields.error }),
-          journal: enrichedFields.journal,
-          budget: { applied: budget, peakConcurrency: runtime?.peakAgentConcurrency() ?? 0 },
-        },
-        artifactStore,
-      );
-      if (reportOutcome.ok) primaryOutputPath = reportOutcome.primaryOutputPath;
-      if (!reportOutcome.ok) {
-        // The run disposition is deliberately unchanged — reversing that is the
-        // evidence contract's call, not this one's. What changes is the silence:
-        // without this line the budget evidence could simply not exist and
-        // nothing would say so, which `evidence-over-claim` cannot live with.
-        const reportFailure: WorkflowJournalLine = {
-          ts: new Date().toISOString(),
-          runId,
-          kind: "error",
-          source: "runtime",
-          message: `Workflow run report was not written to ${workflowReportDir(projectRoot, runId)}: ${reportOutcome.message}`,
-        };
-        journal.write(reportFailure);
-        finalizationErrors.push(
-          workflowFinalizationError("report", reportFailure.message ?? "Workflow run report failed."),
-        );
-        try {
-          opts.onEvent?.(reportFailure);
-        } catch {
-          // A presentation callback cannot change what the durable journal records.
-        }
-        enrichedFields = { ...enrichedFields, journal: [...enrichedFields.journal, reportFailure] };
-      }
-    }
-    const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
-    const { journal: _inMemoryJournal, ...persistedFields } = enrichedFields;
-    const finalizationProjection =
-      finalizationErrors.length === 0 ? {} : { finalizationErrors: [...finalizationErrors] };
-    const resultPersistence = writeWorkflowResultJson(runDir, {
-      runId,
-      ...persistedFields,
-      ...finalizationProjection,
-      // Every axis, undeclared ones included, so a later reader of this envelope
-      // learns what the run was allowed to spend without inferring it from silence.
-      budget: workflowBudgetEnvelope(budget),
-      resultPersistence: intendedPersistence,
-    });
-    if (resultPersistence.ok) {
-      return {
-        runId,
-        runDir,
-        ...enrichedFields,
-        ...finalizationProjection,
-        resultPersistence,
-        ...(resultTextPath === undefined ? {} : { resultTextPath }),
-        ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
-      };
-    }
-
-    const persistenceError: WorkflowJournalLine = {
-      ts: new Date().toISOString(),
-      runId,
-      kind: "error",
-      source: "runtime",
-      message: resultPersistence.message,
-    };
-    journal.write(persistenceError);
-    try {
-      opts.onEvent?.(persistenceError);
-    } catch {
-      // Presentation callbacks cannot recover durable evidence and must not hide
-      // the typed persistence failure returned below.
-    }
-    const failedFields: RunResultFields = withFailureDiagnostic({
-      ...enrichedFields,
-      ok: false,
-      disposition: workflowDispositionForCompletion({
-        ok: false,
-        aborted: opts.signal.aborted,
-        ...(opts.signal.aborted ? { abortReason: opts.signal.reason } : {}),
-      }),
-      error: enrichedFields.error ?? resultPersistence.message,
-      journal: [...enrichedFields.journal, persistenceError],
-    });
-    // result.json is the durable machine envelope, but its own write can fail.
-    // Re-project the human README from the now-failed fields so the readable
-    // surface cannot keep claiming success after that failure.
-    if (artifactStore !== undefined) {
-      const failedReport = writeWorkflowRunReport(
-        {
-          projectRoot,
-          runId,
-          runDir,
-          ...(failedFields.workspaceDir === undefined ? {} : { workspaceDir: failedFields.workspaceDir }),
-          status: failedFields.disposition?.status ?? "failed",
-          ...(failedFields.target === undefined
-            ? {}
-            : {
-                target: {
-                  kind: failedFields.target.kind,
-                  ref: failedFields.target.ref,
-                  source: failedFields.target.source,
-                },
-              }),
-          result: failedFields.result,
-          ...(failedFields.error === undefined ? {} : { error: failedFields.error }),
-          journal: failedFields.journal,
-          budget: { applied: budget, peakConcurrency: runtime?.peakAgentConcurrency() ?? 0 },
-        },
-        artifactStore,
-      );
-      if (failedReport.ok) primaryOutputPath = failedReport.primaryOutputPath;
-    }
-    const failed = {
-      runId,
-      runDir,
-      ...failedFields,
-      ...finalizationProjection,
-      resultPersistence,
-      ...(resultTextPath === undefined ? {} : { resultTextPath }),
-      ...(primaryOutputPath === undefined ? {} : { primaryOutputPath }),
-    };
-    return failed;
-  };
-
-  /** Attach the actionable diagnostic to a failed envelope; other outcomes pass through. */
-  function withFailureDiagnostic(fields: RunResultFields): RunResultFields {
-    // A script that deliberately returns `{ ok: false }` reported a domain
-    // verdict, not a defect: it already owns its own summary and needs no repair
-    // request. Only a thrown/transport failure earns a diagnostic.
-    if (fields.disposition?.status !== "failed" || fields.error === undefined) return fields;
-    let artifacts: readonly { kind: string; stage?: string; relativePath: string; callId?: string }[] = [];
-    try {
-      artifacts = artifactStore?.list() ?? [];
-    } catch {
-      // An unreadable artifact index costs the evidence pointer, never the verdict.
-    }
-    const prior = fields.failureDiagnostic;
-    const errorIndex =
-      prior?.errorLogPath === undefined
-        ? appendProjectError(projectRoot, {
-            ts: new Date().toISOString(),
-            source: "workflow",
-            event: "workflow_result",
-            status: "failed",
-            runId,
-            workflow: requestedWorkflow,
-            message: fields.error,
-            journalPath: workflowJournalFile(runDir),
-          })
-        : { path: prior.errorLogPath, warning: prior.errorLogWarning };
-    return {
-      ...fields,
-      failureDiagnostic: buildWorkflowFailureDiagnostic({
-        errorLogPath: errorIndex.path,
-        ...(errorIndex.warning === undefined ? {} : { errorLogWarning: errorIndex.warning }),
-        projectRoot,
-        runDir,
-        journalPath: workflowJournalFile(runDir),
-        journal: fields.journal,
-        ...(fields.failureOrigin === undefined ? {} : { origin: fields.failureOrigin }),
-        ...(failedChildResult === undefined ? {} : { failedChild: failedChildResult }),
-        ...(unhandledGroupFailure ? { unhandledGroupFailure: true } : {}),
-        ...(fields.error === undefined ? {} : { error: fields.error }),
-        ...(fields.target === undefined ? {} : { target: fields.target }),
-        ...(fields.scriptIdentity === undefined ? {} : { scriptIdentity: fields.scriptIdentity }),
-        artifacts,
-      }),
-    };
-  }
+  // The terminal sequence has one owner. Every `finishRun(...)` route below hands
+  // it the same field shape; the ORDER, the exactly-once lease release and the
+  // mandatory/best-effort split live in `workflow-run-finalization.ts`.
+  const finishRun = createWorkflowRunFinalizer({
+    projectRoot,
+    runId,
+    runDir,
+    requestedWorkflow,
+    budget,
+    signal: opts.signal,
+    journal,
+    ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
+    // A saved child inherits its root's lease: it owns none, so it neither
+    // fence-checks nor releases one.
+    ownedRootLease: () => (inheritedCoordination === undefined ? rootLease : undefined),
+    ...(opts.operatorHandoffClaim === undefined ? {} : { operatorHandoffClaim: opts.operatorHandoffClaim }),
+    handoffClaimBound: () => handoffClaimBound,
+    awaitOperator: () => awaitOperatorDeclaration,
+    artifacts: () => artifactStore,
+    workspaceEvidence: () => workspaceManager?.evidence(),
+    resourceEvidence: () => resourceLoader?.evidence(),
+    replay: () => (replayPlan === undefined ? undefined : workflowReplayEnvelope(replayPlan, replayController)),
+    peakAgentConcurrency: () => runtime?.peakAgentConcurrency() ?? 0,
+    failedChild: () => failedChildResult,
+    unhandledGroupFailure: () => unhandledGroupFailure,
+  });
 
   try {
     items = snapshotWorkflowItems(opts.items);
