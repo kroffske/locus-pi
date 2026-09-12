@@ -9,10 +9,10 @@ exclude_paths = [".locus/**", ".tasks/**", ".test_pi/**", ".claude/**", ".pi/**"
 [[exceptions]]
 path = "tests/extensions/workflows/runtime"
 rule = "directory-files"
-ceiling = 60
+ceiling = 53
 owner = "workflows runtime tests"
-reason = "Runtime behavior tests mirror their production owner; T-218 (2026-09-12) adds one test file per extracted owner."
-trigger = "T-218 splits runtime owners into more files and mirrors them in tests; revisit the ceiling at T-218 W17 closure."
+reason = "Runtime behavior tests mirror their production owner; T-218 (2026-09-12) added one test file per extracted owner and closed at 53 direct files."
+trigger = "T-218 is closed: a 54th file needs its own owner review (a new production owner, or a sub-directory for a stable test family such as replay or return)."
 
 [[exceptions]]
 path = "tests/shared/agent-runtime"
@@ -25,10 +25,10 @@ trigger = "Split when the directory exceeds 12 direct files or a stable agent-ru
 [[exceptions]]
 path = "extensions/workflows/runtime"
 rule = "directory-files"
-ceiling = 45
+ceiling = 44
 owner = "workflows runtime"
-reason = "T-218 (2026-09-12) extracts single-owner modules (execution state, groups, agent call/attempt/output, fusion, journal format, snapshot, workspace, admission, resume, saved child, finalization) out of the runtime/runner/journal monoliths; the file count rises by design."
-trigger = "Revisit at T-218 W17 closure; any file added for a reason other than a T-218 owner extraction needs its own review."
+reason = "T-218 (2026-09-12) extracted single-owner modules (execution state, groups, agent contract/call/attempt/output/model, fusion, journal format, snapshot, workspace, admission, resume, saved child, finalization) out of the runtime/runner/journal/bridge monoliths and closed at 44 direct files."
+trigger = "T-218 is closed: a 45th file is a new owner and needs its own review (ledger entry, negative import test) or a sub-directory."
 
 [[exceptions]]
 path = "scripts"
