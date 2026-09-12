@@ -120,6 +120,7 @@
     "tests/shared/agent-runtime/agent-live-store.test.ts",
     "tests/shared/agent-runtime/agent-command-run.test.ts",
     "tests/extensions/agents/fleet/agent-observer.test.ts",
+    "tests/extensions/agents/operator/agent-observer-text.test.ts",
     "tests/extensions/agents/fleet/agent-drill.test.ts",
     "tests/extensions/agents/fleet/agent-fleet-menu.test.ts",
     "tests/extensions/agents/entrypoint/agent-live-store-entrypoints.test.ts",

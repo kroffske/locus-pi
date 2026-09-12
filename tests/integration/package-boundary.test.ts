@@ -365,7 +365,10 @@ describe("npm public package boundary", () => {
     // T-218 W4 does the same for the journal: the persisted event contract — line
     // shape, payload types and strict codec — ships beside the storage half that
     // appends and reads it.
-    expect(dryRun.files).toHaveLength(273);
+    // T-218 W16 returns two responsibilities the progress widget had absorbed to
+    // their owners — the pure workflow layout half and the agents observer text —
+    // so the widget ships as three modules instead of one.
+    expect(dryRun.files).toHaveLength(275);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

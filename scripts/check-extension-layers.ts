@@ -197,6 +197,11 @@ const PURE_MODULES: readonly PureModuleEntry[] = [
       "operator handoff declarations are normalized inside that core, so the declaration half stays separable from the durable envelope and claim sidecar in workflow-handoff.ts.",
   },
   {
+    module: "extensions/workflows/operator/progress-render.ts",
+    reason:
+      "the read-only half of the progress surface — layout, rail, stage frontier, roster clamping — is decided from plain inputs, so it stays separable from the subscriptions, timers and viewport reservation in progress-widget.ts.",
+  },
+  {
     module: "extensions/workflows/runtime/workflow-outcome.ts",
     reason:
       "what a result means — JSON detachment, disposition and classification — is decided inside that core, so it stays separable from result.json persistence in workflow-result.ts.",

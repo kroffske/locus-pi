@@ -60,3 +60,45 @@ function readProcVersion(): string | undefined {
     return undefined; // non-Linux hosts and restricted sandboxes
   }
 }
+
+/**
+ * The optional slice of Pi's theme a live surface actually styles with.
+ *
+ * Distinct from `pi-api.ts#ThemeLike` on purpose: that one is the shape Pi
+ * hands a widget factory (every method present), this one is what survives
+ * `coerceTheme` — a host may pass a partial object, no object at all, or
+ * methods that return something other than a string, and a renderer must stay
+ * legible in each case.
+ */
+export interface ThemeLike {
+  fg?: (color: string, text: string) => string;
+  bg?: (color: string, text: string) => string;
+  bold?: (s: string) => string;
+}
+
+/**
+ * Narrow an untrusted host theme to the methods that are actually callable.
+ *
+ * Each retained method is re-bound to the original theme object, so a Pi theme
+ * whose `fg`/`bg`/`bold` read instance state keeps working after extraction;
+ * calling the raw reference would lose `this`. The return is coerced with
+ * `String(...)` because a host is free to return a non-string.
+ */
+export function coerceTheme(t: unknown): ThemeLike {
+  if (typeof t !== "object" || t === null) return {};
+  const theme = t as { fg?: unknown; bg?: unknown; bold?: unknown };
+  const result: ThemeLike = {};
+  if (typeof theme.fg === "function") {
+    const fg = theme.fg as (this: unknown, color: string, text: string) => unknown;
+    result.fg = (color: string, text: string) => String(fg.call(theme, color, text));
+  }
+  if (typeof theme.bold === "function") {
+    const bold = theme.bold as (this: unknown, s: string) => unknown;
+    result.bold = (s: string) => String(bold.call(theme, s));
+  }
+  if (typeof theme.bg === "function") {
+    const bg = theme.bg as (this: unknown, color: string, text: string) => unknown;
+    result.bg = (color: string, text: string) => String(bg.call(theme, color, text));
+  }
+  return result;
+}
