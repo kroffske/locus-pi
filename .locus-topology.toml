@@ -149,3 +149,11 @@ ceiling = 550
 owner = "workflow group execution"
 reason = "T-218 W7 (2026-09-12): group barriers, branch context and the per-call scheduler, cut verbatim out of the runtime; 35 lines over the threshold."
 trigger = "Growth above 550 lines: split the barrier-result half (group failure error/envelope/classification) from the scheduler and branch context."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-result.ts"
+rule = "code-lines"
+ceiling = 760
+owner = "workflow result persistence and readback"
+reason = "T-218 W5 (2026-09-12): write and tolerant readback of runtime/result.json and outputs/workflow-result.md now have one owner; the ~310-line envelope parser is the next seam (workflow-result-format.ts) if it grows."
+trigger = "Growth above 760 lines: extract the envelope parser into a result-format module, mirroring artifact/journal format."
