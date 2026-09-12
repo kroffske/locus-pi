@@ -141,3 +141,11 @@ ceiling = 960
 owner = "shared agent live panel"
 reason = "T-218 W16: countAgentLiveStatuses moved here because both the workflow progress header and the agents observer read it; +11 lines."
 trigger = "Above 960 lines, extract row projections from the panel."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-groups.ts"
+rule = "code-lines"
+ceiling = 550
+owner = "workflow group execution"
+reason = "T-218 W7 (2026-09-12): group barriers, branch context and the per-call scheduler, cut verbatim out of the runtime; 35 lines over the threshold."
+trigger = "Growth above 550 lines: split the barrier-result half (group failure error/envelope/classification) from the scheduler and branch context."

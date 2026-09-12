@@ -356,22 +356,10 @@ describe("npm public package boundary", () => {
     // as a chain of representable waits instead of being refused by a policy ceiling.
     // One more shared module answers "can this transport host session tools", so a
     // shaped call on a route that cannot is refused before the child starts.
-    // One more module owns the lexical reading of a workflow source, so the meta
-    // scanner, identity assessment and source checker stop restating it.
-    // The persisted artifact format — version, ref/record/index shapes, strict
-    // parsers — now ships as its own module beside the mutable store that writes it.
-    // T-218 W6 splits the workflow output surface into its workspace-identity and
-    // fenced-workspace-state owners, packing two modules where one shipped before.
-    // T-218 W4 does the same for the journal: the persisted event contract — line
-    // shape, payload types and strict codec — ships beside the storage half that
-    // appends and reads it.
-    // T-218 W16 returns two responsibilities the progress widget had absorbed to
-    // their owners — the pure workflow layout half and the agents observer text —
-    // so the widget ships as three modules instead of one.
-    // T-218 W15 splits the strict source checker into diagnostic identity, lexical
-    // facts, provenance and permitted-use rules, packing four modules beside it.
-    // T-218 W7 lifts the run's one execution budget and the group machinery out of the
-    // DSL core, so the runtime ships as three modules instead of one.
+    // T-218 owner extractions (one packed module each, behavior unchanged):
+    //   W2 source literals · W3 artifact format · W6 workspace + workspace state
+    //   W4 journal event format · W16 progress-render + agent-observer
+    //   W15 source diagnostics/bindings/provenance/value-rules · W7 execution state + groups
     expect(dryRun.files).toHaveLength(281);
   });
 
