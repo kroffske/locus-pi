@@ -189,3 +189,11 @@ ceiling = 980
 owner = "workflow resume authority tests"
 reason = "T-218 W13: 23 resume identity/prefix/safety/recovery cases moved unchanged out of the replay and saved-child suites."
 trigger = "Above 980 lines, split replay-plan cases from workspace-identity cases."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-fusion.ts"
+rule = "code-lines"
+ceiling = 690
+owner = "workflow fusion composition"
+reason = "T-218 W10 (2026-09-12): Fusion declaration/preflight and member+judge execution moved verbatim out of the runtime as one pure composition owner behind injected agent/scheduler ports."
+trigger = "Growth above 690 lines: split the declaration/preflight half from the execution half."
