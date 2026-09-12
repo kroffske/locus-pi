@@ -50,6 +50,18 @@ The current direct feature graph has two edges:
 
 `scripts/check-extension-layers.ts` enforces the shared-layer ownership and import direction rules. It also enforces that the workflow DSL core (`extensions/workflows/runtime/workflow-runtime.ts`) reaches operator handoff and result semantics only through the fs-free contract modules `workflow-handoff-contract.ts` and `workflow-outcome.ts`, never through their durable counterparts, so no `node:fs` dependency enters the core's value-import closure.
 
+## Workflow runtime owners
+
+`extensions/workflows/runtime/` is organised by what a module owns, with imports pointing one way: the composition roots import the owners, never the reverse.
+
+- `workflow-runtime.ts` assembles the DSL; `workflow-runner.ts` is the host entry that claims a run, admits it, executes it and finalizes it. Both re-export the names callers always imported from them, so a reader can start at either root.
+- Execution owners behind the DSL: `workflow-execution-state.ts` (the one root leaf gate, counters and deadline shared by a root run and its saved children), `workflow-groups.ts` (group barriers and branch context), `workflow-agent-contract.ts` / `workflow-agent-call.ts` / `workflow-agent-attempt.ts` (the agent request contract, the logical call with its replay identity and transport retries, and one physical attempt), `workflow-agent-output.ts` (shaped results accepted only from a confirmed tool receipt) and `workflow-fusion.ts` (Fusion composition). All stay in the fs-free closure the layer checker proves for the core.
+- Host owners behind the runner: `workflow-run-admission.ts` (target → source snapshot → workspace identity → launch binding, in that order, after the run claim and first journal line), `workflow-run-resume.ts` (the resume authority the tool and operator handoff share), `workflow-saved-child.ts` (one saved-child level, driven through an injected launcher so it never imports the runner) and `workflow-run-finalization.ts` (terminal precedence: abort, evidence, handoff, terminal text, lease, report, `result.json`).
+- Persistence owners: `workflow-journal-format.ts` (the event contract and strict codec), `workflow-journal.ts` (claim, append, listing, queries), `workflow-result.ts` (result write and tolerant readback), `workflow-run-snapshot.ts` (whether the executed bytes are still provable), `workflow-artifact-format.ts` / `workflow-artifacts.ts` (format vs the mutable store), `workflow-workspace.ts` / `workflow-workspace-state.ts` (workspace identity vs the fenced lease and checkpoints; `workflow-output.ts` is the compatibility surface over both) and `workflow-run-layout.ts` (storage roots and confinement).
+- Everything outside `extensions/workflows/` reads persisted runs through `extensions/workflows/run/run-read.ts`; the layer checker lists the persisted-run owners as feature-internal so that door stays the only one.
+
+File size is a growth ratchet rather than a ceiling: `npm run check:topology` (part of `check:push`) fails on growth since the base ref, and `.locus-topology.toml` records the few accepted exceptions with an owner and a revisit trigger.
+
 ## Runtime state
 
 Local runtime state is intentionally outside the public source surface and ignored by Git:
