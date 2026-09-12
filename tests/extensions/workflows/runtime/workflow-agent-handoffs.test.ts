@@ -8,30 +8,7 @@ import {
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
-
-/** A host that CAN carry a shaped result: it reports the tool receipt the runtime requires. */
-function scriptedRuntime(runId: string, answers: string[]) {
-  const requests: WorkflowAgentRequest[] = [];
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner: async (request): Promise<WorkflowAgentResult> => {
-      requests.push(request);
-      const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return {
-        ok: true,
-        status: "completed",
-        summary: "done",
-        text,
-        diagnostics: [],
-        agent: request.agent,
-        ...(request.returnContract === undefined
-          ? {}
-          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
-      };
-    },
-  });
-  return { ...runtime, requests };
-}
+import { scriptedRuntime } from "../../../fixtures/scripted-agent-runtime.js";
 
 describe("agent({ handoffs }) dynamic decomposition", () => {
   it("passes a complete narrative report without a shaped return or format retry", async () => {

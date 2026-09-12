@@ -1677,9 +1677,9 @@ describe("agent attempts — one shaped call is one physical child", () => {
 
   it("reads the option only in the logical call, and keeps the deleted loop deleted", () => {
     // A transport retry that leaked into a shape budget would re-ask a child that ANSWERED,
-    // the one thing the retry must never do. The logical call and the physical attempt are
-    // separate owners now, so this pins the read to the call module by NAME.
-    const modules = ["workflow-agent-call.ts", "workflow-agent-attempt.ts", "workflow-agent-contract.ts", "workflow-runtime.ts"]; // prettier-ignore
+    // the one thing the retry must never do. Call, physical attempt and shaped output are
+    // separate owners now, so this pins the read to the call module by NAME across all five.
+    const modules = ["workflow-agent-call.ts", "workflow-agent-attempt.ts", "workflow-agent-contract.ts", "workflow-runtime.ts", "workflow-agent-output.ts"]; // prettier-ignore
     const sourceOf = (name: string): string =>
       readFileSync(path.join(process.cwd(), "extensions", "workflows", "runtime", name), "utf8");
     const logicalStart = sourceOf(modules[0]!)

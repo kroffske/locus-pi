@@ -204,14 +204,18 @@ const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
  * their own: the core value-imports both, and rule 7 walks the closure transitively, so the
  * `workflow-runtime.ts` entry already holds them to the same `node:fs`-free proof.
  *
- * The three owners of ONE agent call are in that same closure for the same reason:
+ * The four owners of ONE agent call are in that same closure for the same reason:
  * `workflow-agent-contract.ts` (the shared request/result/options vocabulary and the typed
  * refusals), `workflow-agent-call.ts` (the logical call — ordinal, slot claim, canonical
- * key, replay envelope, transport retry) and `workflow-agent-attempt.ts` (ONE physical
- * child — invocation charge, `callId`, leaf permit, journal pair, evidence adoption). The
- * core value-imports the call and the attempt, both value-import the contract, and
- * `workflow-agent-bridge.ts` reads the contract directly rather than the core — so the host
- * side of a call never pulls the DSL composition root in behind it.
+ * key, replay envelope, transport retry), `workflow-agent-attempt.ts` (ONE physical
+ * child — invocation charge, `callId`, leaf permit, journal pair, evidence adoption) and
+ * `workflow-agent-output.ts` (the shaped half — `choice`/`handoffs`/`schema`/`output`/
+ * `validate` dispatch, acceptance from the confirmed `workflow_return` receipt, the choice
+ * decision projection). The core value-imports the call, the attempt and the output owner;
+ * all three value-import the contract, and the output owner reaches `workflow-return.ts`
+ * and `workflow-schema.ts`, both of which are already fs-free. `workflow-agent-bridge.ts`
+ * reads the contract directly rather than the core — so the host side of a call never
+ * pulls the DSL composition root in behind it.
  */
 const PURE_MODULES: readonly PureModuleEntry[] = [
   {
