@@ -77,3 +77,67 @@ ceiling = 1000
 owner = "architecture ledger"
 reason = "AGENTS.md requires one ledger entry per new internal owner, so this file grows by a few lines per T-218 slice by design; the rule engine itself does not grow."
 trigger = "Above 1000 lines, move the ledger data (module lists) out of the rule engine into a data file."
+
+[[exceptions]]
+path = "extensions/workflows/source/workflow-source-provenance.ts"
+rule = "code-lines"
+ceiling = 690
+owner = "workflow source provenance analysis"
+reason = "T-218 W15 (2026-09-12): one fixed-point provenance analysis plus its query family, extracted verbatim from the 2443-line source checker."
+trigger = "Growth above 690 lines: split the query API from the analysis."
+
+[[exceptions]]
+path = "extensions/workflows/source/workflow-source-value-rules.ts"
+rule = "code-lines"
+ceiling = 650
+owner = "workflow source value-use rules"
+reason = "T-218 W15 (2026-09-12): the permitted-value-use rules, extracted verbatim; validateStandardValueUses alone is 155 lines."
+trigger = "Growth above 650 lines: split validateStandardValueUses by rule family."
+
+[[exceptions]]
+path = "tests/extensions/workflows/authoring/workflow-source-grammar-contract.test.ts"
+rule = "code-lines"
+ceiling = 570
+owner = "workflow source grammar tests"
+reason = "T-218 W15: grammar/policy acceptance table moved out of the 1679-line authoring contract suite."
+trigger = "Above 570 lines, split by diagnostic family."
+
+[[exceptions]]
+path = "tests/extensions/workflows/authoring/workflow-source-value-contract.test.ts"
+rule = "code-lines"
+ceiling = 630
+owner = "workflow source value-use tests"
+reason = "T-218 W15: provenance/value-use acceptance table moved out of the authoring contract suite."
+trigger = "Above 630 lines, split by rule family."
+
+[[exceptions]]
+path = "tests/extensions/workflows/operator"
+rule = "directory-files"
+ceiling = 12
+owner = "workflow operator surface tests"
+reason = "T-218 W16 (2026-09-12): the 2579-line progress suite is partitioned by owner (render, surfaces, state, install)."
+trigger = "Above 12 files, revisit the operator test layout."
+
+[[exceptions]]
+path = "tests/extensions/workflows/operator/workflow-progress-render.test.ts"
+rule = "code-lines"
+ceiling = 1450
+owner = "workflow progress render tests"
+reason = "T-218 W16: the rendering/viewport cases (44) of the former 2579-line suite, moved not rewritten."
+trigger = "Do not grow; split rail vs roster rendering when the next case lands."
+
+[[exceptions]]
+path = "tests/extensions/workflows/operator/workflow-progress-surfaces.test.ts"
+rule = "code-lines"
+ceiling = 930
+owner = "workflow progress surface tests"
+reason = "T-218 W16: terminal/headless projection cases (18) of the former suite."
+trigger = "Above 930 lines, split terminal from headless."
+
+[[exceptions]]
+path = "extensions/_shared/agent-runtime/agent-live-panel.ts"
+rule = "code-lines"
+ceiling = 960
+owner = "shared agent live panel"
+reason = "T-218 W16: countAgentLiveStatuses moved here because both the workflow progress header and the agents observer read it; +11 lines."
+trigger = "Above 960 lines, extract row projections from the panel."
