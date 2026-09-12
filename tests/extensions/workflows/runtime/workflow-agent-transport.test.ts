@@ -146,7 +146,7 @@ function tmpReportsDir(): string {
 
 async function runHost(
   config: FakeSessionConfig,
-  options: { turnTimeoutMs?: number; maxToolCalls?: number; aborted?: boolean } = {},
+  options: { childTimeoutMs?: number; maxToolCalls?: number; aborted?: boolean } = {},
 ) {
   const session = fakeSession(config);
   const createSession: CreateAgentSessionFactory = async () => ({ session });
@@ -154,7 +154,7 @@ async function runHost(
     createSession,
     reportsDir: tmpReportsDir(),
     now: () => "fixed",
-    ...(options.turnTimeoutMs !== undefined ? { turnTimeoutMs: options.turnTimeoutMs } : {}),
+    ...(options.childTimeoutMs !== undefined ? { childTimeoutMs: options.childTimeoutMs } : {}),
     ...(options.maxToolCalls !== undefined ? { maxToolCalls: options.maxToolCalls } : {}),
   });
   const controller = new AbortController();
@@ -225,7 +225,7 @@ async function retriesOn(cause: AgentFailureCause | undefined): Promise<boolean>
 
 describe("agent failure cause — host", () => {
   it("names the host turn budget as a transport failure", async () => {
-    const result = await runHost({ lastAssistantText: undefined, neverEnds: true }, { turnTimeoutMs: 5 });
+    const result = await runHost({ lastAssistantText: undefined, neverEnds: true }, { childTimeoutMs: 5 });
 
     expect(result.status).toBe("failed");
     expect(result.failureCause).toBe("host-turn-timeout");
@@ -246,7 +246,7 @@ describe("agent failure cause — host", () => {
           { type: "tool_execution_start", toolName: "bash" },
         ],
       },
-      { turnTimeoutMs: 60_000, maxToolCalls: 3 },
+      { childTimeoutMs: 60_000, maxToolCalls: 3 },
     );
 
     expect(result.reason).toContain("tool-call budget");
@@ -714,12 +714,19 @@ describe("agent failure cause — runtime", () => {
     observed.add("empty-answer");
   });
 
-  it("names an over-long answer against the call's own bound", async () => {
-    const { dsl, getJournal } = runtimeOver("transport-too-long", [completed("0123456789")]);
+  it("names the transport as the reason a shaped call could not be carried", async () => {
+    // No `answer-too-long` case exists any more: nothing produces that cause. This is the
+    // capability refusal that replaced the text fallback — a host that completed the child
+    // without a workflow_return receipt cannot carry a shaped result at all.
+    const { dsl, getJournal } = runtimeOver("transport-no-receipt", [completed('{"count":3}')]);
 
-    await expect(dsl.agent("summarize", { maxAnswerChars: 4 })).rejects.toThrow(/Agent answer is 10 characters/u);
+    await expect(dsl.agent("count", { schema: { type: "object", properties: {} } })).rejects.toThrow(
+      /Transport cannot carry a shaped result/u,
+    );
     const end = getJournal().find((line) => line.kind === "agent_end");
-    expect(end?.failureCause).toBe("answer-too-long");
+    expect(end?.failureCause).toBe("output-contract-unavailable");
+    observed.add("output-contract-unavailable");
+    // Historical only: the list stays closed over it so old journals still read.
     observed.add("answer-too-long");
   });
 
@@ -727,7 +734,7 @@ describe("agent failure cause — runtime", () => {
     // A recorded answer that the CURRENT validator refuses: the runtime fails the run
     // closed rather than re-asking, because a second prompt would miss at this ordinal.
     const replay: WorkflowReplayController = {
-      beginAgentAttempt: () => ({ replayed: true, text: '```json\n{"count":1}\n```' }),
+      beginAgentAttempt: () => ({ replayed: true, text: '{"count":1}' }),
       recordAgentAttempt: () => {},
       resolveValue: (_kind, produce) => produce(),
       counts: () => ({ replayedCalls: 1, freshCalls: 0 }),
@@ -750,7 +757,7 @@ describe("agent failure cause — runtime", () => {
         },
         validate: (value) => ((value as { count: number }).count === 3 ? [] : ["count: expected 3"]),
       }),
-    ).rejects.toThrow(/rejected by the workflow script/u);
+    ).rejects.toThrow(/count: expected 3/u);
     const end = getJournal().find((line) => line.kind === "agent_end");
     expect(end?.failureCause).toBe("script-rejected");
     observed.add("script-rejected");
@@ -1062,7 +1069,7 @@ function scriptedRuntime(runId: string, results: WorkflowAgentResult[], extra: R
 }
 
 describe("agent attempts — declaration", () => {
-  it.each([0, 1.5, -1, 4])("refuses attempts=%s before any child starts", async (attempts) => {
+  it.each([0, 1.5, -1])("refuses attempts=%s before any child starts", async (attempts) => {
     let children = 0;
     const { dsl } = createWorkflowRuntime({
       runId: `attempts-invalid-${String(attempts)}`,
@@ -1073,16 +1080,18 @@ describe("agent attempts — declaration", () => {
     });
 
     await expect(dsl.agent("work", { ...RETRYABLE_CALL, attempts })).rejects.toThrow(
-      /agent attempts must be a safe integer between 1 and 3/u,
+      /agent attempts must be a positive safe integer/u,
     );
     // Refused, not clamped, and nothing was spawned to find that out.
     expect(children).toBe(0);
   });
 
-  it("accepts the ceiling exactly", async () => {
+  it("accepts an explicitly requested retry count with no ceiling", async () => {
+    // The former ceiling of three existed because the deleted text-repair loop MULTIPLIED
+    // it. With one physical child per attempt, the run's own invocation budget bounds it.
     const { dsl, requests } = scriptedRuntime("attempts-ceiling", [completed("fine")]);
 
-    await expect(dsl.agent("work", { attempts: 3 })).resolves.toBe("fine");
+    await expect(dsl.agent("work", { attempts: 7 })).resolves.toBe("fine");
     expect(requests).toHaveLength(1);
   });
 
@@ -1601,7 +1610,7 @@ describe("agent attempts — replay", () => {
   });
 });
 
-describe("agent attempts — the D13 product with the shape-repair loop", () => {
+describe("agent attempts — one shaped call is one physical child", () => {
   const COUNT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -1609,7 +1618,18 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     properties: { count: { type: "integer" } },
   };
 
-  it("multiplies the shape loop: transport-fail → off-shape → transport-fail → valid", async () => {
+  /** A host that carries a shaped result on every completed answer. */
+  function shapedCompleted(text: string): WorkflowAgentResult {
+    return {
+      ...completed(text),
+      outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+    };
+  }
+
+  it("no longer multiplies: a transport retry then ONE accepted shaped answer", async () => {
+    // The deleted product. `attempts` used to multiply SCHEMA_MAX_ATTEMPTS, so one script
+    // call could cost `attempts x 3` children, each charged to the run's cap. With the
+    // shape accepted in-session, a shaped call costs exactly its transport attempts.
     const { controller, begun } = (() => {
       const begunKeys: string[] = [];
       const ctrl: WorkflowReplayController = {
@@ -1625,45 +1645,38 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     })();
 
     const sequence: WorkflowAgentResult[] = [
-      transportFailure(), // shape attempt 1, physical attempt 1 — discarded
-      completed('```json\n{"count":"three"}\n```'), // shape attempt 1, physical 2 — off shape
-      transportFailure(), // shape attempt 2, physical 1 — discarded
-      completed('```json\n{"count":3}\n```'), // shape attempt 2, physical 2 — valid
+      transportFailure(), // physical attempt 1 — the child never answered
+      shapedCompleted('{"count":3}'), // physical attempt 2 — accepted in its own session
     ];
     const { dsl, requests, getJournal } = scriptedRuntime("attempts-grid", sequence, { replay: controller });
 
-    await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).resolves.toEqual({
-      count: 3,
-    });
+    await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).resolves.toEqual({ count: 3 });
 
-    // Four physical children for one script-level call: attempts × shape attempts.
-    expect(requests).toHaveLength(4);
-    // Each is a distinct agent call with its own identity and its own cap charge.
-    expect(requests.map((request) => request.callId)).toEqual(["call-0001", "call-0002", "call-0003", "call-0004"]);
-    // One replay ordinal per SHAPED attempt: each shape attempt carries its own prompt,
-    // so it is its own logical call; the transport retries inside it are not.
-    expect(begun).toHaveLength(2);
-    expect(new Set(begun).size).toBe(2);
+    expect(requests).toHaveLength(2);
+    expect(requests.map((request) => request.callId)).toEqual(["call-0001", "call-0002"]);
+    // ONE replay ordinal: the two physical attempts are one logical call, sending the
+    // identical prompt, because there is no per-shape-attempt prompt any more.
+    expect(begun).toHaveLength(1);
     const ends = getJournal().filter((line) => line.kind === "agent_end");
-    expect(ends.map((line) => line.status)).toEqual(["failed", "completed", "failed", "completed"]);
+    expect(ends.map((line) => line.status)).toEqual(["failed", "completed"]);
   });
 
-  it("ends the run on transport exhaustion instead of spending the next shape attempt", async () => {
+  it("ends the run on transport exhaustion rather than accepting a later answer", async () => {
     const { dsl, requests } = scriptedRuntime("attempts-exhaustion-precedence", [
       transportFailure(),
       transportFailure(),
-      completed('```json\n{"count":3}\n```'),
+      shapedCompleted('{"count":3}'),
     ]);
 
-    // The child never answered, so there is nothing for the shape loop to repair.
+    // The child never answered, so there is nothing to accept.
     await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).rejects.toThrow(
       /budget and was aborted/u,
     );
     expect(requests).toHaveLength(2);
   });
 
-  it("reads the option only in the logical call, never inside the shape loop", () => {
-    // A transport retry that leaked into the shape budget would re-ask a child that
+  it("reads the option only in the logical call, and keeps the deleted loop deleted", () => {
+    // A transport retry that leaked into a shape budget would re-ask a child that
     // ANSWERED, which is the one thing the retry must never do. This pins WHERE the
     // option is read, by function, rather than by how the file happens to be laid out.
     const source = readFileSync(
@@ -1678,11 +1691,7 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     };
     const logicalStart = lineOf("async function runAgentAttempt(");
     const physicalStart = lineOf("async function runPhysicalAgentAttempt(");
-    const shapedStart = lineOf("async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions)");
-    const shapedEnd = lineOf("async function parallel<T>(");
     expect(logicalStart).toBeLessThan(physicalStart);
-    expect(physicalStart).toBeLessThan(shapedStart);
-    expect(shapedStart).toBeLessThan(shapedEnd);
 
     // The declared option is read exactly once, inside the logical call.
     const optionReads = lines
@@ -1692,12 +1701,23 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     expect(optionReads[0]!.index).toBeGreaterThan(logicalStart);
     expect(optionReads[0]!.index).toBeLessThan(physicalStart);
 
-    // The shape loop never sees it, and the transport loop never sees the shape budget.
-    const shapedBody = lines.slice(shapedStart, shapedEnd).join("\n");
-    expect(shapedBody).not.toMatch(/\bopts\??\.attempts\b/u);
-    const transportBody = lines.slice(logicalStart, physicalStart).join("\n");
-    expect(transportBody).not.toContain("SCHEMA_MAX_ATTEMPTS");
-    expect(transportBody).not.toContain("checkAgentSchema(");
+    // The legacy text transport is gone from the runtime, not merely unused: a dormant
+    // second structured path is a path something will quietly fall back to.
+    for (const removed of [
+      "SCHEMA_MAX_ATTEMPTS =",
+      "function checkAgentSchema",
+      "function coerceExactChoiceAnswer",
+      "function withSchemaContract",
+      "function parseJsonFromText",
+      "function stripJsonFences",
+      // `schemaMaxLength` is deliberately NOT in this list any more: the runtime names it
+      // to refuse it, which is the opposite of implementing it. The behaviour is pinned
+      // in `workflow-agent-bounds.test.ts` ("refuses schemaMaxLength by name at the DSL
+      // boundary"), where a source-string absence could never have shown that the option
+      // was silently dropped instead.
+    ]) {
+      expect(source).not.toContain(removed);
+    }
   });
 });
 

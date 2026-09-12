@@ -1,6 +1,6 @@
 /**
  * workflow-runtime.ts — DSL core (agent/parallel/pipeline/phase/log) + THE single
- * scheduler seam (runScheduled, bounded-concurrency width SCHEDULER_WIDTH) + journal mirror.
+ * scheduler seam (runScheduled, width from the run's one effective concurrency) + journal mirror.
  *
  * Pure host-agnostic core. Talks to agents ONLY through an injected WorkflowAgentRunner.
  * No fs / process / require / shell / network anywhere. Unit-testable in isolation.
@@ -11,10 +11,14 @@
 // ---------------------------------------------------------------------------
 
 import {
+  DEFAULT_WORKFLOW_RETURN_CLARIFICATIONS,
+  assertWorkflowReturnValidationErrors,
   normalizeWorkflowReturnContract,
+  workflowReturnClarificationTurns,
   workflowReturnInstructions,
   workflowReturnValueError,
   type WorkflowReturnContract,
+  type WorkflowReturnValidate,
   type WorkflowStringOutput,
   type WorkflowOutputRepair,
 } from "./workflow-return.js";
@@ -22,10 +26,11 @@ import { assertSupportedAgentSchema, validateAgainstSchema } from "./workflow-sc
 import type { AgentOutputAcceptance } from "../../_shared/agent-runtime/agent-runner.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
-  DEFAULT_WORKFLOW_BUDGET,
-  WORKFLOW_MAX_TIMEOUT_MS,
+  DEFAULT_WORKFLOW_CONCURRENCY,
+  assertRepresentableTimeoutMs,
   assertWorkflowBudgetValue,
   formatWorkflowBudgetRaise,
+  formatWorkflowBudgetStop,
   type WorkflowBudget,
 } from "./workflow-budget.js";
 import type { WorkflowRunSummary } from "./workflow-journal.js";
@@ -94,6 +99,14 @@ export interface WorkflowAgentPreflightRequest {
   agent?: string;
   model?: string;
   modelRole?: string;
+  /**
+   * This leg will ask for a shaped result, so its transport must be able to host
+   * session tools. Declared here because preflight runs before the legs exist: a
+   * Fusion judge with a `schema` is the case that matters, and discovering its
+   * transport cannot carry the shape only after every member has answered wastes
+   * the whole panel.
+   */
+  expectsShapedResult?: boolean;
 }
 
 export type WorkflowAgentPreflight = (requests: readonly WorkflowAgentPreflightRequest[]) => Promise<void>;
@@ -156,8 +169,6 @@ function thrownAgentFailureCause(err: unknown): WorkflowAgentFailureCause | unde
     : undefined;
 }
 
-export const WORKFLOW_INPUT_MAX_CHARS = 16_000;
-
 /** Journal prelude for the run-level no-operator mode. Deliberately names the
  *  guarantee ("operator input"), not any one method: `awaitOperator` and a
  *  stage's `agent({ ask: true })` obey the same mode. */
@@ -177,22 +188,20 @@ export const WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE = `${WORKFLOW_NO_OPERATOR_PRE
 export function workflowOperatorInputForbiddenError(reason: string): string {
   return `Operator input requested but forbidden for this run (no-operator mode): ${reason}`;
 }
-/** High per-child safety fuse. Ordinary agent work should finish far below this value.
- *  Single-sourced from the package budget contract: this name is kept because callers
- *  and tests use it, but the number lives in exactly one place. */
-export const DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS = DEFAULT_WORKFLOW_BUDGET.toolCalls;
 export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
 
 // ---------------------------------------------------------------------------
 // Fusion contract and pure packet policy
 // ---------------------------------------------------------------------------
+/**
+ * A panel needs at least two independent answers to be a panel, and the judge is a
+ * separately declared selector on top of them. That is the whole remaining policy:
+ * there is no upper member count, no per-member or judge answer ceiling, and no
+ * aggregate judge-prompt ceiling. A prompt the selected model physically cannot hold
+ * is the provider's capability answer, not a number this runtime invents — and
+ * truncating member answers to fit one would discard work already paid for.
+ */
 export const WORKFLOW_FUSION_MIN_MEMBERS = 2;
-export const WORKFLOW_FUSION_MAX_MEMBERS = 10;
-export const DEFAULT_WORKFLOW_FUSION_MEMBER_MAX_ANSWER_CHARS = 8_000;
-export const DEFAULT_WORKFLOW_FUSION_JUDGE_MAX_ANSWER_CHARS = 16_000;
-/** Character bound over the exact judge prompt, including all candidate answers. */
-export const WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS = 160_000;
-const WORKFLOW_FUSION_TEXT_MAX_CHARS = 16_000;
 export type WorkflowFusionMode = "tool-free" | "agent";
 
 /** One explicit model selection. Fusion never inherits the parent model silently. */
@@ -213,11 +222,12 @@ export type WorkflowFusionJudge = WorkflowFusionModelSelector & {
 
 export type WorkflowFusionContext = { mode: "prompt-only" } | { mode: "provided"; text: string };
 
-/** Shared limits for the homogeneous member calls or the one judge call. */
+/** Shared limits for the homogeneous member calls or the one judge call. Execution
+ *  budgets only: a panel member's answer has no size policy, so declaring one is refused
+ *  by name rather than ignored. */
 export interface WorkflowFusionCallLimits {
   timeoutMs?: number;
   maxTurns?: number;
-  maxAnswerChars?: number;
   attempts?: number;
 }
 
@@ -259,7 +269,6 @@ interface NormalizedWorkflowFusionMember extends NormalizedWorkflowFusionSelecto
 interface NormalizedWorkflowFusionLimits {
   timeoutMs?: number;
   maxTurns?: number;
-  maxAnswerChars: number;
   attempts: number;
 }
 
@@ -282,13 +291,17 @@ interface NormalizedWorkflowFusion {
 interface WorkflowFusionPreparation {
   memberLimits: NormalizedWorkflowFusionLimits;
   judgeLimits: NormalizedWorkflowFusionLimits;
-  judgeShapeAttempts: number;
-  remainingAgentInvocations: number;
+  /** `undefined` when `totalAgents` is unbounded: there is nothing left to run out of. */
+  remainingAgentInvocations: number | undefined;
+  /** The declared `totalAgents` cap, carried so a refusal here names the real number. */
+  maxTotalAgentInvocations?: number | undefined;
 }
 
 export interface WorkflowAgentRequest {
   /** Host-owned immutable contract; only the bridge injects its return tool. */
   returnContract?: WorkflowReturnContract;
+  /** Author cross-field rules the acceptance tool applies in-session. Never canonicalized. */
+  returnValidate?: WorkflowReturnValidate;
   prompt: string;
   executionMode?: "bare" | "named";
   agent?: string | undefined; // project/user catalog name; absent in bare mode
@@ -405,22 +418,31 @@ export interface WorkflowSchemaValidation {
    *  call that declared `validate` — a schema-only call has one possible authority,
    *  so naming it would change every existing journal line for no added information. */
   source?: "schema" | "script";
-  /** How an exact-choice answer was read when it was not the quoted JSON string the contract
-   *  asked for. Present only on a valid verdict that needed the reading: `bare-text` means the
-   *  child answered with the member itself, `wrapper-object` means it echoed the schema as
-   *  `{"type":"string","value":"<member>"}`. Absent on every answer that validated as written
-   *  and on every line written before the field existed. */
+  /** HISTORICAL. How an exact-choice answer was read when it was not the quoted JSON string
+   *  the text transport asked for: `bare-text` meant the child answered with the member itself,
+   *  `wrapper-object` that it echoed the schema. Nothing writes this any more — a tool argument
+   *  IS the value, so there is no dialect to read — and the field stays declared only so journals
+   *  recorded before the text transport was deleted keep parsing under the current types. */
   coercion?: WorkflowChoiceCoercion;
 }
 
 export type WorkflowChoiceCoercion = "bare-text" | "wrapper-object";
 
-/** Token + cost projection for one model-backed child run, summed per run for the budget view. */
+/**
+ * Token + cost projection for one model-backed child run, summed per run.
+ *
+ * `costTotal` is OPTIONAL and absent means UNKNOWN, not zero. The host reports
+ * tokens but no price, and the field used to be a hardcoded `0` — a number that
+ * reads as "this run was free" and would make any cost budget built on it report
+ * "under budget" forever. Observed tokens are real and stay recorded; the price is
+ * reported as unavailable until something can actually compute it.
+ */
 export interface WorkflowUsage {
   input: number;
   output: number;
   totalTokens: number;
-  costTotal: number;
+  /** Absent when the host reports no price. Never synthesized as zero. */
+  costTotal?: number;
 }
 
 export interface WorkflowDsl {
@@ -524,8 +546,9 @@ export type WorkflowSavedChildRunner = (input: WorkflowSavedChildInvocation) => 
 export interface WorkflowAgentOptions {
   /** Report mode has its own plain-text overload. */
   result?: never;
-  /** Opt-in accepted tool value for a choice, a closed string output, handoffs or a schema.
-   *  Ordinary exact text and fresh-session schema repair are unchanged. */
+  /** @deprecated Redundant and ignored. Every shaped call is carried by same-session
+   *  acceptance now, so `"tool"` says nothing; it is accepted for one release and journaled
+   *  as a deprecation. `"text"` names a transport that no longer exists and is refused. */
   returnVia?: "tool";
   output?: WorkflowStringOutput;
   repair?: WorkflowOutputRepair;
@@ -582,15 +605,9 @@ export interface WorkflowAgentOptions {
    */
   maxTurns?: number;
   /**
-   * Upper bound on the child's answer, in characters. An oversized handoff breaks
-   * the next stage's prompt, so the runtime fails the call here instead of letting
-   * a script re-implement the check. Enforced on replayed answers too.
-   */
-  maxAnswerChars?: number;
-  /**
    * Physical child attempts for this ONE logical call when the TRANSPORT failed — the child
-   * never got to answer, or lost the channel while answering. Default 1; ceiling 3; refused,
-   * never clamped, outside that range.
+   * never got to answer, or lost the channel while answering. Default 1, no ceiling; refused,
+   * never clamped, when it is not a positive integer.
    *
    * It never re-asks because an answer was weak: that is a critic agent's job, and an answer
    * whose SHAPE is wrong already has its own bounded repair (`schema` + `validate`). Refused
@@ -650,13 +667,17 @@ export interface WorkflowAgentChoiceOptions<Choices extends readonly string[] = 
   validate?: never;
 }
 
+/**
+ * What an author may still declare about a discovered work queue.
+ *
+ * Both fields are optional and both are the CONSUMER's contract, not a budget: `minItems`
+ * says "this stage failed if it found nothing", `maxItems` says "this consumer genuinely
+ * cannot take more than N". A discovery stage that knows neither declares `{}` and every
+ * complete unit it finds is accepted, at any length and any count.
+ */
 export interface WorkflowAgentHandoffBounds {
-  /** Empty discovery is allowed by default; raise this when at least one unit is required. */
   minItems?: number;
-  /** Hard cap on runtime-discovered work units. */
-  maxItems: number;
-  /** Per-handoff text bound; defaults to DEFAULT_AGENT_HANDOFF_MAX_CHARS. */
-  maxItemChars?: number;
+  maxItems?: number;
 }
 
 /** Standard dynamic-decomposition form. Each returned string is one complete,
@@ -688,9 +709,8 @@ export interface WorkflowAgentSchemaOptions extends Omit<
   output?: never;
   schema: Record<string, unknown>;
   /** Cross-field rules the schema subset cannot declare. Runs only after schema
-   *  validation succeeds; a non-empty return re-asks the child in its own labelled
-   *  repair block instead of ending the run. Not available with `returnVia: "tool"`,
-   *  where it is refused before any child starts. */
+   *  validation succeeds; a non-empty return asks the SAME child to correct the value
+   *  in its own labelled block instead of ending the run. */
   validate?: WorkflowAgentValidate;
 }
 
@@ -716,6 +736,10 @@ const FUSION_INVOCATION_RESERVATION = Symbol("fusion-invocation-reservation");
 const FUSION_REPLAY_REQUIRED = Symbol("fusion-replay-required");
 const FUSION_CAPABILITY_MODE = Symbol("fusion-capability-mode");
 const WORKFLOW_RETURN_CONTRACT = Symbol("workflow-return-contract");
+/** Author cross-field rules for a shaped call. Deliberately NOT part of the canonical
+ *  request: a function has no stable serialization, and the contract VERSION is what marks
+ *  a replay boundary. */
+const WORKFLOW_RETURN_VALIDATE = Symbol("workflow-return-validate");
 
 interface WorkflowInvocationReservation {
   remaining: number;
@@ -724,6 +748,7 @@ interface WorkflowInvocationReservation {
 
 type WorkflowInternalAgentOptions = WorkflowAgentAnyOptions & {
   [WORKFLOW_RETURN_CONTRACT]?: WorkflowReturnContract;
+  [WORKFLOW_RETURN_VALIDATE]?: WorkflowReturnValidate;
   [FUSION_INVOCATION_RESERVATION]?: WorkflowInvocationReservation;
   [FUSION_REPLAY_REQUIRED]?: true;
   [FUSION_CAPABILITY_MODE]?: WorkflowFusionMode;
@@ -1014,13 +1039,12 @@ export interface WorkflowRuntimeOptions {
   sharedExecution?: WorkflowSharedExecutionState;
   resourceLoader?: WorkflowResourceLoader;
   workspaceManager?: WorkflowWorkspaceManager;
-  maxConcurrentAgents?: number; // default: unlimited global leaf-agent concurrency
-  /** Default per-child tool-call safety fuse; defaults to DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS. */
+  /** Global simultaneous leaf agents; also the default parallel()/pipeline() width.
+   *  Defaults to DEFAULT_WORKFLOW_CONCURRENCY — the ONE width in the runtime. */
+  maxConcurrentAgents?: number;
+  /** Default per-child tool-call safety fuse. Absent means the axis is unbounded:
+   *  no counter refuses a tool start and the run header prints `unbounded`. */
   defaultMaxToolCalls?: number;
-  /** Default upper bound on a child answer, applied to calls that declare none.
-   *  Absent means the axis is enforced only where the call declared it — the
-   *  state every embedder was in before the package budget contract existed. */
-  defaultMaxAnswerChars?: number;
   /** Default wall-clock fuse for one child attempt. Absent means a call that
    *  declares none arms no workflow-level fuse and is bounded only by the SDK host. */
   defaultTimeoutMs?: number;
@@ -1036,8 +1060,9 @@ export interface WorkflowRuntimeOptions {
   /** Injectable numeric clock for the run deadline; defaults to `Date.now`. Separate
    *  from `now()`, which produces ISO strings for journal lines. */
   nowMs?: () => number;
-  // default DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS; global per-run cap across agent() calls;
-  // cyclic workflows allowed up to the cap, exceeding it throws WorkflowInvocationCapError and exits the run.
+  // Global per-run cap across FRESH agent() calls; absent means unbounded.
+  // Cyclic workflows are allowed up to the cap; exceeding it throws
+  // WorkflowInvocationCapError before the next child starts and exits the run.
   maxTotalAgentInvocations?: number;
   /** Optional host-side declaration resolver. Fusion uses it for all members and
    *  the judge before any child call; bare runtime embedders may omit it. */
@@ -1071,13 +1096,28 @@ export interface WorkflowRuntime {
 
 /** Shared by every real saved child. Workflow source receives only the DSL. */
 export interface WorkflowSharedExecutionState {
-  readonly maxTotalAgentInvocations: number;
+  /** The run's ONE effective leaf-agent width; also the default `parallel()` width. */
+  readonly concurrency: number;
+  /** Explicit fresh-child cap, or `undefined` for an unbounded axis. */
+  readonly maxTotalAgentInvocations: number | undefined;
   readonly runtimeMs: number | undefined;
   reserve(count: number): WorkflowInvocationReservation;
   consumeReservation(reservation: WorkflowInvocationReservation): void;
   releaseReservation(reservation: WorkflowInvocationReservation): void;
-  remainingAgentInvocations(): number;
-  spendInvocation(): number;
+  /** `undefined` when the axis is unbounded: nothing remains to run out. */
+  remainingAgentInvocations(): number | undefined;
+  /**
+   * Take the next physical attempt number, charging the `totalAgents` axis only
+   * for attempts that actually start a child.
+   *
+   * `kind` is the whole point: a replayed call projects a recorded answer and calls
+   * no model, so charging it would let a `--resume` of a finished run die on a cap
+   * the original run satisfied. The returned sequence number still counts every
+   * attempt, because it is this attempt's identity (`call-0007`), not its price.
+   */
+  spendInvocation(kind: "fresh" | "replayed"): number;
+  /** Fresh attempts charged so far, and replayed ones observed but not charged. */
+  invocationCounts(): { fresh: number; replayed: number };
   assertDeadline(): void;
   acquireAgent(): Promise<void>;
   releaseAgent(): void;
@@ -1087,9 +1127,6 @@ export interface WorkflowSharedExecutionState {
 export function assertWorkflowInput(value: unknown, field = "workflow input"): asserts value is string | undefined {
   if (value !== undefined && typeof value !== "string") {
     throw new Error(`${field} must be a string when provided`);
-  }
-  if (typeof value === "string" && value.length > WORKFLOW_INPUT_MAX_CHARS) {
-    throw new Error(`${field} exceeds ${WORKFLOW_INPUT_MAX_CHARS} characters`);
   }
 }
 
@@ -1117,15 +1154,20 @@ export function snapshotWorkflowItems(value: unknown, field = "workflow items"):
  * isolation for parallel writes can be dropped in HERE without touching any
  * workflow script.
  *
+ * `width` is REQUIRED and has no local default. It used to have a private
+ * `SCHEDULER_WIDTH = 4` that nobody could see, sitting beside a `budget.concurrency`
+ * of 4 that meant the same thing: two constants, one meaning, and an operator who
+ * narrowed the visible one still got groups of four. The run's single effective
+ * concurrency is the only width now, and a local one exists only when a
+ * `parallel()`/`pipeline()` author passes it explicitly.
+ *
  * // TODO(concurrency): add git-worktree isolation. Keep this signature stable.
  */
-const SCHEDULER_WIDTH = 4;
-
-async function runScheduled<T>(thunks: Array<() => Promise<T>>, width = SCHEDULER_WIDTH): Promise<T[]> {
+async function runScheduled<T>(thunks: Array<() => Promise<T>>, width: number): Promise<T[]> {
   const out: T[] = new Array(thunks.length);
   let next = 0;
   const workerCount = Math.min(width, thunks.length);
-  // SCHEDULER_WIDTH bounds width PER runScheduled call, not globally.
+  // This bounds width PER runScheduled call, not globally.
   // Nested orchestration wrappers create their OWN pool, so nested dsl.agent()
   // inside a parallel() wrapper does NOT deadlock against leaf agent slots.
   // Global leaf-agent concurrency is enforced separately by AgentConcurrencyGate.
@@ -1140,9 +1182,19 @@ async function runScheduled<T>(thunks: Array<() => Promise<T>>, width = SCHEDULE
   return out;
 }
 
+/**
+ * A display name and a `parallel` key have to be a name: non-blank, and free of control
+ * characters that would corrupt a journal line, a terminal row or a path component.
+ *
+ * The former 240-character ceiling is gone. A key is part of branch IDENTITY and enters the
+ * replay key, so control characters are REFUSED rather than encoded — encoding them would
+ * silently rewrite the identity of already-recorded branches — but length was never an
+ * identity property, and a title long enough to be awkward is a display problem the renderer
+ * already solves by clipping what it draws.
+ */
 function assertWorkflowDisplayTitle(value: unknown, field: string): asserts value is string {
-  if (typeof value !== "string" || value.trim() === "" || value.length > 240 || /[\u0000-\u001f\u007f]/u.test(value)) {
-    throw new Error(`${field} must be non-blank text of at most 240 characters without control characters`);
+  if (typeof value !== "string" || value.trim() === "" || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new Error(`${field} must be non-blank text without control characters`);
   }
 }
 
@@ -1186,25 +1238,6 @@ interface AgentConcurrencyGate {
   peak(): number;
 }
 
-class UnlimitedAgentConcurrencyGate implements AgentConcurrencyGate {
-  #inUse = 0;
-  #peak = 0;
-
-  acquire(): Promise<void> {
-    this.#inUse += 1;
-    if (this.#inUse > this.#peak) this.#peak = this.#inUse;
-    return Promise.resolve();
-  }
-
-  release(): void {
-    this.#inUse -= 1;
-  }
-
-  peak(): number {
-    return this.#peak;
-  }
-}
-
 class CountingAgentConcurrencyGate implements AgentConcurrencyGate {
   private inUse = 0;
   private peakInUse = 0;
@@ -1241,25 +1274,36 @@ class CountingAgentConcurrencyGate implements AgentConcurrencyGate {
   }
 }
 
-function createAgentConcurrencyGate(maxConcurrentAgents: number | undefined): AgentConcurrencyGate {
-  if (maxConcurrentAgents === undefined) return new UnlimitedAgentConcurrencyGate();
+function createAgentConcurrencyGate(maxConcurrentAgents: number): AgentConcurrencyGate {
   if (!Number.isInteger(maxConcurrentAgents) || maxConcurrentAgents < 1) {
     throw new Error("maxConcurrentAgents must be a positive integer when provided");
   }
   return new CountingAgentConcurrencyGate(maxConcurrentAgents);
 }
 
-/** Create the one physical execution budget shared by a root and every saved child. */
+/**
+ * Create the one physical execution budget shared by a root and every saved child.
+ *
+ * Two of the three axes here are OPTIONAL and unbounded when absent: an undeclared
+ * `maxTotalAgentInvocations` refuses nobody and an undeclared `runtimeMs` arms no
+ * clock. Only the concurrency width has a package value, because it queues rather
+ * than stops.
+ */
 export function createWorkflowSharedExecutionState(input: {
   maxConcurrentAgents?: number;
   maxTotalAgentInvocations?: number;
   runtimeMs?: number;
   nowMs?: () => number;
 }): WorkflowSharedExecutionState {
-  const gate = createAgentConcurrencyGate(input.maxConcurrentAgents);
+  const concurrency = input.maxConcurrentAgents ?? DEFAULT_WORKFLOW_CONCURRENCY;
+  const gate = createAgentConcurrencyGate(concurrency);
   const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(input.maxTotalAgentInvocations);
   const nowMs = input.nowMs ?? (() => Date.now());
-  let total = 0;
+  /** Physical attempts, replayed included: this is attempt IDENTITY, not spend. */
+  let sequence = 0;
+  /** Attempts that actually started a child. The only number `totalAgents` bounds. */
+  let charged = 0;
+  let replayedCount = 0;
   let reserved = 0;
   let started: number | undefined;
   let deadline: number | undefined;
@@ -1268,21 +1312,30 @@ export function createWorkflowSharedExecutionState(input: {
     started = nowMs();
     deadline = started + input.runtimeMs;
   }
+  const remaining = (): number | undefined =>
+    maxTotalAgentInvocations === undefined ? undefined : maxTotalAgentInvocations - charged - reserved;
 
   return {
+    concurrency,
     maxTotalAgentInvocations,
     runtimeMs: input.runtimeMs,
     reserve(count) {
-      const remaining = maxTotalAgentInvocations - total - reserved;
-      if (count > remaining) {
-        throw new Error(`fusion needs up to ${count} agent invocation(s), but only ${remaining} remain in this run`);
+      const left = remaining();
+      if (left !== undefined && count > left) {
+        // A `totalAgents` refusal, not a Fusion configuration error: the panel is
+        // well-formed and the run simply has no room left for it. Typed so the journal
+        // names the axis and says the answers already received are kept.
+        throw new WorkflowInvocationCapError(
+          maxTotalAgentInvocations ?? 0,
+          `fusion needs up to ${count} agent invocation(s), but only ${left} remain in this run`,
+        );
       }
       reserved += count;
       return { remaining: count, active: true };
     },
     consumeReservation(reservation) {
       if (!reservation.active || reservation.remaining < 1) {
-        throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
+        throw new WorkflowInvocationCapError(maxTotalAgentInvocations ?? 0);
       }
       reservation.remaining -= 1;
       reserved -= 1;
@@ -1293,14 +1346,23 @@ export function createWorkflowSharedExecutionState(input: {
       reservation.remaining = 0;
       reservation.active = false;
     },
-    remainingAgentInvocations: () => maxTotalAgentInvocations - total - reserved,
-    spendInvocation() {
-      if (total + reserved >= maxTotalAgentInvocations) {
+    remainingAgentInvocations: () => remaining(),
+    spendInvocation(kind) {
+      if (kind === "replayed") {
+        replayedCount += 1;
+        sequence += 1;
+        return sequence;
+      }
+      // Checked BEFORE the child starts, so the call that would breach the cap never
+      // runs and everything already received stays exactly as it was.
+      if (maxTotalAgentInvocations !== undefined && charged + reserved >= maxTotalAgentInvocations) {
         throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
       }
-      total += 1;
-      return total;
+      charged += 1;
+      sequence += 1;
+      return sequence;
     },
+    invocationCounts: () => ({ fresh: charged, replayed: replayedCount }),
     assertDeadline() {
       if (deadline === undefined || started === undefined) return;
       const current = nowMs();
@@ -1312,8 +1374,8 @@ export function createWorkflowSharedExecutionState(input: {
   };
 }
 
-function resolveMaxTotalAgentInvocations(maxTotalAgentInvocations: number | undefined): number {
-  if (maxTotalAgentInvocations === undefined) return DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS;
+function resolveMaxTotalAgentInvocations(maxTotalAgentInvocations: number | undefined): number | undefined {
+  if (maxTotalAgentInvocations === undefined) return undefined;
   if (!Number.isInteger(maxTotalAgentInvocations) || maxTotalAgentInvocations < 1) {
     throw new Error("maxTotalAgentInvocations must be a positive integer when provided");
   }
@@ -1327,16 +1389,15 @@ function normalizeMaxToolCalls(maxToolCalls: number, field: string): number {
   return maxToolCalls;
 }
 
-/** A fuse of zero would abort before the child starts; that is a bug, not a bound. */
+/**
+ * A fuse of zero would abort before the child starts; that is a bug, not a bound.
+ *
+ * Length is NOT refused. A 48-hour deadline an operator chose is honoured as a
+ * chain of representable waits (`scheduleLongTimeout`), so the former policy
+ * ceiling — which existed only because a single `setTimeout` clamps — is gone.
+ */
 function normalizeTimeoutMs(timeoutMs: number): number {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new Error("agent timeoutMs must be a positive safe integer");
-  }
-  if (timeoutMs > WORKFLOW_MAX_TIMEOUT_MS) {
-    throw new Error(
-      `agent timeoutMs must not exceed ${WORKFLOW_MAX_TIMEOUT_MS}; larger values cannot be represented by Node timers with the SDK backstop`,
-    );
-  }
+  assertRepresentableTimeoutMs(timeoutMs, "agent timeoutMs");
   return timeoutMs;
 }
 
@@ -1371,56 +1432,76 @@ function normalizeMaxTurns(maxTurns: number): number {
   return maxTurns;
 }
 
-function normalizeMaxAnswerChars(maxAnswerChars: number): number {
-  if (!Number.isSafeInteger(maxAnswerChars) || maxAnswerChars <= 0) {
-    throw new Error("agent maxAnswerChars must be a positive safe integer");
+/**
+ * Options this runtime REMOVED, named at declaration time with their replacement.
+ *
+ * Ignoring one would leave an author believing a bound is applied; the whole point of
+ * removing the runtime's size policy is that a size decision now has a visible owner.
+ * A `maxAnswerChars` author wanted a CONSUMER contract — express it as `output.maxLength`
+ * on a shaped call, or as `maxLength`/`maxItems` inside the schema, where the child is
+ * told about the violation and can correct it.
+ */
+const REMOVED_AGENT_OPTIONS: Readonly<Record<string, string>> = Object.freeze({
+  maxAnswerChars:
+    "agent maxAnswerChars was removed: the runtime no longer rejects an answer for its size. " +
+    "Declare a real consumer contract instead — output.maxLength for a string return, or maxLength/maxItems inside a schema",
+  // Silently dropped while assembling the return contract until this refusal existed, so
+  // an author who wrote it read a bound into a call that had none.
+  schemaMaxLength:
+    "agent schemaMaxLength was removed: the runtime no longer clamps a shaped answer to a package number. " +
+    "Declare the consumer contract instead — maxLength/maxItems inside the schema itself, or output.maxLength for a string return",
+});
+
+function assertNoRemovedAgentOptions(opts: unknown, scope = "agent"): void {
+  if (!isRecord(opts)) return;
+  for (const [key, message] of Object.entries(REMOVED_AGENT_OPTIONS)) {
+    if (opts[key] !== undefined) throw new Error(scope === "agent" ? message : `${scope}: ${message}`);
   }
-  return maxAnswerChars;
 }
 
 /**
- * Ceiling on physical transport attempts for one logical `agent()` call.
+ * Default 1: a package-wide retry default is a budget decision nobody has taken yet.
  *
- * Three, because the shape-repair loop can already call the physical executor three times
- * when `validate` is declared (`SCHEMA_MAX_ATTEMPTS + 1`), so `attempts` MULTIPLIES that
- * budget rather than adding to it: the worst case for one shaped call is `attempts × 3`
- * children, each charged to the run's invocation cap.
+ * There is no upper bound any more. The former ceiling of three existed because the
+ * deleted text-repair loop MULTIPLIED it (`attempts x SCHEMA_MAX_ATTEMPTS` children per
+ * logical call); with one same-session acceptance path, an explicitly requested retry
+ * count is one physical child each and the run's own invocation budget is what bounds it.
  */
-const MAX_AGENT_TRANSPORT_ATTEMPTS = 3;
-
-/** Default 1: a package-wide retry default is a budget decision nobody has taken yet. */
 function normalizeAgentAttempts(attempts: number | undefined): number {
   if (attempts === undefined) return 1;
-  if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > MAX_AGENT_TRANSPORT_ATTEMPTS) {
-    throw new Error(`agent attempts must be a safe integer between 1 and ${MAX_AGENT_TRANSPORT_ATTEMPTS}`);
+  if (!Number.isSafeInteger(attempts) || attempts < 1) {
+    throw new Error("agent attempts must be a positive safe integer");
   }
   return attempts;
 }
 
 /**
- * Options refused by same-session output acceptance.
+ * Declaration checks for a shaped call, now the only shaped path.
  *
- * The shape comes from `choice`, `output`, `schema` or `handoffs`; what is refused here is a
- * script `validate` (its rule belongs in the schema, or in a separate verifier call that can
- * see the value) and transport `attempts`. Declared beside the transport budget rather than
- * inside the shaped call, so the shape path keeps reading no transport option at all: this
- * REFUSES `attempts`, it never spends it, and one clarification session is not a second
- * physical child.
+ * `validate` is no longer refused: it runs inside the child's own session beside the
+ * schema check, so a cross-field violation is a correctable clarification instead of a
+ * fresh child that has forgotten everything. Transport `attempts` is no longer refused
+ * either — a same-session clarification is not a physical retry, so the two no longer
+ * multiply; the ordinary worktree refusal below still applies.
  */
 function assertWorkflowToolReturnOptions(options: WorkflowAgentAnyOptions): void {
-  const { schema, validate, handoffs, attempts } = options as {
+  const { schema, validate, handoffs, choice, output } = options as {
     schema?: unknown;
     validate?: unknown;
     handoffs?: unknown;
-    attempts?: number;
+    choice?: unknown;
+    output?: unknown;
   };
-  if (validate !== undefined)
-    throw new Error(
-      "returnVia: tool does not support validate; put the rule in the schema or review the value in a separate verifier call",
-    );
+  if (validate !== undefined && typeof validate !== "function") throw new Error("agent validate must be a function");
+  if (validate !== undefined && schema === undefined && handoffs === undefined)
+    throw new Error("agent validate requires a schema or handoffs");
+  // Named pairwise, before the contract's generic "exactly one shape" message, so an author
+  // who combined two shapes reads WHICH two rather than a count.
   if (schema !== undefined && handoffs !== undefined) throw new Error("agent handoffs cannot be combined with schema");
-  if ((attempts ?? 1) !== 1)
-    throw new Error("returnVia: tool does not combine output clarification with transport retries");
+  if (choice !== undefined && handoffs !== undefined) throw new Error("agent choice cannot be combined with handoffs");
+  if (choice !== undefined && schema !== undefined) throw new Error("agent choice cannot be combined with schema");
+  if (output !== undefined && (choice !== undefined || schema !== undefined || handoffs !== undefined))
+    throw new Error("agent output is a string-only contract and cannot be combined with choice, schema or handoffs");
 }
 
 /**
@@ -1457,31 +1538,24 @@ function defaultWorkflowWorkspaceMode(opts: WorkflowAgentAnyOptions | undefined)
 // Schema enforcement (S2)
 // ---------------------------------------------------------------------------
 
-/** Maximum child-run attempts when agent({schema}) declares an answer shape — one retry
- *  budget for the DSL. */
-const SCHEMA_MAX_ATTEMPTS = 2;
+/**
+ * A routing contract needs at least two branches to be a decision. Everything else the
+ * old bound said — at most 32 members, at most 200 characters each — was a size policy
+ * over an `enum` the provider has no practical trouble carrying, so it is gone. What
+ * stays is what the CONSUMER needs: a non-blank, unambiguous set whose membership can
+ * be checked, because a choice must name a branch that exists.
+ */
 const MIN_AGENT_CHOICES = 2;
-const MAX_AGENT_CHOICES = 32;
-const MAX_AGENT_CHOICE_CHARS = 200;
-const MAX_AGENT_HANDOFFS = 100;
-const DEFAULT_AGENT_HANDOFF_MAX_CHARS = 8_000;
 
-/** Validate the small standard routing contract before it enters the existing
- *  schema path. Refuse ambiguity instead of trimming or deduplicating author data. */
 function normalizeAgentChoices(value: unknown): readonly string[] {
   if (!Array.isArray(value)) throw new Error("agent choice must be an array of strings");
-  if (value.length < MIN_AGENT_CHOICES || value.length > MAX_AGENT_CHOICES) {
-    throw new Error(`agent choice must contain ${MIN_AGENT_CHOICES}-${MAX_AGENT_CHOICES} values`);
+  if (value.length < MIN_AGENT_CHOICES) {
+    throw new Error(`agent choice must contain at least ${MIN_AGENT_CHOICES} values`);
   }
   const seen = new Set<string>();
   for (const [index, member] of value.entries()) {
     if (typeof member !== "string" || member.trim() === "") {
       throw new Error(`agent choice value at index ${index} must be a non-empty string`);
-    }
-    if (member.length > MAX_AGENT_CHOICE_CHARS) {
-      throw new Error(
-        `agent choice value at index ${index} is ${member.length} character(s); at most ${MAX_AGENT_CHOICE_CHARS} are allowed`,
-      );
     }
     if (seen.has(member)) throw new Error(`agent choice contains duplicate value ${JSON.stringify(member)}`);
     seen.add(member);
@@ -1496,107 +1570,93 @@ function normalizeAgentChoiceFallback(value: unknown, choices: readonly string[]
   return value;
 }
 
-function normalizeAgentHandoffs(value: unknown): Required<WorkflowAgentHandoffBounds> {
+/**
+ * Handoff bounds after the size policy was removed.
+ *
+ * `maxItems` is now OPTIONAL and has no ceiling: a discovery stage cannot know in
+ * advance how many work units exist, and refusing the 101st one is a refusal to accept
+ * work that was already done. `maxItemChars` is gone entirely — a complete brief is
+ * exactly as long as it needs to be, and the 8 000-character default is what truncated
+ * real queues. `minItems` stays, because "at least one unit or this stage failed" is a
+ * statement about the WORK, not about its size.
+ *
+ * Uniqueness-after-trim is gone too: two items whose text happens to match after
+ * trimming are not proof of duplicated work, and deduplicating author data silently
+ * loses a unit. Blank items are still refused — an empty string is not a work unit.
+ */
+function normalizeAgentHandoffs(value: unknown): WorkflowAgentHandoffBounds {
   if (!isRecord(value)) throw new Error("agent handoffs must be an object");
+  for (const key of Object.keys(value)) {
+    if (key === "maxItemChars")
+      throw new Error(
+        "agent handoffs maxItemChars was removed: a complete handoff is accepted at any length. " +
+          "Declare a real consumer bound with a schema if the next stage genuinely needs one",
+      );
+    if (!["minItems", "maxItems"].includes(key)) throw new Error(`agent handoffs has no option ${key}`);
+  }
   const minItems = value.minItems ?? 0;
   const maxItems = value.maxItems;
-  const maxItemChars = value.maxItemChars ?? DEFAULT_AGENT_HANDOFF_MAX_CHARS;
   if (!Number.isSafeInteger(minItems) || (minItems as number) < 0) {
     throw new Error("agent handoffs minItems must be a non-negative safe integer");
   }
-  if (!Number.isSafeInteger(maxItems) || (maxItems as number) < 1 || (maxItems as number) > MAX_AGENT_HANDOFFS) {
-    throw new Error(`agent handoffs maxItems must be a safe integer between 1 and ${MAX_AGENT_HANDOFFS}`);
+  if (maxItems !== undefined && (!Number.isSafeInteger(maxItems) || (maxItems as number) < 1)) {
+    throw new Error("agent handoffs maxItems must be a positive safe integer when declared");
   }
-  if ((minItems as number) > (maxItems as number)) {
+  if (maxItems !== undefined && (minItems as number) > (maxItems as number)) {
     throw new Error("agent handoffs minItems cannot exceed maxItems");
   }
-  if (!Number.isSafeInteger(maxItemChars) || (maxItemChars as number) < 1) {
-    throw new Error("agent handoffs maxItemChars must be a positive safe integer");
-  }
-  const bounds = {
+  return {
     minItems: minItems as number,
-    maxItems: maxItems as number,
-    maxItemChars: maxItemChars as number,
+    ...(maxItems === undefined ? {} : { maxItems: maxItems as number }),
   };
-  handoffsJsonMaxLength(bounds);
-  return bounds;
 }
 
-/** JSON escaping needs at most six characters per UTF-16 code unit, plus array punctuation. */
-function handoffsJsonMaxLength(bounds: Required<WorkflowAgentHandoffBounds>): number {
-  const maxLength = bounds.maxItems * (6 * bounds.maxItemChars + 3) + 1;
-  if (!Number.isSafeInteger(maxLength)) {
-    throw new Error("agent handoffs canonical JSON allowance must be a safe integer");
-  }
-  return Math.max(100_000, maxLength);
-}
-
-/** The one array shape handoffs desugar to, shared by the text loop and tool acceptance so
- *  both paths send byte-identical bytes and neither can drift into a second handoff dialect. */
-function handoffsSchema(bounds: Required<WorkflowAgentHandoffBounds>): Record<string, unknown> {
+/** The one array shape handoffs desugar to. It carries the author's declared bounds and
+ *  nothing the runtime invented. */
+function handoffsSchema(bounds: WorkflowAgentHandoffBounds): Record<string, unknown> {
   return {
     type: "array",
-    items: {
-      type: "string",
-      minLength: 1,
-      maxLength: bounds.maxItemChars,
-      nonBlank: true,
-    },
-    minItems: bounds.minItems,
-    maxItems: bounds.maxItems,
-    uniqueTrimmedItems: true,
+    items: { type: "string", minLength: 1, nonBlank: true },
+    minItems: bounds.minItems ?? 0,
+    ...(bounds.maxItems === undefined ? {} : { maxItems: bounds.maxItems }),
   };
 }
-
-/** Upper bounds on what a script validator may hand back. Its strings reach the next
- *  child's prompt, the journal verdict and — through the prompt — the replay key, and
- *  nothing else caps them. A breach is a run error, never a truncation: truncating
- *  would silently rewrite the replay key. */
-const MAX_SCRIPT_VALIDATION_ERRORS = 32;
-const MAX_SCRIPT_VALIDATION_ERROR_CHARS = 500;
-
-/** A validate() return is author data crossing into runtime-owned surfaces, so it is
- *  checked like any other untrusted value. Every breach fails the run closed and
- *  consumes no retry — a bug in author code must not be laundered into a repair loop
- *  that blames the model for it. */
-function assertScriptValidationErrors(returned: unknown): readonly string[] {
-  if (isRecord(returned) && typeof returned.then === "function") {
-    throw new Error("agent validate must return an array of strings, not a Promise");
-  }
-  if (!Array.isArray(returned)) throw new Error("agent validate must return an array of strings");
-  if (returned.length > MAX_SCRIPT_VALIDATION_ERRORS) {
-    throw new Error(
-      `agent validate returned ${returned.length} error(s); at most ${MAX_SCRIPT_VALIDATION_ERRORS} are allowed`,
-    );
-  }
-  for (const [index, error] of returned.entries()) {
-    if (typeof error !== "string") throw new Error("agent validate must return an array of strings");
-    if (error === "") throw new Error(`agent validate error at index ${index} must be a non-empty string`);
-    if (error.length > MAX_SCRIPT_VALIDATION_ERROR_CHARS) {
-      throw new Error(
-        `agent validate error at index ${index} is ${error.length} character(s); at most ${MAX_SCRIPT_VALIDATION_ERROR_CHARS} are allowed`,
-      );
-    }
-  }
-  return returned as readonly string[];
-}
-
-/** Default global per-run cap on total dsl.agent() invocations. Cyclic workflows are
- *  allowed up to this cap; exceeding it throws WorkflowInvocationCapError and exits the run.
- *  Single-sourced from the package budget contract. */
-export const DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS = DEFAULT_WORKFLOW_BUDGET.totalAgents;
 
 /** Thrown by agentDsl() when a run exceeds maxTotalAgentInvocations. Bubbles past
  *  grouped contexts (parallel/pipeline) so a cyclic/runaway workflow exits the run
  *  with a clear error instead of looping unbounded. */
 export class WorkflowInvocationCapError extends Error {
   readonly cap: number;
-  constructor(cap: number) {
-    super(`workflow exceeded maxTotalAgentInvocations cap of ${cap}`);
+  /**
+   * `detail` replaces the generic sentence when the refusal has a more precise one
+   * — a Fusion panel that cannot fit its worst case, for instance. The CLASS is what
+   * `journalBudgetStop` reads to name the axis, so every refusal on `totalAgents`
+   * prints as `stopped by budget totalAgents` whatever its sentence says.
+   */
+  constructor(cap: number, detail?: string) {
+    super(detail ?? `workflow exceeded maxTotalAgentInvocations cap of ${cap}`);
     this.name = "WorkflowInvocationCapError";
     this.cap = cap;
   }
 }
+
+/**
+ * The per-call failure causes that mean "an explicit budget stopped this", mapped
+ * to the axis an operator would recognise.
+ *
+ * Deliberately a closed table rather than a prefix match on the cause name: every
+ * other cause here is a real failure — the provider broke, the host could not spawn,
+ * the answer did not satisfy its contract — and calling one of those a budget stop
+ * would hide it behind a reassuring word.
+ */
+const PER_CALL_BUDGET_STOPS: Readonly<Partial<Record<WorkflowAgentFailureCause, keyof WorkflowBudget>>> = Object.freeze(
+  {
+    "call-timeout": "timeoutMs",
+    "host-turn-timeout": "timeoutMs",
+    "tool-call-budget": "toolCalls",
+    "assistant-turn-budget": "turns",
+  },
+);
 
 /** The two failures that bound the RUN, not one branch. Both are thrown before any
  *  child work and must exit grouped contexts unchanged. */
@@ -1662,10 +1722,35 @@ export class WorkflowAgentSlotConflictError extends Error {
   }
 }
 
-/** The DSL's "declared shape not met" failure. Thrown by agent({ schema }) — that path always
- *  fails closed — when the child's answer still violates the schema after SCHEMA_MAX_ATTEMPTS.
- *  Carries the validator errors + attempt count. A child RUN failure stays
- *  WorkflowAgentExecutionError; this error means the child ran and answered off-shape. */
+/**
+ * The one sentence a shaped call gets when the TRANSPORT cannot carry a shaped result.
+ *
+ * The host refuses before it prompts the child (`agent-sdk-host.ts`: no
+ * `setActiveToolsByName`, no tool readback, or the return tool was never registered), so
+ * nothing is spent on work that could not be returned. There is deliberately no fallback:
+ * the text transport that used to parse a structured value out of a final message is gone,
+ * and silently reverting to it would be the hidden degradation this refusal exists to stop.
+ */
+export const WORKFLOW_SHAPED_TRANSPORT_REFUSAL =
+  "Transport cannot carry a shaped result: this host did not accept a workflow_return receipt for the call. " +
+  "Same-session acceptance needs a registered return tool plus tool-set readback, and there is no text fallback. " +
+  "Use a plain agent(prompt) call on this transport, or run the shaped call on a host that supports it.";
+
+/** Thrown instead of a generic execution failure when the refusal above is the cause, so a
+ *  script or operator reads "this route cannot do shaped results", never "bad answer". */
+export class WorkflowOutputCapabilityError extends Error {
+  readonly result: WorkflowAgentResult;
+  constructor(result: WorkflowAgentResult) {
+    super(WORKFLOW_SHAPED_TRANSPORT_REFUSAL);
+    this.name = "WorkflowOutputCapabilityError";
+    this.result = result;
+  }
+}
+
+/** The DSL's "declared shape not met" failure: the child completed and its ACCEPTED value
+ *  still fails the contract when the boundary re-reads it. Carries the validator errors and
+ *  the attempt count. A child RUN failure stays WorkflowAgentExecutionError; this error means
+ *  the child ran and the value it submitted is not the value its consumer declared. */
 export class SchemaValidationError extends Error {
   readonly errors: string[];
   readonly attempts: number;
@@ -1674,35 +1759,6 @@ export class SchemaValidationError extends Error {
     this.name = "SchemaValidationError";
     this.errors = errors;
     this.attempts = attempts;
-  }
-}
-
-/** Strip a ```json … ``` (or bare ``` … ```) fence if the model wrapped its JSON. */
-function stripJsonFences(text: string): string {
-  const fence = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  return fence !== null ? fence[1]! : text;
-}
-
-/**
- * Tolerant JSON extraction from a child's final text for schema validation: try the whole
- * (fence-stripped) string, then fall back to the first {...}/[...] block. Used only
- * when a schema is provided; never throws.
- */
-function parseJsonFromText(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
-  const trimmed = stripJsonFences(text).trim();
-  if (trimmed === "") return { ok: false, error: "empty response" };
-  try {
-    return { ok: true, value: JSON.parse(trimmed) };
-  } catch (err) {
-    const block = /[{[][\s\S]*[\]}]/.exec(trimmed);
-    if (block !== null) {
-      try {
-        return { ok: true, value: JSON.parse(block[0]) };
-      } catch {
-        // fall through to the error below
-      }
-    }
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -1717,7 +1773,7 @@ interface AgentSchemaCheck {
 function isReportableAgentFailure(result: WorkflowAgentResult): boolean {
   return (
     (result.status === "failed" || result.status === "blocked") &&
-    ["provider-error", "empty-answer", "answer-too-long"].includes(workflowAgentFailureCause(result))
+    ["provider-error", "empty-answer"].includes(workflowAgentFailureCause(result))
   );
 }
 
@@ -1771,9 +1827,6 @@ interface PhysicalAgentAttemptInput {
   permissionMode: PermissionMode;
   workspaceMode: WorkspaceMode;
   opts: WorkflowInternalAgentOptions | undefined;
-  /** Resolved answer bound, including the run default. Kept outside the request and
-   *  replay key so a tighter current bound rejects an older recorded answer. */
-  maxAnswerChars?: number;
   checkSchema?: (text: string) => AgentSchemaCheck;
   /** Present only when the logical call was served from a record; no child then runs. */
   replayedText?: string;
@@ -1782,164 +1835,6 @@ interface PhysicalAgentAttemptInput {
   attempts: number;
   /** Stable identity of the ONE logical call every attempt here belongs to. */
   logicalCallId: string;
-}
-
-/**
- * Validate one child answer against a declared schema with the DSL's single JSON extractor and
- * subset validator, then — only on a value that already validated — against the script's own
- * `validate` callback. `attempt` is the 1-based child run this verdict describes.
- *
- * The order is the contract: a cross-field rule presupposes the shape holds, so an off-shape
- * answer never reaches author code. `source` names the rejecting authority, and is recorded only
- * when two authorities could have rejected — a schema-only call has exactly one.
- */
-function checkAgentSchema(
-  text: string,
-  schema: Record<string, unknown>,
-  attempt: number,
-  validate?: WorkflowAgentValidate,
-): AgentSchemaCheck {
-  const authority = validate === undefined ? {} : { source: "schema" as const };
-  const parsed = parseJsonFromText(text);
-  const choiceMembers = exactChoiceMembers(schema);
-  const coerced = choiceMembers === undefined ? undefined : coerceExactChoiceAnswer(text, parsed, choiceMembers);
-  const read = coerced === undefined ? parsed : { ok: true as const, value: coerced.value };
-  if (!read.ok) {
-    return {
-      validation: {
-        status: "mismatch",
-        attempts: attempt,
-        errors: [`response is not valid JSON: ${read.error}`],
-        ...authority,
-      },
-    };
-  }
-  const validation = validateAgainstSchema(read.value, schema);
-  if (!validation.ok) {
-    return { validation: { status: "mismatch", attempts: attempt, errors: [...validation.errors], ...authority } };
-  }
-  if (validate !== undefined) {
-    const scriptErrors = assertScriptValidationErrors(validate(read.value));
-    if (scriptErrors.length > 0) {
-      return { validation: { status: "mismatch", attempts: attempt, errors: [...scriptErrors], source: "script" } };
-    }
-  }
-  const coercion = coerced === undefined ? {} : { coercion: coerced.coercion };
-  return { validation: { status: "valid", attempts: attempt, errors: [], ...coercion }, value: read.value };
-}
-
-/**
- * The members of a root exact-choice schema — `{ type: "string", enum: [...] }` with only
- * string members, the shape `agent({ choice })` desugars to — or undefined for any other
- * shape. The lenient readings below are scoped to exactly this shape: a string enum is a
- * routing word, and a routing word has no quoting to get wrong.
- */
-function exactChoiceMembers(schema: Record<string, unknown>): readonly string[] | undefined {
-  if (schema.type !== "string" || !Array.isArray(schema.enum)) return undefined;
-  if (!schema.enum.every((member) => typeof member === "string")) return undefined;
-  return schema.enum as readonly string[];
-}
-
-/**
- * Read an exact-choice answer the child did not quote as a JSON string.
- *
- * Observed on `openai-codex/gpt-5.6-luna` (run 20260822-194520-6c07): told by a step prompt
- * to "return exactly `completed`", the child answered `completed` — not valid JSON — and,
- * once the repair prompt quoted that parser error back, answered
- * `{"type":"string","value":"completed"}`, echoing the schema itself. Both name one declared
- * member and nothing else, and the step had genuinely completed; refusing them failed the
- * whole run over quoting.
- *
- * Exactly two readings are accepted, and each must land on a declared member: the trimmed
- * (fence-stripped, optionally single-backticked) text equal to a member, or an object whose
- * keys are drawn from `type`/`enum`/`value` — a schema echo — whose `value` is a member and
- * whose `type`, when present, is `"string"`. Prose around a member, a near-miss, an unlisted
- * value and any other key stay a mismatch, so `choice` remains a routing contract and not a
- * guess. The bare reading runs first: a member such as `"1"` or `"true"` is also valid JSON
- * of the wrong type, and the declared word wins over the parser there.
- */
-function coerceExactChoiceAnswer(
-  text: string,
-  parsed: ReturnType<typeof parseJsonFromText>,
-  members: readonly string[],
-): { value: string; coercion: WorkflowChoiceCoercion } | undefined {
-  const bare = stripJsonFences(text).trim();
-  const word = /^`([^`]*)`$/u.exec(bare)?.[1] ?? bare;
-  if (members.includes(word)) return { value: word, coercion: "bare-text" };
-  if (!parsed.ok || !isRecord(parsed.value)) return undefined;
-  const wrapper = parsed.value;
-  const echoesSchema = Object.keys(wrapper).every((key) => key === "type" || key === "enum" || key === "value");
-  if (!echoesSchema || typeof wrapper.value !== "string" || !members.includes(wrapper.value)) return undefined;
-  if (wrapper.type !== undefined && wrapper.type !== "string") return undefined;
-  return { value: wrapper.value, coercion: "wrapper-object" };
-}
-
-/**
- * Append the shape contract to a child prompt for agent({schema}).
- *
- * This is the legacy text transport. The prompt states the value contract and the runtime
- * enforces it after the fact: parse, validate, retry, fail closed. A retry repeats the request
- * with the previous validator errors — a fresh child has no memory of the previous attempt.
- */
-function withSchemaContract(
-  prompt: string,
-  schema: Record<string, unknown>,
-  attempt: number,
-  previousErrors: readonly string[],
-  previousSource: "schema" | "script",
-  maxAttempts: number,
-): string {
-  // Exactly one repair block can appear, because the script validator only ever sees a
-  // schema-valid value: an attempt has one rejecting authority. Script errors are never
-  // merged into the schema list — schema errors carry 0-indexed JSON paths and observed
-  // values, and one merged list would hand the child two index bases and frame a
-  // cross-field violation as a shape violation.
-  const repair =
-    attempt > 1 && previousErrors.length > 0
-      ? [
-          "",
-          previousSource === "script"
-            ? `The previous answer (attempt ${attempt - 1} of ${maxAttempts}) matched the required shape but was REJECTED by the workflow script for:`
-            : `The previous answer (attempt ${attempt - 1} of ${maxAttempts}) was REJECTED for:`,
-          ...previousErrors.map((error) => `- ${error}`),
-          "Return the corrected JSON value only.",
-        ].join("\n")
-      : "";
-  // A choice asks for one value, not a description of its schema. Showing the
-  // schema itself encouraged schema-only echoes with no selected member.
-  // Keep richer string schemas intact so extra constraints stay visible.
-  const members = exactChoiceMembers(schema);
-  if (members !== undefined && Object.keys(schema).length === 2) {
-    return [
-      prompt,
-      "",
-      "## Required answer shape",
-      "",
-      "Your final message must be exactly ONE of the JSON string values below.",
-      "Choose the value supported by your result; no prose or explanation.",
-      "Do not return the list, a JSON object, or a JSON Schema.",
-      "Allowed answers (choose one):",
-      ...members.map((member) => `- ${JSON.stringify(member)}`),
-      repair,
-    ]
-      .join("\n")
-      .trimEnd();
-  }
-  return [
-    prompt,
-    "",
-    "## Required answer shape",
-    "",
-    "Your final message must be ONE JSON value that validates against this JSON Schema.",
-    "No prose before or after it, no explanation, no commentary.",
-    "",
-    "```json",
-    JSON.stringify(schema, null, 2),
-    "```",
-    repair,
-  ]
-    .join("\n")
-    .trimEnd();
 }
 
 // ---------------------------------------------------------------------------
@@ -1968,11 +1863,8 @@ function prepareWorkflowFusion(
     throw new Error('fusion strategy must be "replicate" or "roles"');
   }
   if (!Array.isArray(rawOptions.members)) throw new Error("fusion members must be an array");
-  if (
-    rawOptions.members.length < WORKFLOW_FUSION_MIN_MEMBERS ||
-    rawOptions.members.length > WORKFLOW_FUSION_MAX_MEMBERS
-  ) {
-    throw new Error(`fusion requires ${WORKFLOW_FUSION_MIN_MEMBERS}-${WORKFLOW_FUSION_MAX_MEMBERS} members`);
+  if (rawOptions.members.length < WORKFLOW_FUSION_MIN_MEMBERS) {
+    throw new Error(`fusion requires at least ${WORKFLOW_FUSION_MIN_MEMBERS} members`);
   }
 
   const memberKeys = new Set<string>();
@@ -1989,7 +1881,7 @@ function prepareWorkflowFusion(
     memberLabels.add(label);
     const lens = member.lens;
     if (strategy === "roles") {
-      assertFusionText(lens, `${field}.lens`, 4_000);
+      assertFusionText(lens, `${field}.lens`);
     } else if (lens !== undefined) {
       throw new Error(`${field}.lens is allowed only when fusion strategy is "roles"`);
     }
@@ -2032,12 +1924,18 @@ function prepareWorkflowFusion(
   if (validate !== undefined && typeof validate !== "function") throw new Error("fusion validate must be a function");
   if (schema !== undefined && !isRecord(schema)) throw new Error("fusion schema must be a JSON-schema object");
 
+  // One physical child per member and one for the judge, times the explicitly requested
+  // transport attempts. A shaped judge no longer multiplies this: it is accepted in its
+  // own session like every other shaped call instead of being re-run to fix its format.
   const maximumPhysicalInvocations =
-    members.length * preparation.memberLimits.attempts +
-    preparation.judgeShapeAttempts * preparation.judgeLimits.attempts;
-  if (maximumPhysicalInvocations > preparation.remainingAgentInvocations) {
-    throw new Error(
-      `fusion needs up to ${maximumPhysicalInvocations} agent invocation(s), but only ${preparation.remainingAgentInvocations} remain in this run`,
+    members.length * preparation.memberLimits.attempts + preparation.judgeLimits.attempts;
+  const remainingAgentInvocations = preparation.remainingAgentInvocations;
+  if (remainingAgentInvocations !== undefined && maximumPhysicalInvocations > remainingAgentInvocations) {
+    // Same axis, one step earlier: the worst case is computed here, before the panel is
+    // normalized, so this is the first point at which the run can say it does not fit.
+    throw new WorkflowInvocationCapError(
+      preparation.maxTotalAgentInvocations ?? 0,
+      `fusion needs up to ${maximumPhysicalInvocations} agent invocation(s), but only ${remainingAgentInvocations} remain in this run`,
     );
   }
 
@@ -2056,18 +1954,9 @@ function prepareWorkflowFusion(
     ...(validate !== undefined ? { validate } : {}),
     maximumPhysicalInvocations,
   };
-  const maximumJudgePrompt = buildWorkflowFusionJudgePrompt(
-    normalized,
-    // `"` has the longest XML entity emitted by escapeFusionXml (`&quot;`). Use it
-    // for the declaration-time ceiling so adversarial answers cannot expand past
-    // the aggregate bound only after every member has already spent.
-    members.map(({ label }) => ({ label, answer: '"'.repeat(preparation.memberLimits.maxAnswerChars) })),
-  );
-  if (maximumJudgePrompt.length > WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS) {
-    throw new Error(
-      `fusion maximum judge input is ${maximumJudgePrompt.length} characters; at most ${WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS} are allowed`,
-    );
-  }
+  // No declaration-time judge-prompt ceiling: the former check multiplied a member
+  // answer ceiling that no longer exists, and a prompt too large for the selected
+  // model is that model's capability answer rather than a number invented here.
   return normalized;
 }
 
@@ -2219,15 +2108,13 @@ function normalizeFusionSelector(value: unknown, field: string): NormalizedWorkf
   };
 }
 
-function assertFusionText(
-  value: unknown,
-  field: string,
-  maxChars = WORKFLOW_FUSION_TEXT_MAX_CHARS,
-): asserts value is string {
+/** Non-blankness is a type check, not a size policy: `maxChars` is applied only where a
+ *  caller passes a real display bound (a label that has to fit a row). */
+function assertFusionText(value: unknown, field: string, maxChars?: number): asserts value is string {
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`${field} must be a non-empty string`);
   }
-  if (value.length > maxChars) {
+  if (maxChars !== undefined && value.length > maxChars) {
     throw new Error(`${field} exceeds ${maxChars} characters`);
   }
 }
@@ -2247,15 +2134,13 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   const items = snapshotWorkflowItems(options.items);
   assertBoundContinuation(options.continuation, runId);
   const args = options.args;
-  const defaultMaxToolCalls = normalizeMaxToolCalls(
-    options.defaultMaxToolCalls ?? DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
-    "defaultMaxToolCalls",
-  );
-  // No package fallback here on purpose: the runner owns the contract, and an
-  // embedder that supplies nothing keeps the pre-contract behaviour instead of
-  // silently acquiring a bound it never asked for.
-  const defaultMaxAnswerChars =
-    options.defaultMaxAnswerChars === undefined ? undefined : normalizeMaxAnswerChars(options.defaultMaxAnswerChars);
+  // No package fallback on any of the three per-call axes: absent means unbounded,
+  // and the run header says so in one word rather than leaving an operator to guess
+  // which invisible number their child is running under.
+  const defaultMaxToolCalls =
+    options.defaultMaxToolCalls === undefined
+      ? undefined
+      : normalizeMaxToolCalls(options.defaultMaxToolCalls, "defaultMaxToolCalls");
   const defaultTimeoutMs =
     options.defaultTimeoutMs === undefined ? undefined : normalizeTimeoutMs(options.defaultTimeoutMs);
   const defaultMaxTurns =
@@ -2346,6 +2231,42 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   }
 
   /**
+   * Run one budget check and, if it stops the run, say so in the journal in the
+   * operator's terms before the error leaves the runtime.
+   *
+   * This exists because the three notions the run separates elsewhere collapse here
+   * otherwise. A run that ends on `totalAgents` or `runtimeMs` did not produce a bad
+   * answer and did not lose anything: the limit its operator set was reached, every
+   * answer already received is stored, and the only thing that did not happen is the
+   * next child. The journal line names the axis and says the data is kept, so an
+   * operator reading the tail of a headless log is not left to read a cap as a
+   * failure of the work.
+   */
+  function journalBudgetStop<T>(check: () => T, phase: string | undefined): T {
+    try {
+      return check();
+    } catch (error) {
+      const axis: keyof WorkflowBudget | undefined =
+        error instanceof WorkflowInvocationCapError
+          ? "totalAgents"
+          : error instanceof WorkflowRunDeadlineError
+            ? "runtimeMs"
+            : undefined;
+      if (axis !== undefined) {
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          message: formatWorkflowBudgetStop(axis, (error as Error).message),
+          ...(phase !== undefined ? { phase } : {}),
+        });
+      }
+      throw error;
+    }
+  }
+
+  /**
    * ONE logical `agent()` call: the resolved request, the transport-retry bound, and the
    * replay envelope — opened once and closed once, whatever the physical executor below had
    * to do to get an answer.
@@ -2375,14 +2296,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (opts?.title !== undefined) assertWorkflowDisplayTitle(opts.title, "agent title");
     const groupScope = groupContext.getStore();
     const itemPath = groupScope?.hasBusinessKeys === true ? [...groupScope.memberPath] : undefined;
-    const maxToolCalls = normalizeMaxToolCalls(opts?.maxToolCalls ?? defaultMaxToolCalls, "agent maxToolCalls");
-    // Resolved here rather than at the check site below, so a call that declares
-    // NOTHING is held to the run's bound. Gating the check on `opts.maxAnswerChars`
-    // enforced the axis on exactly the calls that had already declared it, which is
-    // an axis in name only. The value is validated before a child starts; the bound
-    // itself is still applied to whatever answer arrives, fresh or replayed.
-    const maxAnswerChars =
-      opts?.maxAnswerChars !== undefined ? normalizeMaxAnswerChars(opts.maxAnswerChars) : defaultMaxAnswerChars;
+    const maxToolCalls =
+      opts?.maxToolCalls !== undefined
+        ? normalizeMaxToolCalls(opts.maxToolCalls, "agent maxToolCalls")
+        : defaultMaxToolCalls;
     const timeoutMs = opts?.timeoutMs !== undefined ? normalizeTimeoutMs(opts.timeoutMs) : defaultTimeoutMs;
     // Refused here — before the invocation is spent on a child — so an out-of-clamp
     // value is an authoring error the operator reads immediately, not a host
@@ -2394,7 +2311,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     // silence: the raise is journalled where the rest of the run's evidence lives.
     journalPerCallRaises({
       toolCalls: { requested: opts?.maxToolCalls, applied: defaultMaxToolCalls },
-      answerChars: { requested: opts?.maxAnswerChars, applied: defaultMaxAnswerChars },
       timeoutMs: { requested: opts?.timeoutMs, applied: defaultTimeoutMs },
       turns: { requested: opts?.maxTurns, applied: defaultMaxTurns },
     });
@@ -2421,6 +2337,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.title === undefined ? {} : { title: opts.title }),
       ...(itemPath === undefined ? {} : { itemPath }),
       ...(opts?.[WORKFLOW_RETURN_CONTRACT] === undefined ? {} : { returnContract: opts[WORKFLOW_RETURN_CONTRACT] }),
+      ...(opts?.[WORKFLOW_RETURN_VALIDATE] === undefined ? {} : { returnValidate: opts[WORKFLOW_RETURN_VALIDATE] }),
       executionMode: agentName === undefined ? "bare" : "named",
       ...(agentName === undefined ? {} : { agent: agentName }),
       tools: ["*"],
@@ -2439,7 +2356,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       // deadlines can never expire at the same instant.
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
-      maxToolCalls,
+      ...(maxToolCalls !== undefined ? { maxToolCalls } : {}),
       ...(opts?.[FUSION_CAPABILITY_MODE] === undefined ? {} : { capabilityMode: opts[FUSION_CAPABILITY_MODE] }),
       ...(opts?.label !== undefined ? { label: opts.label } : {}),
       ...(workflowSlot === undefined ? {} : { workflowSlot }),
@@ -2488,8 +2405,30 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       // call. One object serves the lookup and all three record sites, so the name
       // written can never drift from the name compared.
       const node = workflowNodeName(req, agentNodeOccurrences);
-      const replayCall = { ...(node === undefined ? {} : { node }), canonicalRequest };
+      const replayCall = {
+        ...(node === undefined ? {} : { node }),
+        canonicalRequest,
+        // Carried so a miss against a record written under return-contract v1 is named as
+        // the contract boundary rather than reported as a changed script.
+        ...(req.returnContract === undefined ? {} : { returnContractVersion: req.returnContract.version }),
+      };
       const lookup = options.replay?.beginAgentAttempt({ ...replayCall, replayable });
+      // The replay boundary an operator has to be told about by name. A shaped call
+      // recorded under return-contract v1 cannot match a v2 request key, and saying
+      // "key-mismatch" here would send them looking for a script edit that never happened.
+      if (lookup?.replayed === false && lookup.reason === "return-contract-changed") {
+        emit({
+          ts: nowFn(),
+          runId,
+          kind: "log",
+          source: "runtime",
+          ...(req.phase !== undefined ? { phase: req.phase } : {}),
+          message:
+            `[workflow:replay] ${req.label ?? workflowAgentDisplayName(req)}: the shaped return contract changed in this ` +
+            "release (v1 -> v2: no default answer ceiling, no derived JSON allowance, no bounded clarification budget). " +
+            "The recorded answer stays readable, but it answered a different contract, so replay stops here and this call runs fresh.",
+        });
+      }
       if (opts?.[FUSION_REPLAY_REQUIRED] === true && lookup?.replayed !== true) {
         options.replay?.recordAgentAttempt(replayCall, { ok: false });
         throw new Error(
@@ -2507,7 +2446,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
             permissionMode,
             workspaceMode,
             opts,
-            ...(maxAnswerChars !== undefined ? { maxAnswerChars } : {}),
             attempt,
             attempts,
             logicalCallId,
@@ -2555,7 +2493,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         });
         return { text: renderAgentReport(req, failed.result), callId: failed.callId, replayed: false };
       }
-      throw new WorkflowAgentExecutionError(failed.result);
+      throw workflowAgentFailureCause(failed.result) === "output-contract-unavailable"
+        ? new WorkflowOutputCapabilityError(failed.result)
+        : new WorkflowAgentExecutionError(failed.result);
     } finally {
       // Released on every exit — answer, transport exhaustion, thrown host failure, abort and
       // run deadline alike. A claim that outlived its call would refuse the next round of the
@@ -2575,7 +2515,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    * evidence an operator has that the stage was paid for twice.
    */
   async function runPhysicalAgentAttempt(input: PhysicalAgentAttemptInput): Promise<PhysicalAgentAttempt> {
-    const { permissionMode, workspaceMode, opts, maxAnswerChars, checkSchema, replayedText, attempt, attempts } = input;
+    const { permissionMode, workspaceMode, opts, checkSchema, replayedText, attempt, attempts } = input;
     // Emitted only when a retry budget was actually declared, so every journal written
     // before `attempts` existed stays byte-identical and absence still means "one attempt".
     // The three travel together: an ordinal with no logical call to belong to cannot be
@@ -2590,11 +2530,20 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     if (reservation !== undefined) {
       sharedExecution.consumeReservation(reservation);
     }
-    const physicalInvocation = sharedExecution.spendInvocation();
+    // A replayed attempt calls no model. Charging it against `totalAgents` would let a
+    // `--resume` of a completed run die on a cap the original run satisfied, which is
+    // why the two are counted apart and only the fresh one is charged. Both still take
+    // a sequence number, because that number is the attempt's identity.
+    const physicalInvocation = journalBudgetStop(
+      () => sharedExecution.spendInvocation(replayedText === undefined ? "fresh" : "replayed"),
+      currentPhase(),
+    );
     // Refuse an already-expired attempt before it occupies a concurrency slot or
     // inflates the gate-owned peak. Fresh work checks again after any queue wait,
     // immediately before execution; a replay has no gate and this is its only check.
-    sharedExecution.assertDeadline();
+    journalBudgetStop(() => {
+      sharedExecution.assertDeadline();
+    }, currentPhase());
     const callId = `call-${String(physicalInvocation).padStart(4, "0")}`;
     // `callId` is deliberately absent from `canonicalAgentRequest`, so giving each physical
     // attempt its own identity leaves the logical call's replay key untouched.
@@ -2652,19 +2601,30 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       };
     } else {
       try {
-        const [result] = await runScheduled<WorkflowAgentResult>([
-          async () => {
-            await sharedExecution.acquireAgent();
-            try {
-              executionStartedAtMs = Date.now();
-              sharedExecution.assertDeadline();
-              emitAdmission("agent_start");
-              return await agentRunner(req);
-            } finally {
-              sharedExecution.releaseAgent();
-            }
-          },
-        ]);
+        const [result] = await runScheduled<WorkflowAgentResult>(
+          [
+            async () => {
+              await sharedExecution.acquireAgent();
+              try {
+                executionStartedAtMs = Date.now();
+                // The run deadline can pass WHILE this call waits for a concurrency slot,
+                // so this second check is the one that most often fires — and it fired
+                // silently, ending the run with a bare error and no line saying which axis
+                // stopped it or that the answers already received were kept.
+                journalBudgetStop(() => {
+                  sharedExecution.assertDeadline();
+                }, currentPhase());
+                emitAdmission("agent_start");
+                return await agentRunner(req);
+              } finally {
+                sharedExecution.releaseAgent();
+              }
+            },
+          ],
+          // One thunk: the width is a formality here, and the global gate above is
+          // what actually bounds simultaneous leaf agents.
+          1,
+        );
         if (result === undefined) {
           throw new Error("scheduler returned empty array for single-agent call");
         }
@@ -2699,6 +2659,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         throw err;
       }
     }
+    // CAPABILITY, not content. A transport that cannot register `workflow_return` and read
+    // back the child's active tools cannot carry a shaped result at all — and since the text
+    // transport is deleted, there is nothing to quietly fall back to. Naming it here keeps
+    // the refusal a capability statement instead of "the agent answered wrongly".
     if (
       !replayed &&
       req.returnContract !== undefined &&
@@ -2711,7 +2675,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         ok: false,
         status: "failed",
         failureCause: "output-contract-unavailable",
-        summary: "Runner returned no accepted workflow tool receipt",
+        summary: WORKFLOW_SHAPED_TRANSPORT_REFUSAL,
       };
     }
     if (opts?.sandbox !== undefined) {
@@ -2736,28 +2700,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         diagnostics: [...finalResult.diagnostics, "Agent result text is empty."],
       };
     }
-    // The answer bound is a runtime gate, not part of the request: it is checked
-    // here so a replayed answer is held to the caller's CURRENT bound. Tightening
-    // it therefore fails an old recording loudly instead of passing text the next
-    // stage's prompt cannot hold.
-    if (maxAnswerChars !== undefined && finalResult.ok && finalResult.status === "completed") {
-      const length = finalResult.text?.length ?? 0;
-      if (length > maxAnswerChars) {
-        // Keep the established first sentence stable for callers that surface it
-        // verbatim; append the budget classification instead of inserting it before
-        // the sentence-ending period.
-        const message = `Agent answer is ${length} characters; the call allows ${maxAnswerChars}. Budget axis: answerChars.`;
-        finalResult = {
-          ...finalResult,
-          ok: false,
-          status: "failed",
-          // The child answered; the author's bound was wrong. Never a transport failure.
-          failureCause: "answer-too-long",
-          summary: message,
-          diagnostics: [...finalResult.diagnostics, message],
-        };
-      }
-    }
+    // NO answer-size gate. A complete answer the child already paid for is never refused
+    // for its length: the runtime owns no output budget, and the consumer's own contract
+    // (schema, output.maxLength, membership) is checked below where a violation is
+    // correctable in-session instead of fatal after the fact.
     // Shape check runs before agent_end so the run journal carries the verdict for THIS attempt.
     // A child that failed or returned no text has nothing to validate; that stays a run failure.
     let schemaCheck: AgentSchemaCheck | undefined;
@@ -2854,6 +2800,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       });
       throw err;
     }
+    // One line, one wording, for every axis that actually stopped something. The
+    // `agent_end` below already carries the machine-readable cause; this says in the
+    // operator's words that a limit they set was reached, not that the child answered
+    // badly — and that whatever the child had already produced is still stored.
+    const stoppedAxis = PER_CALL_BUDGET_STOPS[workflowAgentFailureCause(finalResult)];
+    if (finalResult.status !== "completed" && stoppedAxis !== undefined) {
+      emit({
+        ts: nowFn(),
+        runId,
+        kind: "log",
+        source: "runtime",
+        message: formatWorkflowBudgetStop(stoppedAxis, finalResult.summary),
+        ...(req.phase !== undefined ? { phase: req.phase } : {}),
+      });
+    }
     emit({
       ts: nowFn(),
       runId,
@@ -2922,19 +2883,14 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     };
   }
 
-  function normalizeFusionLimits(
-    value: unknown,
-    field: string,
-    defaultMaxAnswerChars: number,
-  ): NormalizedWorkflowFusionLimits {
+  function normalizeFusionLimits(value: unknown, field: string): NormalizedWorkflowFusionLimits {
     if (value !== undefined && !isRecord(value)) throw new Error(`${field} must be an object when provided`);
+    assertNoRemovedAgentOptions(value, field);
     const limits = value as WorkflowFusionCallLimits | undefined;
-    const maxAnswerChars = normalizeMaxAnswerChars(limits?.maxAnswerChars ?? defaultMaxAnswerChars);
     const attempts = normalizeAgentAttempts(limits?.attempts);
     const timeoutMs = limits?.timeoutMs === undefined ? undefined : normalizeTimeoutMs(limits.timeoutMs);
     const maxTurns = limits?.maxTurns === undefined ? undefined : normalizeMaxTurns(limits.maxTurns);
     return {
-      maxAnswerChars,
       attempts,
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
@@ -2943,7 +2899,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
 
   async function runPreparedFusion(
     fusion: NormalizedWorkflowFusion,
-    reservation: WorkflowInvocationReservation,
+    /** True when this panel starts past the replay boundary and every leg must run fresh. */
+    freshSuffix: boolean,
+    /** Present only for a fresh panel: a replayed one starts no child and reserves none. */
+    reservation: WorkflowInvocationReservation | undefined,
   ): Promise<unknown> {
     const fusionId = `fusion-${String(++totalFusionCalls).padStart(4, "0")}`;
     emit({
@@ -2966,14 +2925,15 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
           const memberOptions: WorkflowInternalAgentOptions = {
             ...member.agentOptions,
             attempts: fusion.memberLimits.attempts,
-            maxAnswerChars: fusion.memberLimits.maxAnswerChars,
             ...(fusion.memberLimits.timeoutMs !== undefined ? { timeoutMs: fusion.memberLimits.timeoutMs } : {}),
             ...(fusion.memberLimits.maxTurns !== undefined ? { maxTurns: fusion.memberLimits.maxTurns } : {}),
             label: `${fusionId} member ${index + 1}: ${member.label}`,
             artifact: `${fusionId}-member-${String(index + 1).padStart(2, "0")}-${workflowFusionArtifactSlug(member.label)}.md`,
-            [FUSION_INVOCATION_RESERVATION]: reservation,
+            ...(reservation === undefined ? {} : { [FUSION_INVOCATION_RESERVATION]: reservation }),
             [FUSION_CAPABILITY_MODE]: fusion.mode,
-            ...(options.replaySourceRunId !== undefined ? { [FUSION_REPLAY_REQUIRED]: true as const } : {}),
+            ...(options.replaySourceRunId !== undefined && !freshSuffix
+              ? { [FUSION_REPLAY_REQUIRED]: true as const }
+              : {}),
           };
           return () => agentDsl(buildWorkflowFusionMemberPrompt(fusion, member), memberOptions);
         }),
@@ -2983,24 +2943,18 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         fusion,
         fusion.members.map(({ label }, index) => ({ label, answer: answers[index]! })),
       );
-      if (judgePrompt.length > WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS) {
-        throw new Error(
-          `fusion judge input is ${judgePrompt.length} characters; at most ${WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS} are allowed`,
-        );
-      }
       const judgeOptions: WorkflowInternalAgentOptions = {
         ...fusion.judge.agentOptions,
         attempts: fusion.judgeLimits.attempts,
-        maxAnswerChars: fusion.judgeLimits.maxAnswerChars,
         ...(fusion.judgeLimits.timeoutMs !== undefined ? { timeoutMs: fusion.judgeLimits.timeoutMs } : {}),
         ...(fusion.judgeLimits.maxTurns !== undefined ? { maxTurns: fusion.judgeLimits.maxTurns } : {}),
         label: `${fusionId} ${fusion.judge.label}`,
         artifact: `${fusionId}-result.md`,
         ...(fusion.schema !== undefined ? { schema: fusion.schema } : {}),
         ...(fusion.validate !== undefined ? { validate: fusion.validate } : {}),
-        [FUSION_INVOCATION_RESERVATION]: reservation,
+        ...(reservation === undefined ? {} : { [FUSION_INVOCATION_RESERVATION]: reservation }),
         [FUSION_CAPABILITY_MODE]: fusion.mode,
-        ...(options.replaySourceRunId !== undefined ? { [FUSION_REPLAY_REQUIRED]: true as const } : {}),
+        ...(options.replaySourceRunId !== undefined && !freshSuffix ? { [FUSION_REPLAY_REQUIRED]: true as const } : {}),
       };
       const result = await agentDsl(judgePrompt, judgeOptions as WorkflowAgentSchemaOptions);
       emit({
@@ -3030,73 +2984,86 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   async function fusionDsl(question: string, opts: WorkflowFusionAnyOptions): Promise<unknown> {
     if (insideValidate) throw new Error("fusion() must not be called from inside a validate callback");
     if (!isRecord(opts)) throw new Error("fusion options must be an object");
-    const memberLimits = normalizeFusionLimits(
-      opts.memberLimits,
-      "fusion memberLimits",
-      DEFAULT_WORKFLOW_FUSION_MEMBER_MAX_ANSWER_CHARS,
-    );
-    const judgeLimits = normalizeFusionLimits(
-      opts.judgeLimits,
-      "fusion judgeLimits",
-      DEFAULT_WORKFLOW_FUSION_JUDGE_MAX_ANSWER_CHARS,
-    );
+    const memberLimits = normalizeFusionLimits(opts.memberLimits, "fusion memberLimits");
+    const judgeLimits = normalizeFusionLimits(opts.judgeLimits, "fusion judgeLimits");
     const schema = opts.schema;
     const validate = opts.validate;
     if (schema !== undefined) {
       if (!isRecord(schema)) throw new Error("fusion schema must be a JSON-schema object");
       assertSupportedAgentSchema(schema);
     }
-    const judgeShapeAttempts =
-      schema === undefined ? 1 : validate === undefined ? SCHEMA_MAX_ATTEMPTS : SCHEMA_MAX_ATTEMPTS + 1;
-    const fusion = prepareWorkflowFusion(question, opts, {
-      memberLimits,
-      judgeLimits,
-      judgeShapeAttempts,
-      remainingAgentInvocations: sharedExecution.remainingAgentInvocations(),
-    });
-    const reservation = sharedExecution.reserve(fusion.maximumPhysicalInvocations);
+    // A fusion that starts AFTER the replay boundary is an ordinary fresh panel.
+    //
+    // Replay is a strict prefix with a one-way latch, so once the run has diverged no
+    // later call can be served from the record — including every leg of this panel. The
+    // former rule refused such a fusion outright, which made a resume unable to run a
+    // fusion that had not happened yet in the recorded run. What must NOT happen is a
+    // MIXED panel (some legs recorded, some fresh), and the latch already guarantees
+    // that: before divergence every leg replays or the panel fails; after it, none can.
+    const freshSuffix = options.replay === undefined || options.replay.counts().divergedAtCall !== undefined;
+    // `totalAgents` counts children that START, and a replayed leg starts none — which is
+    // exactly why `spendInvocation("replayed")` charges nothing. Reserving the whole panel
+    // before knowing replay from fresh charged the resume for work the original run had
+    // already paid for: a three-member panel read back from the record was refused under
+    // `totalAgents: 1`. So the reservation is taken only for a panel that will run fresh;
+    // a replayed one reserves nothing, and a leg that turns out to diverge still meets the
+    // same cap at `spendInvocation("fresh")`, through the same named budget stop.
+    //
+    // Both legs of that reservation go through the journalling wrapper: running out of
+    // declared invocations is a budget stop with a kept result set, not a broken panel,
+    // and the operator reads that distinction in the journal line.
+    const fusion = journalBudgetStop(
+      () =>
+        prepareWorkflowFusion(question, opts, {
+          memberLimits,
+          judgeLimits,
+          remainingAgentInvocations: freshSuffix ? sharedExecution.remainingAgentInvocations() : undefined,
+          maxTotalAgentInvocations: sharedExecution.maxTotalAgentInvocations,
+        }),
+      currentPhase(),
+    );
+    const reservation = freshSuffix
+      ? journalBudgetStop(() => sharedExecution.reserve(fusion.maximumPhysicalInvocations), currentPhase())
+      : undefined;
     try {
-      // A resume needs no currently configured model because every internal call
-      // must replay. FUSION_REPLAY_REQUIRED turns any missing/divergent leg into a
-      // transactional failure before agentRunner; a fresh panel starts without resume.
-      if (options.replaySourceRunId === undefined) {
+      // A fresh panel needs its model preflight, exactly like one outside a resume: without
+      // it a fresh suffix would start spending on selectors nobody checked.
+      if (options.replaySourceRunId === undefined || freshSuffix) {
         await options.preflightAgentRequests?.([
           ...fusion.members.map((member) => ({ ...member.agentOptions })),
-          { ...fusion.judge.agentOptions },
+          // Only the judge can be shaped: `schema`/`validate` are declared on the panel
+          // and applied to the judge leg alone (see `runPreparedFusion`).
+          { ...fusion.judge.agentOptions, ...(fusion.schema === undefined ? {} : { expectsShapedResult: true }) },
         ]);
       }
-      return await runPreparedFusion(fusion, reservation);
+      return await runPreparedFusion(fusion, freshSuffix, reservation);
     } finally {
-      sharedExecution.releaseReservation(reservation);
+      if (reservation !== undefined) sharedExecution.releaseReservation(reservation);
     }
   }
 
   /**
-   * `agent()` — exact text by default, a small exact choice for standard routing,
-   * plus the advanced compatibility shaped answer.
+   * `agent()` — exact text by default, one shaped acceptance path for everything else.
    *
-   * Without `schema` this is one child run resolving to the child's exact final text: no prompt
-   * augmentation, no parsing, unchanged journal. With `schema` the runtime owns the contract at
-   * the boundary: it appends a deterministic shape block to the prompt, runs the child, parses
-   * and validates its text, retries up to SCHEMA_MAX_ATTEMPTS with the previous validator errors
-   * fed back, and resolves to the validated value. Every attempt is a real child run and is
-   * journaled as one. Exhaustion throws SchemaValidationError — never a partial or untyped value.
+   * Without a shape this is one child run resolving to the child's EXACT final text: no
+   * prompt augmentation, no parsing, no length policy, unchanged journal. A complete
+   * report comes back complete, however long it is.
    *
-   * `choice` is syntax over `{ type: "string", enum: [...] }`; it reaches this same path
-   * before any request is canonicalized. Without `choiceFallback`, a hand-written equivalent
-   * schema therefore has the same prompt, replay key, journal evidence and failure behavior —
-   * including the two lenient readings of an exact-choice answer (`coerceExactChoiceAnswer`),
-   * which stamp `coercion` on that attempt's `schemaValidation` instead of re-asking.
-   * An explicit fallback changes only exhaustion: the runtime journals the degraded route and
-   * returns that declared choice after both schema attempts fail.
+   * With `choice`, `handoffs`, `schema` or `output` the value is accepted inside the
+   * child's own session through the `workflow_return` tool (see runToolReturningAgent).
+   * There is exactly ONE structured path now: the former text transport — which appended
+   * a shape block to the prompt, parsed the final message, and spawned a FRESH child to
+   * fix the format of an answer the previous child had already found — is deleted. A
+   * fresh session cannot repair a form it has no memory of producing, and the two
+   * dialects of "how a structured answer travels" could drift apart.
    *
-   * `validate` extends that loop to the rules a declared schema cannot say — referential
-   * integrity, cross-field agreement, summed budgets, graph shape. It runs after schema
-   * validation succeeds, its errors reach the child in their own labelled repair block, and a
-   * call that declares it gets one dedicated extra attempt.
+   * `validate` extends the accepted contract to rules a schema cannot declare —
+   * referential integrity, cross-field agreement, graph shape. It now runs inside the
+   * same session, so a violation is a clarification the child can answer rather than a
+   * new child that starts from nothing.
    *
-   * With `returnVia: "tool"` the same contract is validated by the `workflow_return` tool
-   * inside ONE child session instead of by re-running the child; see runToolReturningAgent.
+   * `returnVia` is no longer needed: `"tool"` is accepted for one release and diagnosed
+   * as redundant, and `"text"` is refused by name.
    */
   function agentDsl<const Choices extends readonly [string, string, ...string[]]>(
     prompt: string,
@@ -3108,6 +3075,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   function agentDsl(prompt: string, opts: WorkflowAgentReportOptions): Promise<string>;
   function agentDsl(prompt: string, opts?: WorkflowAgentOptions): Promise<string>;
   async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions): Promise<unknown> {
+    assertNoRemovedAgentOptions(opts);
     if (opts?.result !== undefined) {
       if (opts.result !== "report") throw new Error("agent result must be report when supplied");
       for (const key of [
@@ -3123,108 +3091,47 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         if (opts[key] !== undefined) throw new Error(`agent result: report cannot be combined with ${key}`);
       }
     }
-    const schema = opts?.schema;
-    const declaredChoice = opts?.choice;
-    const declaredChoiceFallback = opts?.choiceFallback;
-    const declaredHandoffs = opts?.handoffs;
-    const declaredValidate = opts?.validate;
-    if (opts?.returnVia !== undefined && opts.returnVia !== "tool")
-      throw new Error("agent returnVia must be tool when supplied");
-    if (opts?.returnVia === "tool") return runToolReturningAgent(prompt, opts);
-    if (opts?.output !== undefined || opts?.repair !== undefined)
-      throw new Error("agent output and repair require returnVia: tool");
-    if (declaredChoice === undefined && declaredChoiceFallback !== undefined) {
+    assertWorkflowReturnVia(opts?.returnVia);
+    const shaped =
+      opts !== undefined &&
+      (opts.choice !== undefined ||
+        opts.handoffs !== undefined ||
+        opts.schema !== undefined ||
+        opts.output !== undefined ||
+        opts.repair !== undefined);
+    if (opts?.choice === undefined && opts?.choiceFallback !== undefined)
       throw new Error("agent choiceFallback requires choice");
-    }
-    if (declaredChoice !== undefined) {
-      if (schema !== undefined) throw new Error("agent choice cannot be combined with schema");
-      if (declaredHandoffs !== undefined) throw new Error("agent choice cannot be combined with handoffs");
-      if (declaredValidate !== undefined) throw new Error("agent choice cannot be combined with validate");
-      const choices = normalizeAgentChoices(declaredChoice);
-      const choiceFallback = normalizeAgentChoiceFallback(declaredChoiceFallback, choices);
-      // `output` is proven undefined above (it requires returnVia: tool) and the shaped
-      // overload types it away as never, so it is dropped rather than forwarded.
-      const {
-        choice: _choice,
-        choiceFallback: _choiceFallback,
-        output: _output,
-        ...baseOptions
-      } = opts as WorkflowAgentChoiceOptions;
-      try {
-        const value = await agentDsl(prompt, {
-          ...baseOptions,
-          schema: { type: "string", enum: [...choices] },
-        });
-        recordChoiceDecision(opts, { value: value as string, source: "validated", returnVia: "text" });
-        return value;
-      } catch (error) {
-        if (choiceFallback === undefined || !(error instanceof SchemaValidationError)) throw error;
-        emit({
-          ts: nowFn(),
-          runId,
-          kind: "log",
-          source: "runtime",
-          message: `choice fallback ${JSON.stringify(choiceFallback)} selected after ${error.attempts} schema mismatch attempts: ${error.errors.join("; ")}`,
-          ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
-        });
-        recordChoiceDecision(opts, {
-          value: choiceFallback,
-          source: "fallback",
-          returnVia: "text",
-          attempts: error.attempts,
-          reason: "output-contract-exhausted",
-        });
-        return choiceFallback;
-      }
-    }
-    if (declaredHandoffs !== undefined) {
-      if (schema !== undefined) throw new Error("agent handoffs cannot be combined with schema");
-      if (declaredValidate !== undefined) throw new Error("agent handoffs cannot be combined with validate");
-      const bounds = normalizeAgentHandoffs(declaredHandoffs);
-      const { handoffs: _handoffs, ...baseOptions } = opts as WorkflowAgentHandoffOptions;
-      return await agentDsl(prompt, { ...baseOptions, schema: handoffsSchema(bounds) });
-    }
-    // Refused before the text overload returns: the text path runs one attempt and has no
-    // parsed value, so a validator there would silently never run and report success.
-    if (declaredValidate !== undefined) {
-      if (schema === undefined) throw new Error("agent validate requires a schema");
-      if (typeof declaredValidate !== "function") throw new Error("agent validate must be a function");
-    }
-    if (schema === undefined) return (await runAgentAttempt(prompt, opts)).text;
-    if (!isRecord(schema)) throw new Error("agent schema must be a JSON-schema object");
-    assertSupportedAgentSchema(schema);
+    if (shaped) return runToolReturningAgent(prompt, opts);
+    if (opts?.validate !== undefined) throw new Error("agent validate requires a schema or handoffs");
+    return (await runAgentAttempt(prompt, opts)).text;
+  }
 
-    const validate: WorkflowAgentValidate | undefined =
-      declaredValidate === undefined
-        ? undefined
-        : (value) => {
-            insideValidate = true;
-            try {
-              return declaredValidate(value);
-            } finally {
-              insideValidate = false;
-            }
-          };
-    // A dedicated, unconditional extra attempt when a validator is declared. It is not
-    // conditioned on which authority rejected which attempt, because the repair block must
-    // state a TRUE budget ("attempt 1 of M") in text that enters the replay key, and at
-    // render time nobody knows who will reject the next answer. A schema-only call keeps
-    // the same constant, so the retry budget is unchanged.
-    const maxAttempts = validate === undefined ? SCHEMA_MAX_ATTEMPTS : SCHEMA_MAX_ATTEMPTS + 1;
-
-    let lastErrors: string[] = [];
-    let lastSource: "schema" | "script" = "schema";
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const attemptPrompt = withSchemaContract(prompt, schema, attempt, lastErrors, lastSource, maxAttempts);
-      const outcome = await runAgentAttempt(attemptPrompt, opts, (text) =>
-        checkAgentSchema(text, schema, attempt, validate),
+  /**
+   * The one place `returnVia` is still read.
+   *
+   * `"tool"` describes what every shaped call now does, so it is accepted and reported as
+   * redundant for one release rather than failing an existing source. `"text"` named the
+   * deleted transport: accepting it would silently give the author the tool path under a
+   * name that promises text parsing, so it is refused by name.
+   */
+  function assertWorkflowReturnVia(returnVia: unknown): void {
+    if (returnVia === undefined) return;
+    if (returnVia === "text")
+      throw new Error(
+        'agent returnVia: "text" was removed: structured results are accepted in the child\'s own session through workflow_return. ' +
+          "Drop the option; a plain agent(prompt) call still returns the exact full text",
       );
-      const check = outcome.schemaCheck;
-      if (check?.validation.status === "valid") return check.value;
-      lastErrors = check?.validation.errors ?? ["agent returned no text to validate"];
-      lastSource = check?.validation.source === "script" ? "script" : "schema";
-    }
-    throw new SchemaValidationError(lastErrors, maxAttempts);
+    if (returnVia !== "tool") throw new Error("agent returnVia must be tool when supplied");
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message:
+        '[workflow:deprecated] agent returnVia: "tool" is redundant and ignored: every shaped call uses same-session ' +
+        "workflow_return acceptance. Remove the option.",
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
+    });
   }
 
   function recordChoiceDecision(
@@ -3248,31 +3155,73 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     });
   }
 
+  /**
+   * THE structured path: one child session, one acceptance, no second dialect.
+   *
+   * Everything shaped desugars here. `choice` becomes a string enum, `handoffs` becomes an
+   * array-of-strings schema carrying only the author's declared bounds, `output` stays a
+   * string contract, `schema` passes through. The contract is stated in the prompt and
+   * enforced by the `workflow_return` tool INSIDE the child's session, so a rejected value
+   * comes back to the agent that produced it, with its evidence still in context.
+   *
+   * `validate` travels beside the request rather than inside the contract, because the
+   * contract is JSON — it is deliberately absent from `canonicalAgentRequest`, so an
+   * author editing a validator body does not silently rewrite every replay key; the
+   * VERSION of the contract is what marks the boundary.
+   */
   async function runToolReturningAgent(prompt: string, opts: WorkflowAgentAnyOptions): Promise<unknown> {
     assertWorkflowToolReturnOptions(opts);
     const choices = opts.choice === undefined ? undefined : normalizeAgentChoices(opts.choice);
-    if (choices === undefined && opts.choiceFallback !== undefined)
-      throw new Error("agent choiceFallback requires choice");
     const fallback = choices === undefined ? undefined : normalizeAgentChoiceFallback(opts.choiceFallback, choices);
-    // Handoffs reach the contract as the same desugared array schema the text path sends.
     const bounds = opts.handoffs === undefined ? undefined : normalizeAgentHandoffs(opts.handoffs);
-    const schema = bounds === undefined ? opts.schema : handoffsSchema(bounds);
+    const schema =
+      bounds !== undefined
+        ? handoffsSchema(bounds)
+        : choices !== undefined
+          ? undefined
+          : (opts as WorkflowAgentSchemaOptions).schema;
     const contract = normalizeWorkflowReturnContract({
       ...(choices === undefined ? {} : { choices }),
       ...(opts.output === undefined ? {} : { output: opts.output }),
       ...(schema === undefined ? {} : { schema }),
-      // Keep existing contracts byte-identical for replay. Newly opted-in large handoffs
-      // need room for JSON escaping (up to six characters per UTF-16 code unit), quotes,
-      // commas and brackets as well as their declared text. Outer answer budgets still apply.
-      ...(bounds !== undefined && bounds.maxItemChars > 32_000
-        ? { schemaMaxLength: handoffsJsonMaxLength(bounds) }
-        : {}),
       ...(opts.repair === undefined ? {} : { repair: opts.repair }),
     });
+    // The clarification allowance is a real execution decision, so it is in the journal
+    // as well as in the contract the child is shown: a default nobody can see is a hidden
+    // policy, which is exactly what this change set exists to remove.
+    emit({
+      ts: nowFn(),
+      runId,
+      kind: "log",
+      source: "runtime",
+      message:
+        `[workflow:return] ${opts.label ?? "agent"}: contract v${String(contract.version)}, ` +
+        `${String(workflowReturnClarificationTurns(contract))} same-session clarification turn(s) ` +
+        `(${opts.repair === undefined ? `package default ${String(DEFAULT_WORKFLOW_RETURN_CLARIFICATIONS)}` : "declared"})`,
+      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
+    });
+    const declaredValidate = (opts as WorkflowAgentSchemaOptions).validate;
+    // Re-entrancy guard, same as the old text path: a validator that calls back into the
+    // DSL would open a second execution inside an acceptance decision.
+    const validate: WorkflowReturnValidate | undefined =
+      declaredValidate === undefined
+        ? undefined
+        : (value) => {
+            insideValidate = true;
+            try {
+              return assertWorkflowReturnValidationErrors(declaredValidate(value));
+            } finally {
+              insideValidate = false;
+            }
+          };
     try {
       const outcome = await runAgentAttempt(
         `${prompt}\n\n${workflowReturnInstructions(contract)}`,
-        { ...opts, [WORKFLOW_RETURN_CONTRACT]: contract },
+        {
+          ...opts,
+          [WORKFLOW_RETURN_CONTRACT]: contract,
+          ...(validate === undefined ? {} : { [WORKFLOW_RETURN_VALIDATE]: validate }),
+        },
         (text) => {
           let value: unknown;
           try {
@@ -3282,10 +3231,21 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
               validation: { status: "mismatch", attempts: 1, errors: ["accepted output is not canonical JSON"] },
             };
           }
+          // `source` names the rejecting authority, and is recorded only when two
+          // authorities could have rejected: a schema-only call has exactly one.
+          const authority = validate === undefined ? {} : { source: "schema" as const };
           const error = workflowReturnValueError(value, contract);
-          return error === undefined
-            ? { value, validation: { status: "valid", attempts: 1, errors: [] } }
-            : { validation: { status: "mismatch", attempts: 1, errors: [error] } };
+          if (error !== undefined)
+            return { validation: { status: "mismatch", attempts: 1, errors: [error], ...authority } };
+          // Re-checked here so a REPLAYED answer is held to the current validator too; the
+          // `script` authority is what makes that a named `script-rejected` failure rather
+          // than a shape mismatch that would re-ask at an ordinal the record cannot serve.
+          if (validate !== undefined) {
+            const errors = validate(value);
+            if (errors.length > 0)
+              return { validation: { status: "mismatch", attempts: 1, errors: [...errors], source: "script" } };
+          }
+          return { value, validation: { status: "valid", attempts: 1, errors: [] } };
         },
       );
       if (
@@ -3406,7 +3366,9 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         };
       }
     });
-    const slots = await runScheduled(wrapped, groupOptions?.concurrency);
+    // The run's ONE effective concurrency, unless this group's author narrowed it
+    // explicitly. There is no second hidden package width any more.
+    const slots = await runScheduled(wrapped, groupOptions?.concurrency ?? sharedExecution.concurrency);
     if (slots.some((slot) => slot.status === "failed")) {
       throw new WorkflowGroupFailureError(kind, groupId, slots);
     }
@@ -3711,8 +3673,11 @@ function assertBoundContinuation(binding: WorkflowBoundContinuation | undefined,
   if (typeof binding.originRunId !== "string" || binding.originRunId.trim() === "") {
     throw new Error("workflow continuation binding has an invalid originRunId");
   }
-  if (!Array.isArray(binding.artifacts) || binding.artifacts.length < 1 || binding.artifacts.length > 8) {
-    throw new Error("workflow continuation binding must contain 1-8 artifacts");
+  // At least one artifact, and no upper bound: a continuation carries the evidence the
+  // origin run actually produced, and refusing the ninth complete reference would drop
+  // work the operator already paid for. Identity, origin and completeness stay enforced.
+  if (!Array.isArray(binding.artifacts) || binding.artifacts.length < 1) {
+    throw new Error("workflow continuation binding must contain at least one artifact");
   }
   const identities = new Set<string>();
   for (const pair of binding.artifacts) {

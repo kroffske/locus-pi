@@ -37,7 +37,6 @@ import {
 
 export const WORKFLOW_ASK_TOOL_NAME = "workflow_ask";
 
-const MAX_QUESTIONS_PER_CALL = 10;
 const DEFAULT_REMOUNT_DELAY_MS = 250;
 
 export const WORKFLOW_ASK_NO_UI_MESSAGE =
@@ -76,9 +75,10 @@ export interface WorkflowAskToolDeps {
   ctx: ExtensionContext;
   /** Who is asking, in the operator's terms: workflow run, agent, stage. */
   contextText: string;
-  /** Pause the per-call wall-clock fuse: a human thinking is not child run time. */
+  /** The operator wait has begun. The call's deadline is wall clock and keeps
+   *  running: one clock, and the bridge records how long the wait was. */
   onWaitStart: () => void;
-  /** Re-arm the fuse once the wait is over (answered, declined, or failed). */
+  /** The wait is over (answered, declined, or failed). */
   onWaitEnd: () => void;
   /** Fail the whole child call before any answer can re-enter model context. */
   failCall: (message: string, cause: WorkflowAskFailureCause) => void;
@@ -102,7 +102,10 @@ const WORKFLOW_ASK_PARAMETERS: Record<string, unknown> = {
     questions: {
       type: "array",
       minItems: 1,
-      maxItems: MAX_QUESTIONS_PER_CALL,
+      // No per-call maximum: the queue is served FIFO, one question at a time, and
+      // the operator answers or declines each. A count is not a reason to refuse a
+      // call the workflow already decided to make — the durable handoff contract
+      // holds no such number either.
       description: "Questions for the human operator, asked one at a time.",
       items: {
         type: "object",
@@ -178,9 +181,6 @@ function parseWorkflowAskInput(input: unknown): ParsedAskInput {
   const rawQuestions = (input as { questions?: unknown }).questions;
   if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
     return { ok: false, error: "questions must be a non-empty array" };
-  }
-  if (rawQuestions.length > MAX_QUESTIONS_PER_CALL) {
-    return { ok: false, error: `at most ${MAX_QUESTIONS_PER_CALL} questions per call` };
   }
   const questions: WorkflowAskQuestion[] = [];
   for (const [index, raw] of rawQuestions.entries()) {

@@ -11,13 +11,17 @@
 
 import type { WorkflowArtifactRef } from "./workflow-artifacts.js";
 
+/**
+ * Storage-safe identity component: run ids, artifact ids, question ids, handoff
+ * ids. These are keys — they name files and index entries — so they stay narrow.
+ * Human-facing text (a title, a prompt, an option label, an artifact's display
+ * name) is NOT a key and carries no length or alphabet policy: this contract must
+ * not reject a question because somebody wrote a long one. A surface that can only
+ * draw so much is a rendering concern and bounds itself, with an explicit
+ * "N more" indicator, in the layer that draws it.
+ */
 export const SAFE_COMPONENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 export const SHA256 = /^[a-f0-9]{64}$/u;
-const MAX_QUESTIONS = 8;
-const MAX_OPTIONS = 20;
-const MAX_TITLE_CHARS = 200;
-const MAX_PROMPT_CHARS = 500;
-const MAX_LABEL_CHARS = 200;
 
 export interface WorkflowOperatorSelectQuestion {
   kind: "select";
@@ -60,7 +64,7 @@ export function normalizeWorkflowAwaitOperatorDeclaration(value: unknown): Workf
         : "awaitOperator input must contain exactly reason",
     );
   }
-  const reason = normalizeBoundedString(record.reason, "awaitOperator reason", 200, true);
+  const reason = normalizeRequiredString(record.reason, "awaitOperator reason", true);
   return {
     reason,
     ...(hasHandoff ? { operatorHandoff: normalizeWorkflowOperatorHandoffDeclaration(record.operatorHandoff) } : {}),
@@ -69,9 +73,9 @@ export function normalizeWorkflowAwaitOperatorDeclaration(value: unknown): Workf
 
 export function normalizeWorkflowOperatorHandoffDeclaration(value: unknown): WorkflowOperatorHandoffDeclaration {
   const record = requireExactRecord(value, ["continuationArtifactRefs", "questions", "title"], "operatorHandoff");
-  const title = normalizeBoundedString(record.title, "operatorHandoff title", MAX_TITLE_CHARS);
-  if (!Array.isArray(record.questions) || record.questions.length < 1 || record.questions.length > MAX_QUESTIONS) {
-    throw new Error(`operatorHandoff questions must contain 1-${MAX_QUESTIONS} questions`);
+  const title = normalizeRequiredString(record.title, "operatorHandoff title");
+  if (!Array.isArray(record.questions) || record.questions.length < 1) {
+    throw new Error("operatorHandoff questions must contain at least one question");
   }
   const questions = record.questions.map(normalizeQuestion);
   const ids = new Set<string>();
@@ -88,9 +92,9 @@ function normalizeQuestion(value: unknown, index: number): WorkflowOperatorQuest
     const allowed = ["allowCustom", "detailArtifactRef", "id", "kind", "options", "prompt", "recommended"];
     requireAllowedKeys(record, allowed, `operatorHandoff select question ${index + 1}`);
     const id = normalizeQuestionId(record.id);
-    const prompt = normalizeBoundedString(record.prompt, `operatorHandoff question ${id} prompt`, MAX_PROMPT_CHARS);
-    if (!Array.isArray(record.options) || record.options.length < 1 || record.options.length > MAX_OPTIONS) {
-      throw new Error(`operatorHandoff question ${id} options must contain 1-${MAX_OPTIONS} choices`);
+    const prompt = normalizeRequiredString(record.prompt, `operatorHandoff question ${id} prompt`);
+    if (!Array.isArray(record.options) || record.options.length < 1) {
+      throw new Error(`operatorHandoff question ${id} options must contain at least one choice`);
     }
     const options = record.options.map((option, optionIndex) => {
       const optionRecord = requireExactRecord(
@@ -99,10 +103,9 @@ function normalizeQuestion(value: unknown, index: number): WorkflowOperatorQuest
         `operatorHandoff question ${id} option ${optionIndex + 1}`,
       );
       return {
-        label: normalizeBoundedString(
+        label: normalizeRequiredString(
           optionRecord.label,
           `operatorHandoff question ${id} option ${optionIndex + 1} label`,
-          MAX_LABEL_CHARS,
         ),
       };
     });
@@ -112,7 +115,7 @@ function normalizeQuestion(value: unknown, index: number): WorkflowOperatorQuest
     const recommended =
       record.recommended === undefined
         ? undefined
-        : normalizeBoundedString(record.recommended, `operatorHandoff question ${id} recommended`, MAX_LABEL_CHARS);
+        : normalizeRequiredString(record.recommended, `operatorHandoff question ${id} recommended`);
     if (recommended !== undefined && !options.some((option) => option.label === recommended)) {
       throw new Error(`operatorHandoff question ${id} recommended label must match an option`);
     }
@@ -143,7 +146,7 @@ function normalizeQuestion(value: unknown, index: number): WorkflowOperatorQuest
     return {
       kind: "text",
       id,
-      prompt: normalizeBoundedString(record.prompt, `operatorHandoff question ${id} prompt`, MAX_PROMPT_CHARS),
+      prompt: normalizeRequiredString(record.prompt, `operatorHandoff question ${id} prompt`),
       ...(detailArtifactRef !== undefined ? { detailArtifactRef } : {}),
     };
   }
@@ -155,10 +158,12 @@ function normalizeQuestionId(value: unknown): string {
   }
   return value;
 }
-export function normalizeArtifactRefs(value: unknown, allowEmpty = false, maxItems = 8): WorkflowArtifactRef[] {
-  if (!Array.isArray(value) || (!allowEmpty && value.length < 1) || value.length > maxItems) {
+export function normalizeArtifactRefs(value: unknown, allowEmpty = false): WorkflowArtifactRef[] {
+  if (!Array.isArray(value) || (!allowEmpty && value.length < 1)) {
     throw new Error(
-      `operatorHandoff continuationArtifactRefs must contain ${allowEmpty ? "0" : "1"}-${maxItems} references`,
+      allowEmpty
+        ? "operatorHandoff continuationArtifactRefs must be an array of references"
+        : "operatorHandoff continuationArtifactRefs must contain at least one reference",
     );
   }
   const refs = value.map(normalizeArtifactRef);
@@ -175,7 +180,18 @@ function normalizeArtifactRef(value: unknown): WorkflowArtifactRef {
   const record = requireExactRecord(value, ["artifactId", "name", "runId", "sha256"], "workflow artifact ref");
   assertSafeComponent(record.runId, "workflow artifact runId");
   assertSafeComponent(record.artifactId, "workflow artifact artifactId");
-  if (typeof record.name !== "string" || !SAFE_COMPONENT.test(record.name)) {
+  // The artifact's DISPLAY name. `artifactId` above is the storage id, so this one
+  // is checked for confinement and non-emptiness, never for length or alphabet.
+  if (
+    typeof record.name !== "string" ||
+    record.name.trim() === "" ||
+    record.name.includes("/") ||
+    record.name.includes("\\") ||
+    // A control character in a name is never a label.
+    /[\u0000-\u001f\u007f]/u.test(record.name) ||
+    record.name.trim() === "." ||
+    record.name.trim() === ".."
+  ) {
     throw new Error("Workflow artifact name is invalid");
   }
   if (typeof record.sha256 !== "string" || !SHA256.test(record.sha256)) {
@@ -200,11 +216,14 @@ export function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifa
 export function cloneArtifactRef(ref: WorkflowArtifactRef): WorkflowArtifactRef {
   return { runId: ref.runId, artifactId: ref.artifactId, name: ref.name, sha256: ref.sha256 };
 }
-function normalizeBoundedString(value: unknown, label: string, maxChars: number, collapseWhitespace = false): string {
+/**
+ * Human-facing text: required and non-blank, of any length. The absent maximum is
+ * the point — a handoff is not rejected because the workflow had a lot to say.
+ */
+function normalizeRequiredString(value: unknown, label: string, collapseWhitespace = false): string {
   if (typeof value !== "string") throw new Error(`${label} must be non-empty`);
   const normalized = collapseWhitespace ? value.replace(/\s+/gu, " ").trim() : value.trim();
   if (normalized === "") throw new Error(`${label} must be non-empty`);
-  if (normalized.length > maxChars) throw new Error(`${label} exceeds ${maxChars} characters`);
   return normalized;
 }
 

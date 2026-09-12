@@ -7,7 +7,6 @@ import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_sha
 import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
-  DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
   type WorkflowJournalLine,
@@ -71,7 +70,8 @@ describe("workflow evidence threading", () => {
 
     assert.deepEqual(
       requests.map((request) => request.maxToolCalls),
-      [DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS, 5_000],
+      // Nobody declared a run-level tool-call budget, so the first call carries none.
+      [undefined, 5_000],
     );
 
     const configuredRequests: WorkflowAgentRequest[] = [];

@@ -41,7 +41,10 @@ and a bounded `message`. Optional facts include `status`, `workflow`, `runId`,
 `attempt`, `cause`, `sessionId` (child), `parentSessionId` (calling Pi session), `replayed`, and the three evidence paths above.
 Unknown facts are omitted; absence does not mean attempt 1 or a guessed agent.
 Messages and display text (`title`, `label`, `displayName`) use the existing
-secret redactor, flatten whitespace and retain at most 1,000 characters. Full details remain in their original evidence.
+secret redactor, flatten whitespace and retain at most 1,000 characters. That is a
+bound on this INDEX row, whose consumer is a one-line pointer, and it never truncates
+an agent's answer or an artifact: full details remain in their original evidence, at
+whatever length they were produced.
 
 - Workflow rows project actual `error` and failed/blocked/cancelled `agent_end`
   records. The source journal is attempted first and names the index path; the

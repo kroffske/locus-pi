@@ -269,8 +269,9 @@ share.
 The script orchestrates and bounds; it does not grade the answer. The whole
 allowed set, and every item is about being able to continue at all:
 
-- non-empty text and a per-stage character cap — an empty or oversized handoff
-  breaks the next prompt before the model ever sees it;
+- non-empty text — an empty handoff breaks the next prompt before the model ever
+  sees it. Not its length: there is no per-stage character cap, here or in the
+  runtime (see [the principle](output-acceptance.md#the-principle));
 - confining an operator-supplied path, or refusing to start when there is nothing
   to act on;
 - host-owned trust: continuation refs, lineage, digests, identity;
@@ -443,11 +444,17 @@ observed value, what would satisfy it. `review clarification questions must be
 unique` was the old wording for a check that compared `question.id`; a child
 re-asked with that string would reword its prompts and reproduce the collision.
 
-Bounds on **free text** are per-call, not per-script: `maxAnswerChars` on the
-`agent()` call that produces the answer, so an oversized handoff names the stage
-that produced it instead of the stage that tried to forward it. Keep hand-written
-bounds only for text the workflow itself owns — operator input, consumed
-artifacts, and strings the script composes.
+There is **no bound on the size of free text**, and `maxAnswerChars` is gone: the
+runtime never refuses an answer a child already produced because of its length.
+Shape a stage's output by ASKING for what you want ("one paragraph and three
+bullets"), and declare a bound only where a consumer genuinely has one — a
+one-line heading through `output: { type: "string", maxLength: 80 }`, or
+`maxLength`/`maxItems` inside a `schema`. Those reach the child as a contract it
+can satisfy, instead of failing the call after the work is done. Keep
+hand-written bounds only for text the workflow itself owns — operator input,
+consumed artifacts, and strings the script composes. The whole rule, and the
+budget and capability rules beside it, are stated once in
+[the principle](output-acceptance.md#the-principle).
 
 ### Declare the fact, do not scan the prose
 
@@ -891,7 +898,6 @@ const advice = await dsl.workflow(async (nested) =>
 );
 const synthesis = await agent(synthesizeTask(brief, advice), {
   artifact: "synthesis-draft.md", // NOT the terminal name — see below
-  maxAnswerChars: 12_000,
 });
 const check = await agent(verifyTask(synthesis, advice), {
   schema: {
@@ -902,7 +908,6 @@ const check = await agent(verifyTask(synthesis, advice), {
       reason: { type: "string", nonBlank: true, maxLength: 600 },
     },
   },
-  maxAnswerChars: 2_000,
 });
 if (check.verdict === "reject") return { ok: false, verdict: "reject", reason: check.reason };
 return { ok: true, consiliumRef: publishArtifact("consilium.md", synthesis) };

@@ -72,14 +72,34 @@ Show the worst-case agent calls and explain if the task requires more.
 
 This is advice to the author. Locus Pi has no `workflowSizeGuideline` setting or
 `small`/`medium` runtime switch. The reviewed design records concrete slice and
-correction bounds; existing runtime attempt and concurrency limits are separate.
-Never remove required work to meet an advisory size preference.
+correction bounds; run budgets — time, agents, turns, tool calls — are a separate
+concern and are explicit-only, so an axis nobody declares is reported as
+`unbounded` rather than silently defaulted. Never remove required work to meet an
+advisory size preference.
 
 Claude Code's **Dynamic workflow size** setting uses `workflowSizeGuideline`:
 `small` aims below 5 agents, `medium` below 15, `large` below 50, and
 `unrestricted` sends no guideline. Its default is `medium`. This controls an
 advisory agent count, not prompt length or reasoning effort. See the
 [Claude Code size guide](https://code.claude.com/docs/en/workflows#set-a-size-guideline).
+
+### What the runtime does not bound
+
+Graph size is the author's choice. The size of an ANSWER is nobody's: the runtime
+never rejects or truncates what a child returned because of its length, and there is
+no package ceiling on answer characters, handoff items, or artifact bytes to design
+around. Two consequences for authoring:
+
+- Shape a stage by asking for what you want — "one paragraph and three bullets", "one
+  sentence naming the failing check". Do not write "keep this under 2000 characters"
+  as a stand-in for a limit the runtime no longer has; it buys nothing and costs the
+  part of the answer the stage was for.
+- Declare a bound only when a real consumer has one, and then declare it on the call
+  (`output.maxLength`, or `maxLength`/`maxItems` inside a `schema`) so the child is
+  told about it and can correct the value in the same session.
+
+The full statement, including how budgets and unsupported capabilities behave, is in
+[output acceptance](../extensions/workflows/references/output-acceptance.md#the-principle).
 
 ### Use the references
 

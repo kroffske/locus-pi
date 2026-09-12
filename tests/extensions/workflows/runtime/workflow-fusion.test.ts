@@ -15,7 +15,6 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-replay.js";
 import {
   createWorkflowRuntime,
-  WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS,
   type WorkflowAgentRequest,
   type WorkflowAgentResult,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
@@ -46,6 +45,9 @@ function success(request: WorkflowAgentRequest, text: string): WorkflowAgentResu
     text,
     diagnostics: [],
     agent: request.agent,
+    ...(request.returnContract === undefined
+      ? {}
+      : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
     ...(request.capabilityMode === undefined
       ? {}
       : { activeToolNames: request.capabilityMode === "tool-free" ? [] : ["read"] }),
@@ -96,9 +98,10 @@ describe("dsl.fusion", () => {
     for (const request of requests) {
       expect(request).toMatchObject({
         permissionMode: "inherit-parent",
-        maxToolCalls: 1_000,
         capabilityMode: "agent",
       });
+      // Nobody declared a tool-call budget for this panel, so none reaches the child.
+      expect(request.maxToolCalls).toBeUndefined();
       expect(request.readOnly).toBeUndefined();
       expect(request.tools).toEqual(["*"]);
     }
@@ -204,15 +207,9 @@ describe("dsl.fusion", () => {
   });
 
   it.each([
-    ["too few members", { ...BASE, members: [BASE.members[0]] }, /requires 2-10 members/u],
-    [
-      "too many members",
-      {
-        ...BASE,
-        members: Array.from({ length: 11 }, (_, index) => ({ label: `m${index}`, model: `test/m${index}` })),
-      },
-      /requires 2-10 members/u,
-    ],
+    // A panel needs two independent answers to be a panel. It has no upper member
+    // count: an eleventh opinion is a spend decision, bounded by the run's own budget.
+    ["too few members", { ...BASE, members: [BASE.members[0]] }, /requires at least 2 members/u],
     [
       "selectorless member",
       { ...BASE, members: [{ label: "none" }, BASE.members[1]] },
@@ -251,37 +248,47 @@ describe("dsl.fusion", () => {
     expect(calls).toBe(0);
   });
 
-  it("preflights the remaining invocation budget and aggregate judge packet", async () => {
+  it("preflights the remaining invocation budget, and bounds nothing else", async () => {
     let calls = 0;
     const runner = async (request: WorkflowAgentRequest) => {
       calls += 1;
       return success(request, "unused");
     };
+    // A real budget: the run cannot pay for the panel it was asked to convene.
     const budgeted = createWorkflowRuntime({ runId: "fusion-cap", agentRunner: runner, maxTotalAgentInvocations: 2 });
     await expect(budgeted.dsl.fusion("question", BASE)).rejects.toThrow(/only 2 remain/u);
     expect(calls).toBe(0);
 
-    const oversized = createWorkflowRuntime({ runId: "fusion-input", agentRunner: runner });
+    // What used to be refused here and no longer is: a large question, a large provided
+    // context, a large output instruction and twenty members. The former ceiling was the
+    // product of per-member answer ceilings that no longer exist, and a prompt too large
+    // for the selected model is that model's capability answer, not a number invented here.
+    const large = createWorkflowRuntime({ runId: "fusion-input", agentRunner: runner });
     await expect(
-      oversized.dsl.fusion("q".repeat(16_000), {
+      large.dsl.fusion("q".repeat(40_000), {
         mode: "agent",
-        members: Array.from({ length: 10 }, (_, index) => ({ label: `m${index}`, model: `test/m${index}` })),
+        members: Array.from({ length: 20 }, (_, index) => ({
+          label: `m${String(index)}`,
+          model: `test/m${String(index)}`,
+        })),
         judge: { model: "test/judge" },
-        context: { mode: "provided", text: "c".repeat(16_000) },
-        output: "o".repeat(16_000),
-        memberLimits: { maxAnswerChars: 12_000 },
+        context: { mode: "provided", text: "c".repeat(40_000) },
+        output: "o".repeat(40_000),
       }),
-    ).rejects.toThrow(new RegExp(`at most ${WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS}`, "u"));
-    expect(calls).toBe(0);
+    ).resolves.toBe("unused");
+    expect(calls).toBe(21);
+  });
 
-    const escapedWorstCase = createWorkflowRuntime({ runId: "fusion-escaped-input", agentRunner: runner });
+  it("refuses a removed per-call size option by name", async () => {
+    const { dsl } = createWorkflowRuntime({
+      runId: "fusion-removed-option",
+      agentRunner: async () => {
+        throw new Error("must not run");
+      },
+    });
     await expect(
-      escapedWorstCase.dsl.fusion("question", {
-        ...BASE,
-        memberLimits: { maxAnswerChars: 14_000 },
-      }),
-    ).rejects.toThrow(new RegExp(`at most ${WORKFLOW_FUSION_MAX_JUDGE_INPUT_CHARS}`, "u"));
-    expect(calls).toBe(0);
+      dsl.fusion("question", { ...BASE, memberLimits: { maxAnswerChars: 12_000 } } as never),
+    ).rejects.toThrow(/fusion memberLimits: agent maxAnswerChars was removed/u);
   });
 
   it("reserves the complete invocation budget across overlapping Fusion calls", async () => {
@@ -379,8 +386,16 @@ describe("dsl.fusion", () => {
         },
       }),
     ).resolves.toEqual({ answer: "safe" });
-    expect(requests.slice(0, 2).every(({ prompt }) => !prompt.includes("## Required answer shape"))).toBe(true);
-    expect(requests[2]!.prompt).toContain("## Required answer shape");
+    // Members answer in plain text; only the judge carries a shaped contract, and it
+    // uses the same same-session acceptance path as any other shaped call.
+    expect(requests.slice(0, 2).every(({ returnContract }) => returnContract === undefined)).toBe(true);
+    expect(requests[2]!.returnContract?.schema).toEqual({
+      type: "object",
+      additionalProperties: false,
+      required: ["answer"],
+      properties: { answer: { type: "string", minLength: 1 } },
+    });
+    expect(requests[2]!.prompt).toContain("workflow_return");
   });
 
   it("escapes candidate delimiters before the judge sees them", async () => {
@@ -423,7 +438,6 @@ describe("dsl.fusion", () => {
       mode: "agent",
       members: Array.from({ length: 10 }, (_, index) => ({ label: `m${index}`, model: `test/m${index}` })),
       judge: { model: "test/judge" },
-      memberLimits: { maxAnswerChars: 200 },
     });
     expect(peak).toBe(4);
   });
@@ -530,14 +544,62 @@ describe("dsl.fusion", () => {
     expect(divergentCalls).toBe(0);
   });
 
+  it("replays a whole recorded panel under a totalAgents budget too small to run it fresh", async () => {
+    // `totalAgents` bounds the children a run STARTS, and a replayed leg starts none —
+    // which is why `spendInvocation("replayed")` charges nothing. The panel reservation
+    // used to be taken for the whole worst case before replay or fresh was known, so a
+    // resume was billed again for work the original run had already paid for: three
+    // recorded legs were refused under `totalAgents: 1` before the first record lookup.
+    const sourceDir = temporaryRunDir("workflow-fusion-replay-budget-source-", "fusion-replay-budget-source");
+    const source = createWorkflowRuntime({
+      runId: "fusion-replay-budget-source",
+      replay: createWorkflowReplayController({ runDir: sourceDir }),
+      agentRunner: async (request) =>
+        success(request, request.model === "test/judge" ? "replayed final" : `candidate ${request.model}`),
+    });
+    await expect(source.dsl.fusion("question", BASE)).resolves.toBe("replayed final");
+    const sourceEntries = readFileSync(workflowReplayFile(sourceDir), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(sourceEntries).toHaveLength(3);
+
+    let freshCalls = 0;
+    const controller = createWorkflowReplayController({
+      runDir: temporaryRunDir("workflow-fusion-replay-budget-resumed-", "fusion-replay-budget-resumed"),
+      recorded: sourceEntries,
+    });
+    const resumed = createWorkflowRuntime({
+      runId: "fusion-replay-budget-resumed",
+      replay: controller,
+      replaySourceRunId: "fusion-replay-budget-source",
+      maxTotalAgentInvocations: 1,
+      agentRunner: async (request) => {
+        freshCalls += 1;
+        return success(request, "unexpected fresh answer");
+      },
+    });
+
+    await expect(resumed.dsl.fusion("question", BASE)).resolves.toBe("replayed final");
+    expect(freshCalls).toBe(0);
+    expect(controller.counts()).toEqual({ replayedCalls: 3, freshCalls: 0 });
+    // No budget stop was journalled, because nothing was charged.
+    expect(
+      resumed.getJournal().filter((line) => line.kind === "log" && /stopped by budget/u.test(line.message ?? "")),
+    ).toHaveLength(0);
+  });
+
   /**
-   * A `fusion()` group standing after the divergence point is a NAMED BOUNDARY of
-   * repair-and-continue, not a defect. Every member and the judge are marked
-   * "replay required" for the whole of any resume, so once the latch is set the
-   * group ends the run with one error instead of running a fresh panel. Both
-   * tests below assert that error rather than a fresh execution.
+   * A `fusion()` group standing AFTER the divergence point is an ordinary fresh panel.
+   *
+   * Replay is a strict prefix with a one-way latch: once the run has diverged, no later
+   * call can be served from the record, so the whole panel is fresh and cannot be mixed.
+   * Refusing it outright — the previous rule — meant a resume could never run a fusion
+   * that had not happened yet in the recorded run, which is exactly what repair-and-
+   * continue is for. What stays refused is a MIXED panel before the boundary, which the
+   * two divergence tests above pin.
    */
-  it("ends a repaired resume at the fusion group instead of running a fresh panel", async () => {
+  it("runs a whole fresh panel after the replay boundary, with its model preflight", async () => {
     const sourceDir = temporaryRunDir("workflow-fusion-repair-source-", "fusion-repair-source");
     const source = createWorkflowRuntime({
       runId: "fusion-repair-source",
@@ -554,8 +616,12 @@ describe("dsl.fusion", () => {
       .map((line) => JSON.parse(line));
 
     let freshCalls = 0;
+    const preflighted: string[][] = [];
     const repaired = createWorkflowRuntime({
       runId: "fusion-repair-resumed",
+      preflightAgentRequests: async (batch) => {
+        preflighted.push(batch.map((entry) => entry.model ?? entry.modelRole ?? "?"));
+      },
       replay: createWorkflowReplayController({
         runDir: temporaryRunDir("workflow-fusion-repair-resumed-", "fusion-repair-resumed"),
         recorded: sourceEntries,
@@ -570,13 +636,15 @@ describe("dsl.fusion", () => {
     // The repair edits the node before the group, so the latch is set by the time
     // the panel is reached.
     await expect(repaired.dsl.agent("stage-a repaired", { label: "node-a" })).resolves.toBe("fresh answer");
-    await expect(repaired.dsl.fusion("question", BASE)).rejects.toThrow(
-      /fusion resume cannot mix recorded and fresh agent calls/u,
-    );
-    expect(freshCalls).toBe(1);
+    await expect(repaired.dsl.fusion("question", BASE)).resolves.toBe("fresh answer");
+    // One repaired node plus two members plus the judge — every leg fresh, none mixed.
+    expect(freshCalls).toBe(4);
+    // A fresh panel is preflighted like any other: it must not start spending on
+    // selectors nobody checked just because the run happens to be a resume.
+    expect(preflighted).toEqual([["test/alpha", "test/beta", "test/judge"]]);
   });
 
-  it("ends a byte-identical resume at the fusion group after a recorded failure", async () => {
+  it("runs a fresh panel after a recorded failure diverged the run", async () => {
     const sourceDir = temporaryRunDir("workflow-fusion-failure-source-", "fusion-failure-source");
     const sourceController = createWorkflowReplayController({ runDir: sourceDir });
     // A recorded `ok:false` followed by a recorded panel. Before divergence
@@ -611,10 +679,8 @@ describe("dsl.fusion", () => {
       },
     });
     await expect(resumed.dsl.agent("stage-a")).resolves.toBe("fresh answer");
-    await expect(resumed.dsl.fusion("question", BASE)).rejects.toThrow(
-      /fusion resume cannot mix recorded and fresh agent calls/u,
-    );
-    expect(freshCalls).toBe(1);
+    await expect(resumed.dsl.fusion("question", BASE)).resolves.toBe("fresh answer");
+    expect(freshCalls).toBe(4);
   });
 
   it("marks a replayed judge validator throw as replayed terminal evidence", async () => {

@@ -91,9 +91,12 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "operator-notify",
     "viewer-geometry",
   ],
-  /** `runtime-capabilities` constructs and reports on the session store, so runtime owns it. */
-  runtime: ["session-core", "artifacts", "event-bus", "runtime-capabilities"],
-  model: ["model-settings", "live-model-display", "workflow-model-resolve"],
+  /** `runtime-capabilities` constructs and reports on the session store, so runtime owns it.
+   *  `long-timer` is pure `setTimeout` arithmetic with no host binding at all, and both the
+   *  agent host and the workflow runtime arm deadlines through it, so it sits at the lowest
+   *  layer either of them can reach. */
+  runtime: ["session-core", "artifacts", "event-bus", "runtime-capabilities", "long-timer"],
+  model: ["model-settings", "live-model-display", "workflow-model-resolve", "session-tool-transport"],
   project: ["goal-mode", "prompt-command-store", "tasks-store"],
   "agent-runtime": [
     "agents",

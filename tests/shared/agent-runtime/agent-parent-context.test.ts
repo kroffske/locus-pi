@@ -155,12 +155,57 @@ describe("T-119 explicit parent-context", () => {
     expect(result).toContain("ARTIFACT_SENTINEL");
   });
 
-  it("truncates oversized parent context", () => {
-    const hugeString = "X".repeat(200000);
-    const result = assembleParentContext({ inline: hugeString });
+  it("passes a large parent context to the child whole, and says so in the receipt", () => {
+    // This is the child's INPUT, not a projection for a human reader. Cutting it at 16 KiB
+    // deleted the half of the brief the child never learns it was missing — and the marker
+    // it left behind is not the data. What a large context earns now is a receipt line the
+    // operator can act on, never a silent edit.
+    const twentyThousand = "X".repeat(20_000);
+    const assembled = assembleParentContext({ inline: twentyThousand });
 
-    expect(result).not.toBeUndefined();
-    expect(result!.length).toBeLessThan(200000);
-    expect(result!.endsWith("...[parent context truncated]")).toBe(true);
+    expect(assembled).toBe(twentyThousand);
+    expect(assembled).not.toContain("parent context truncated");
+
+    const diagnostics: string[] = [];
+    const capsule = createAgentExecutionPromptCapsule(
+      {
+        ...createAgentRunRequest(agent, "Review this change", {
+          approvalTier: "allow",
+          parentContext: { inline: twentyThousand },
+        }),
+        parentSessionId: "parent-session",
+        projectRoot: "/project",
+        workingDirectory: "/project",
+      },
+      diagnostics,
+      { LOCUS_AGENT_CONTEXT_EXTRAS: "0" },
+    );
+
+    expect(capsule.parentContext).toBe(twentyThousand);
+    expect(formatAgentKickoffPrompt(capsule)).toContain(twentyThousand);
+    const note = diagnostics.find((entry) => entry.includes("Parent context is"));
+    expect(note).toContain("20000 bytes");
+    expect(note).toContain("whole (no truncation)");
+    expect(capsule.contextDiagnostics).toContain(note);
+  });
+
+  it("leaves a small parent context unremarked", () => {
+    const diagnostics: string[] = [];
+    const capsule = createAgentExecutionPromptCapsule(
+      {
+        ...createAgentRunRequest(agent, "Review this change", {
+          approvalTier: "allow",
+          parentContext: { inline: "PARENT_CTX_SENTINEL" },
+        }),
+        parentSessionId: "parent-session",
+        projectRoot: "/project",
+        workingDirectory: "/project",
+      },
+      diagnostics,
+      { LOCUS_AGENT_CONTEXT_EXTRAS: "0" },
+    );
+
+    expect(capsule.parentContext).toBe("PARENT_CTX_SENTINEL");
+    expect(diagnostics.some((entry) => entry.includes("Parent context is"))).toBe(false);
   });
 });

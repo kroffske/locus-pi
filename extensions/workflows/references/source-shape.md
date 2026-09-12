@@ -37,22 +37,23 @@ closed. A design may declare
 is safer; the runtime uses it only after both invalid answers and records the
 fallback in the journal. Workflow code does none of that recovery itself.
 
-When discovery determines the work units at runtime, use bounded text handoffs:
+When discovery determines the work units at runtime, use text handoffs:
 
 ```js
 const MAX_DAGS_IN_SCOPE = 12;
 const units = await agent("Return one complete handoff per discovered unit.", {
-  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE, maxItemChars: 4000 },
+  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE },
 });
 ```
 
-Runtime desugars `handoffs` to its bounded unique non-blank string-array path and
-owns the same format instructions, repair, replay, journal, budget, and
+Runtime states `handoffs` as a non-blank string array in the return contract and
+owns the format instructions, same-session correction, replay, journal, budget, and
 fail-closed behavior. Workflow code passes each returned string unchanged into
-visible `parallel()` or `pipeline()` workers. The approved Design derives and
-names a small `maxItems` in the runtime range `1..100`; the bound protects one
-structured response and is not a default business limit. Runtime allows one
-repair, then fails closed.
+visible `parallel()` or `pipeline()` workers. `maxItems` is optional and belongs to
+the CONSUMER: declare it when the approved Design names a fixed number of downstream
+slots, and omit it when the work decides how many units there are. There is no
+per-item character bound. Runtime allows one same-session correction by default, then
+fails closed.
 
 The remaining standard orchestration primitives are:
 
@@ -311,17 +312,18 @@ human-readable description and never replaces stable identity.
 
 ### Output acceptance is not semantic continuation
 
-Standard authoring may opt into `agent({ choice, returnVia: "tool" })`, the
-closed string `output` contract, or `agent({ handoffs, returnVia: "tool" })`
-described in [output acceptance](output-acceptance.md).
-The workflow-only `workflow_return` tool validates a proposed value within the
-same child session; it does not certify the truth of a decision, nor the facts
-inside a shaped record. Ordinary text,
-legacy text-choice repair and adaptive fresh-worker rounds retain separate
-contracts. The standard source grammar still does not parse model prose or
-permit raw `schema`/`validate`; `schema` with `returnVia: "tool"` is available
-to reviewed compatibility scripts only, because the strict checker refuses raw
-`schema` regardless of transport. Review the [pattern index](../../../skills/locus-pi-workflow-create/references/INDEX.md)
+Standard authoring uses `agent({ choice })`, the closed string `output` contract, or
+`agent({ handoffs })`, described in [output acceptance](output-acceptance.md). Every
+one of them is carried by the workflow-only `workflow_return` tool, which validates a
+proposed value within the same child session; `returnVia` is no longer a choice the
+author makes. The tool does not certify the truth of a decision, nor the facts inside
+a shaped record. An author-declared `minItems`/`maxItems` on `handoffs` bounds how MANY
+work units the stage returns, never how long one of them may be — the runtime adds no
+size policy of its own, and the reason is stated once in
+[the principle](output-acceptance.md#the-principle). Ordinary text and adaptive
+fresh-worker rounds retain separate contracts. The standard source grammar still does not parse model prose or permit raw
+`schema`/`validate`; `schema` is available to reviewed compatibility scripts only,
+because the strict checker refuses raw `schema`. Review the [pattern index](../../../skills/locus-pi-workflow-create/references/INDEX.md)
 before selecting adaptive slices, fixed, refinement, decomposition or human-gated execution.
 
 The owner contract separately forbids mandatory acknowledgement protocols whose
@@ -356,4 +358,4 @@ validation is not evidence that the workflow ran.
 
 ### Explicit execution observations
 
-Plain-text `agent(prompt, { result: "report", label: "review" })` produces opaque text for the next agent. Author the static literal `result: "report"`; it cannot combine with shaped outputs or `returnVia`. The checker validates direct option pairs, not the contents of variable or spread option objects; runtime validation covers every call. Source must not branch on, parse or inspect report content. An arbiter interprets full reports; a separate `choice` call can translate its recommendation into an edge. Runtime eligibility and fatal boundaries are defined in [agent execution reports](../REFERENCE.md#agent-execution-reports). No `try/catch` exception is added to the standard grammar.
+Plain-text `agent(prompt, { result: "report", label: "review" })` produces opaque text for the next agent. Author the static literal `result: "report"`; it cannot combine with shaped outputs. The checker validates direct option pairs, not the contents of variable or spread option objects; runtime validation covers every call. Source must not branch on, parse or inspect report content. An arbiter interprets full reports; a separate `choice` call can translate its recommendation into an edge. Runtime eligibility and fatal boundaries are defined in [agent execution reports](../REFERENCE.md#agent-execution-reports). No `try/catch` exception is added to the standard grammar.

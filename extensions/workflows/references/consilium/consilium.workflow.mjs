@@ -82,27 +82,20 @@ synthesizer will read it as evidence that the obvious answer is safe.`,
   }),
 ]);
 
-/** Every stage bound: an advisory brief is short, a document is long, a verdict is tiny. */
-const MAX_BRIEF_CHARS = 4_000;
-const MAX_ADVICE_CHARS = 6_000;
-const MAX_CONSILIUM_CHARS = 12_000;
-/**
- * The verdict stage is bounded too, and `schema` is not a substitute for it. Schema
- * validation extracts a value from the child's raw answer, so a small valid object can
- * arrive wrapped in an arbitrarily large reply — which is then persisted as this stage's
- * answer artifact. The bound is what makes "every stage is bounded" true of the verifier
- * rather than only of the stages whose answers are read as text.
- */
-const MAX_VERDICT_CHARS = 2_000;
+// No per-stage answer ceilings, deliberately.
+//
+// Every stage here used to declare one and the runtime refused a longer answer after the
+// child had already produced it. That is a size policy over finished work, not a budget:
+// a brief that needs a paragraph more is not a failure, and discarding a completed
+// synthesis for its length loses the whole stage. The stages are shaped by their PROMPTS
+// (a brief is short because it is asked to be) and the verdict by its `schema`, which is a
+// real consumer contract this script branches on. Nothing below asks a model to "keep it
+// under N characters" either — that is the same policy moved into the prompt.
 
-/** The question itself. A run without one has nothing to advise on. */
-const MAX_QUESTION_CHARS = 4_000;
-
-/** Every stage runs in the launch checkout with the inherited tool surface. */
-const ADVISORY_OPTIONS = Object.freeze({});
-
-/** The framing and verification stages use the same inherited tool surface. */
-const NO_TOOL_OPTIONS = Object.freeze({});
+// The question is not measured either. A curated reference workflow is where an author
+// first reads what "no size policy" means, so it models the principle end to end: the
+// only thing asked of the input is that there IS one. An operator who pastes a long brief
+// has given the consilium more to frame, not a malformed request.
 
 const VERIFICATION_SCHEMA = {
   type: "object",
@@ -110,7 +103,11 @@ const VERIFICATION_SCHEMA = {
   required: ["verdict", "reason"],
   properties: {
     verdict: { type: "string", enum: ["accept", "reject"] },
-    reason: { type: "string", minLength: 1, maxLength: 600, nonBlank: true },
+    // `verdict` is the branch: one declared member of a closed set, which is a real
+    // contract. `reason` is carried to the operator verbatim and has no consumer that
+    // could be broken by a longer sentence, so it declares only that it is present and
+    // non-blank. The prompt, not a `maxLength`, asks for one or two sentences.
+    reason: { type: "string", minLength: 1, nonBlank: true },
   },
 };
 
@@ -123,9 +120,6 @@ export default async function runWorkflow(dsl, input) {
   const { agent, parallel, phase, log, publishArtifact } = dsl;
   const question = typeof input === "string" ? input.trim() : "";
   if (question === "") throw new Error("consilium requires a non-empty question");
-  if (question.length > MAX_QUESTION_CHARS) {
-    throw new Error(`consilium question is ${question.length} characters; at most ${MAX_QUESTION_CHARS} are allowed`);
-  }
 
   // 1. FRAME. Without it each advisor answers a slightly different question and the
   //    synthesizer's job silently becomes reconciliation — the classic stage only a
@@ -156,10 +150,8 @@ Do not answer the question. Do not recommend anything.
 ${question}
 --- END OPERATOR QUESTION ---`,
     {
-      ...NO_TOOL_OPTIONS,
       label: "frame the question",
       artifact: "brief.md",
-      maxAnswerChars: MAX_BRIEF_CHARS,
     },
   );
 
@@ -183,11 +175,9 @@ others, and the synthesizer needs your view unmixed with theirs.
 ${brief}
 --- END ADVISORY BRIEF ---`,
             {
-              ...ADVISORY_OPTIONS,
               label: advisor.label,
               artifact: advisor.artifact,
               modelRole: advisor.modelRole,
-              maxAnswerChars: MAX_ADVICE_CHARS,
             },
           ),
       ),
@@ -236,12 +226,10 @@ ${brief}
 
 ${advisorSections}`,
     {
-      ...NO_TOOL_OPTIONS,
       label: "synthesize the document",
       // Deliberately NOT `consilium.md`: the terminal document is published by this
       // script after verification, so a rejected run leaves no terminal artifact.
       artifact: "synthesis-draft.md",
-      maxAnswerChars: MAX_CONSILIUM_CHARS,
     },
   );
 
@@ -274,11 +262,9 @@ ${synthesis}
 
 ${advisorSections}`,
     {
-      ...NO_TOOL_OPTIONS,
       label: "verify the synthesis",
       artifact: "verification.json",
       schema: VERIFICATION_SCHEMA,
-      maxAnswerChars: MAX_VERDICT_CHARS,
     },
   );
 
@@ -294,12 +280,9 @@ ${advisorSections}`,
     };
   }
 
-  // Published EXACTLY as validated. The previous line appended a trailing newline when the
-  // answer lacked one, which quietly moved the bound: a synthesis of exactly
-  // MAX_CONSILIUM_CHARS passed the runtime gate and then became a
-  // MAX_CONSILIUM_CHARS + 1 terminal document. It also made the script read the agent's
-  // own bytes to decide what to write. A bound the terminal artifact does not actually
-  // respect is worse than no bound, because every reader downstream trusts it.
+  // Published EXACTLY as validated, byte for byte. An earlier version appended a trailing
+  // newline when the answer lacked one, which made the script read the agent's own bytes to
+  // decide what to write; the terminal document is the answer, not a reformatting of it.
   const consiliumRef = publishArtifact("consilium.md", synthesis);
   return {
     ok: true,

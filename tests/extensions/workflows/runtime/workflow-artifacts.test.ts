@@ -490,7 +490,75 @@ describe("workflow run artifact store", () => {
     assert.throws(() => current.consumeText(sourceRef), /malformed (?:script identity|disposition)/u);
   });
 
-  it("refuses an indexed source artifact omitted from the terminal handoff projection", () => {
+  it("writes and consumes a 3 MiB text artifact: size is not a policy", () => {
+    const root = project();
+    const sourceRunId = "large-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    // Past the 2 MiB ceiling this store used to enforce on every text artifact.
+    const large = "L".repeat(3 * 1024 * 1024);
+    const sourceRef = source.publishText("large.md", large);
+    assert.equal(source.read(sourceRef).byteLength, 3 * 1024 * 1024);
+    writeFileSync(
+      workflowResultFile(runDir(root, sourceRunId)),
+      `${JSON.stringify({
+        runId: sourceRunId,
+        ok: true,
+        result: "done",
+        artifactRefs: [sourceRef],
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
+    );
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "large-consumer",
+      runDir: runDir(root, "large-consumer"),
+    });
+
+    assert.equal(current.consumeText(sourceRef).text, large);
+  });
+
+  it("keeps an artifact older than the newest twenty consumable", () => {
+    const root = project();
+    const sourceRunId = "deep-history-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    const refs = Array.from({ length: 25 }, (_, index) =>
+      source.publishText(`doc-${index + 1}.md`, `body ${index + 1}`),
+    );
+    const oldest = refs[0]!;
+    const projected = refs.slice(-20);
+    assert.equal(
+      projected.some((ref) => ref.artifactId === oldest.artifactId),
+      false,
+    );
+    writeFileSync(
+      workflowResultFile(runDir(root, sourceRunId)),
+      `${JSON.stringify({
+        runId: sourceRunId,
+        ok: true,
+        result: "done",
+        artifactRefs: projected,
+        artifactRefsOmitted: refs.length - projected.length,
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
+    );
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "deep-history-consumer",
+      runDir: runDir(root, "deep-history-consumer"),
+    });
+
+    assert.equal(current.consumeText(oldest).text, "body 1");
+  });
+
+  it("consumes an indexed source artifact omitted from the terminal display projection", () => {
     const root = project();
     const sourceRunId = "projected-source";
     const source = createWorkflowArtifactStore({
@@ -517,7 +585,10 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, "projection-consumer"),
     });
 
-    assert.throws(() => current.consumeText(omittedRef), /not present in the source run terminal projection/u);
+    // The projection in result.json is a display summary, not an admission list:
+    // an artifact it omitted is still resolvable through the source run's full
+    // verified index.
+    assert.equal(current.consumeText(omittedRef).text, "omitted");
     assert.equal(current.consumeText(projectedRef).text, "projected");
   });
 

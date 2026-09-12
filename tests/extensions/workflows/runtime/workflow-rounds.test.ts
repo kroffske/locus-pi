@@ -150,7 +150,7 @@ describe("REQ-009 W1 — store slot dedupe", () => {
     }): AgentExecutor =>
       createAgentSdkSessionExecutor({
         createSession: async () => ({ session: fakeSession({ input: 100, output: 40 }) }),
-        turnTimeoutMs: 5000,
+        childTimeoutMs: 5000,
         ...(opts.live !== undefined ? { live: opts.live } : {}),
         ...(opts.onLiveExecution !== undefined ? { onLiveExecution: opts.onLiveExecution } : {}),
       });
@@ -178,7 +178,9 @@ describe("REQ-009 W1 — store slot dedupe", () => {
     const ends = runtime.getJournal().filter((line) => line.kind === "agent_end");
     expect(ends.map((line) => line.round)).toEqual([1, 2]);
     expect(ends.every((line) => line.slotKey === workflowSlotKey({ phase: "verify", label: "verify fix" }))).toBe(true);
-    expect(ends[1]?.usage).toEqual({ input: 100, output: 40, totalTokens: 140, costTotal: 0 });
+    // No `costTotal`: the host reports tokens and no price, and an absent field says
+    // "unknown" where a hardcoded 0 said "this run was free".
+    expect(ends[1]?.usage).toEqual({ input: 100, output: 40, totalTokens: 140 });
   });
 
   it("bridge: three mapped members keep one authored label but use three live rows", async () => {
@@ -193,7 +195,7 @@ describe("REQ-009 W1 — store slot dedupe", () => {
       createExecutor: (opts) =>
         createAgentSdkSessionExecutor({
           createSession: async () => ({ session: fakeSession({ input: 100, output: 40 }) }),
-          turnTimeoutMs: 5000,
+          childTimeoutMs: 5000,
           ...(opts.live !== undefined ? { live: opts.live } : {}),
           ...(opts.onLiveExecution !== undefined ? { onLiveExecution: opts.onLiveExecution } : {}),
         }),

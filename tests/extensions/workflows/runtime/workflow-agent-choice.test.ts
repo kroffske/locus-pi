@@ -8,21 +8,54 @@ import {
   type WorkflowAgentResult,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 
-function scriptedRuntime(runId: string, answers: string[]) {
+/**
+ * A host that carries a shaped result. `choice` no longer travels as parsed final text, so
+ * a scripted answer is the canonical JSON the `workflow_return` tool accepted in-session.
+ */
+function scriptedRuntime(runId: string, answers: string[], attempts = 1) {
   const requests: WorkflowAgentRequest[] = [];
   const runtime = createWorkflowRuntime({
     runId,
     agentRunner: async (request): Promise<WorkflowAgentResult> => {
       requests.push(request);
       const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return { ok: true, status: "completed", summary: "done", text, diagnostics: [], agent: request.agent };
+      return {
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text,
+        diagnostics: [],
+        agent: request.agent,
+        ...(request.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts, toolName: "workflow_return" as const } }),
+      };
+    },
+  });
+  return { ...runtime, requests };
+}
+
+/** A host whose acceptance tool exhausted its clarification turns without a valid value. */
+function exhaustedRuntime(runId: string) {
+  const requests: WorkflowAgentRequest[] = [];
+  const runtime = createWorkflowRuntime({
+    runId,
+    agentRunner: async (request): Promise<WorkflowAgentResult> => {
+      requests.push(request);
+      return {
+        ok: false,
+        status: "failed",
+        summary: "Output contract exhausted after 2 attempts",
+        failureCause: "output-contract-exhausted",
+        diagnostics: [],
+      };
     },
   });
   return { ...runtime, requests };
 }
 
 describe("agent({ choice }) exact routing output", () => {
-  it("returns one declared literal through the existing schema journal path", async () => {
+  it("returns one declared literal through the same-session acceptance path", async () => {
     const { dsl, getJournal, requests } = scriptedRuntime("agent-choice-happy", ['"revise"']);
 
     const decision = await dsl.agent("Choose the next step.", {
@@ -33,9 +66,8 @@ describe("agent({ choice }) exact routing output", () => {
     const typed: "accept" | "revise" | "blocked" = decision;
 
     expect(typed).toBe("revise");
-    expect(requests[0]?.prompt).toContain("Allowed answers (choose one):");
-    expect(requests[0]?.prompt).not.toContain('"enum": [');
-    expect(requests[0]?.prompt).toContain('"blocked"');
+    expect(requests[0]?.returnContract?.choices).toEqual(["accept", "revise", "blocked"]);
+    expect(requests[0]?.prompt).toContain("workflow_return");
     expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
       status: "valid",
       attempts: 1,
@@ -43,56 +75,28 @@ describe("agent({ choice }) exact routing output", () => {
     });
   });
 
-  it("re-asks a non-choice answer and fails closed after the shared fixed budget", async () => {
-    const repaired = scriptedRuntime("agent-choice-repair", ['"maybe"', '"accept"']);
-    await expect(repaired.dsl.agent("Route.", { choice: ["accept", "revise"] })).resolves.toBe("accept");
-    expect(repaired.requests).toHaveLength(2);
-    expect(repaired.requests[1]?.prompt).toContain('value "maybe" not in enum');
-
-    const failed = scriptedRuntime("agent-choice-fail", ['"maybe"']);
-    await expect(failed.dsl.agent("Route.", { choice: ["accept", "revise"] })).rejects.toBeInstanceOf(
-      SchemaValidationError,
-    );
-    expect(failed.requests).toHaveLength(2);
+  it("refuses a value outside the declared set: membership is the consumer's real contract", async () => {
+    const { dsl } = scriptedRuntime("agent-choice-off-set", ['"maybe"']);
+    await expect(dsl.agent("Route.", { choice: ["accept", "revise"] })).rejects.toBeInstanceOf(SchemaValidationError);
   });
 
-  it("rejects a schema with no selected value and requests one literal without treating files as success", async () => {
-    const echo = JSON.stringify({ type: "string", enum: ["success", "failed"] });
-    const repaired = scriptedRuntime("compose-schema-echo", [echo, '"success"']);
-    await expect(
-      repaired.dsl.agent("Compose the catalog and report its exit status.", {
-        choice: ["success", "failed"],
-      }),
-    ).resolves.toBe("success");
-    expect(repaired.requests).toHaveLength(2);
-    for (const request of repaired.requests) {
-      expect(request.prompt).toContain('Allowed answers (choose one):\n- "success"\n- "failed"');
-      expect(request.prompt).toContain("Do not return the list, a JSON object, or a JSON Schema.");
-      expect(request.prompt).not.toContain("```json");
-    }
-    const exhausted = scriptedRuntime("compose-schema-echo-exhausted", [echo]);
-    await expect(
-      exhausted.dsl.agent("The catalog file exists. Report the command status.", {
-        choice: ["success", "failed"],
-      }),
-    ).rejects.toBeInstanceOf(SchemaValidationError);
-    expect(exhausted.requests).toHaveLength(2);
+  it("accepts a set of forty options: a routing list has no size policy", async () => {
+    const options = Array.from({ length: 40 }, (_, index) => `route-${String(index).padStart(2, "0")}`);
+    const { dsl, requests } = scriptedRuntime("agent-choice-forty", [JSON.stringify(options[37])]);
+
+    await expect(dsl.agent("Route.", { choice: options })).resolves.toBe("route-37");
+    expect(requests[0]?.returnContract?.choices).toHaveLength(40);
   });
 
-  it("keeps all schema constraints visible for a string enum with extra rules", async () => {
-    const runtime = scriptedRuntime("choice-extra-constraint", ['"failed"']);
-    await expect(
-      runtime.dsl.agent("Choose.", {
-        schema: { type: "string", enum: ["ok", "failed"], minLength: 3 },
-      }),
-    ).resolves.toBe("failed");
-    expect(runtime.requests[0]?.prompt).toContain('"minLength": 3');
-    expect(runtime.requests[0]?.prompt).toContain("```json");
+  it("accepts an option far longer than the deleted 200-character ceiling", async () => {
+    const long = `escalate-because-${"reason ".repeat(60)}`.trim();
+    expect(long.length).toBeGreaterThan(200);
+    const { dsl } = scriptedRuntime("agent-choice-long-option", [JSON.stringify(long)]);
+    await expect(dsl.agent("Route.", { choice: ["accept", long] })).resolves.toBe(long);
   });
 
-  it("uses an explicit fallback after the model echoes the choice schema twice", async () => {
-    const schemaEcho = JSON.stringify({ type: "string", enum: ["compose", "ask_operator"] });
-    const fallback = scriptedRuntime("agent-choice-fallback", [schemaEcho, schemaEcho]);
+  it("uses an explicit fallback only after the contract is exhausted in-session", async () => {
+    const fallback = exhaustedRuntime("agent-choice-fallback");
 
     await expect(
       fallback.dsl.agent("Route.", {
@@ -100,7 +104,7 @@ describe("agent({ choice }) exact routing output", () => {
         choiceFallback: "compose",
       }),
     ).resolves.toBe("compose");
-    expect(fallback.requests).toHaveLength(2);
+    expect(fallback.requests).toHaveLength(1);
     expect(fallback.getJournal().at(-1)).toMatchObject({
       kind: "log",
       source: "runtime",
@@ -108,7 +112,7 @@ describe("agent({ choice }) exact routing output", () => {
       choiceDecision: {
         value: "compose",
         source: "fallback",
-        returnVia: "text",
+        returnVia: "tool",
         attempts: 2,
         reason: "output-contract-exhausted",
       },
@@ -124,7 +128,7 @@ describe("agent({ choice }) exact routing output", () => {
       }),
     ).resolves.toBe("ask_operator");
     expect(valid.getJournal().filter((line) => line.choiceDecision !== undefined)).toMatchObject([
-      { choiceDecision: { value: "ask_operator", source: "validated", returnVia: "text" } },
+      { choiceDecision: { value: "ask_operator", source: "validated", returnVia: "tool" } },
     ]);
 
     const failed = createWorkflowRuntime({
@@ -141,32 +145,44 @@ describe("agent({ choice }) exact routing output", () => {
     ).rejects.toThrow("transport unavailable");
   });
 
-  it("desugars to the byte-identical request used by an equivalent string-enum schema", async () => {
+  it("states membership as a contract, whether written as choice or as a string enum", async () => {
+    // These are no longer byte-identical: `choice` states its members in the contract's own
+    // `choices` field, a hand-written schema states them as an `enum`. Byte identity was a
+    // property of the deleted text transport, where `choice` was literally desugared into a
+    // schema before the prompt was built. What MUST stay identical is the decision: both
+    // forms accept exactly a declared member and refuse anything else.
     const choice = scriptedRuntime("agent-choice-equivalence", ['"accept"']);
     const schema = scriptedRuntime("agent-schema-equivalence", ['"accept"']);
 
-    await choice.dsl.agent("Route.", { choice: ["accept", "revise"], label: "route" });
-    await schema.dsl.agent("Route.", {
-      schema: { type: "string", enum: ["accept", "revise"] },
-      label: "route",
-    });
+    await expect(choice.dsl.agent("Route.", { choice: ["accept", "revise"], label: "route" })).resolves.toBe("accept");
+    await expect(
+      schema.dsl.agent("Route.", { schema: { type: "string", enum: ["accept", "revise"] }, label: "route" }),
+    ).resolves.toBe("accept");
+    expect(choice.requests[0]?.returnContract?.choices).toEqual(["accept", "revise"]);
+    expect(schema.requests[0]?.returnContract?.schema).toEqual({ type: "string", enum: ["accept", "revise"] });
 
-    expect(choice.requests).toEqual(schema.requests);
+    for (const runtime of [scriptedRuntime("choice-off", ['"maybe"']), scriptedRuntime("schema-off", ['"maybe"'])]) {
+      const off = await runtime.dsl
+        .agent("Route.", { choice: ["accept", "revise"] })
+        .then(() => undefined)
+        .catch((error: unknown) => error);
+      expect(off).toBeInstanceOf(SchemaValidationError);
+    }
   });
 
   it.each([
     [{ choice: "accept" }, /agent choice must be an array of strings/u],
-    [{ choice: ["accept"] }, /agent choice must contain 2-32 values/u],
+    [{ choice: ["accept"] }, /agent choice must contain at least 2 values/u],
     [{ choice: ["accept", ""] }, /value at index 1 must be a non-empty string/u],
     [{ choice: ["accept", "accept"] }, /duplicate value "accept"/u],
     [{ choice: ["accept", "revise"], schema: { type: "string" } }, /cannot be combined with schema/u],
-    [{ choice: ["accept", "revise"], validate: () => [] }, /cannot be combined with validate/u],
     [{ choiceFallback: "accept" }, /agent choiceFallback requires choice/u],
     [
       { choice: ["accept", "revise"], choiceFallback: "blocked" },
       /agent choiceFallback must be one of the declared choices/u,
     ],
     [{ choice: ["accept", "revise"], choiceFallback: 1 }, /agent choiceFallback must be a string/u],
+    [{ choice: ["accept", "revise"], returnVia: "text" }, /returnVia: "text" was removed/u],
   ])("rejects malformed declaration %# before any child runs", async (opts, error) => {
     let calls = 0;
     const { dsl } = createWorkflowRuntime({
@@ -181,6 +197,17 @@ describe("agent({ choice }) exact routing output", () => {
       error,
     );
     expect(calls).toBe(0);
+  });
+
+  it('accepts returnVia: "tool" for one release and says it is redundant', async () => {
+    const { dsl, getJournal } = scriptedRuntime("agent-choice-returnvia-tool", ['"accept"']);
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("Route.", {
+        choice: ["accept", "revise"],
+        returnVia: "tool",
+      }),
+    ).resolves.toBe("accept");
+    expect(getJournal().some((line) => line.message?.includes("[workflow:deprecated] agent returnVia"))).toBe(true);
   });
 
   it("keeps choice out of exact-text and shaped option types", () => {
@@ -215,119 +242,23 @@ describe("agent({ choice }) exact routing output", () => {
   });
 });
 
-describe("agent({ choice }) reads an unquoted exact-choice answer", () => {
-  // Regression for run 20260822-194520-6c07 on openai-codex/gpt-5.6-luna: the step prompt said
-  // "return exactly `completed`", the child answered `completed`, the strict JSON parser rejected
-  // it, the repair attempt answered {"type":"string","value":"completed"}, and the whole run
-  // failed although the step had completed and its history file said so.
-  it("accepts the bare member text the live run answered with, on the first attempt", async () => {
-    const { dsl, getJournal, requests } = scriptedRuntime("agent-choice-bare-text", ["completed\n"]);
+describe("the deleted text dialects of an exact-choice answer", () => {
+  // The old text transport accepted a bare word, a backticked word and a schema-echo
+  // wrapper, because a final MESSAGE has no way to say "this is the value". A tool call
+  // does: the argument is the value. Those readings are gone with the transport, and a
+  // host that submits anything but the declared member is a mismatch, not a dialect.
+  it.each([["completed"], ["`completed`"], ['{"type":"string","value":"completed"}'], ["```\ncompleted\n```"]])(
+    "refuses %s as a choice value",
+    async (submitted) => {
+      const { dsl } = scriptedRuntime("agent-choice-dialects", [submitted]);
+      await expect(dsl.agent("Route.", { choice: ["completed", "failed"] })).rejects.toBeInstanceOf(
+        SchemaValidationError,
+      );
+    },
+  );
 
-    await expect(dsl.agent("Implement the step.", { choice: ["completed", "blocked"] as const })).resolves.toBe(
-      "completed",
-    );
-    expect(requests).toHaveLength(1);
-    expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
-      status: "valid",
-      attempts: 1,
-      errors: [],
-      coercion: "bare-text",
-    });
-  });
-
-  it("accepts the schema-echo wrapper the live run's repair attempt answered with", async () => {
-    const { dsl, getJournal, requests } = scriptedRuntime("agent-choice-wrapper-object", [
-      '{"type":"string","value":"completed"}',
-    ]);
-
-    await expect(dsl.agent("Implement the step.", { choice: ["completed", "blocked"] as const })).resolves.toBe(
-      "completed",
-    );
-    expect(requests).toHaveLength(1);
-    expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
-      status: "valid",
-      attempts: 1,
-      errors: [],
-      coercion: "wrapper-object",
-    });
-  });
-
-  it.each([
-    ["a fenced bare member", "```\nblocked\n```", "blocked"],
-    ["a single-backticked member", "`blocked`", "blocked"],
-    [
-      "a wrapper that also echoes the enum",
-      '{"type":"string","enum":["completed","blocked"],"value":"blocked"}',
-      "blocked",
-    ],
-    ["a wrapper without a type", '{"value":"completed"}', "completed"],
-  ])("reads %s as that member without a repair attempt", async (name, answer, expected) => {
-    const { dsl, requests } = scriptedRuntime(`agent-choice-read-${name.replaceAll(" ", "-")}`, [answer]);
-
-    await expect(dsl.agent("Route.", { choice: ["completed", "blocked"] as const })).resolves.toBe(expected);
-    expect(requests).toHaveLength(1);
-  });
-
-  it("leaves the quoted JSON string as the unmarked reading", async () => {
-    const { dsl, getJournal } = scriptedRuntime("agent-choice-quoted", ['"completed"']);
-
-    await expect(dsl.agent("Route.", { choice: ["completed", "blocked"] as const })).resolves.toBe("completed");
-    expect(getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toEqual({
-      status: "valid",
-      attempts: 1,
-      errors: [],
-    });
-  });
-
-  it.each([
-    ["prose around a member", "Status: completed"],
-    ["a near-miss in case", "Completed"],
-    ["an unlisted wrapper value", '{"type":"string","value":"done"}'],
-    ["a wrapper with an extra key", '{"value":"completed","note":"see history"}'],
-    ["a wrapper of another type", '{"type":"object","value":"completed"}'],
-    ["two members", "completed blocked"],
-  ])("still fails closed on %s after the shared budget", async (name, answer) => {
-    const { dsl, getJournal, requests } = scriptedRuntime(`agent-choice-strict-${name.replaceAll(" ", "-")}`, [answer]);
-
-    await expect(dsl.agent("Route.", { choice: ["completed", "blocked"] as const })).rejects.toBeInstanceOf(
-      SchemaValidationError,
-    );
-    expect(requests).toHaveLength(2);
-    expect(
-      getJournal()
-        .filter((line) => line.kind === "agent_end")
-        .map((line) => line.schemaValidation?.status),
-    ).toEqual(["mismatch", "mismatch"]);
-  });
-
-  it("applies the same readings to a hand-written string enum and to no other shape", async () => {
-    const handWritten = scriptedRuntime("agent-schema-string-enum-bare", ["completed"]);
-    await expect(
-      handWritten.dsl.agent("Route.", { schema: { type: "string", enum: ["completed", "blocked"] } }),
-    ).resolves.toBe("completed");
-    expect(handWritten.getJournal().find((line) => line.kind === "agent_end")?.schemaValidation).toMatchObject({
-      status: "valid",
-      coercion: "bare-text",
-    });
-
-    const plainString = scriptedRuntime("agent-schema-plain-string-bare", ["completed"]);
-    await expect(plainString.dsl.agent("Route.", { schema: { type: "string" } })).rejects.toThrow(/not valid JSON/u);
-
-    const objectShape = scriptedRuntime("agent-schema-object-bare", ["completed"]);
-    await expect(
-      objectShape.dsl.agent("Route.", {
-        schema: {
-          type: "object",
-          required: ["answer"],
-          properties: { answer: { type: "string", enum: ["completed", "blocked"] } },
-        },
-      }),
-    ).rejects.toThrow(/not valid JSON/u);
-  });
-
-  it("prefers the declared word over the parser for a member that is also JSON of another type", async () => {
-    const { dsl } = scriptedRuntime("agent-choice-json-looking-member", ["1"]);
-
-    await expect(dsl.agent("Pick.", { choice: ["1", "2"] as const })).resolves.toBe("1");
+  it("accepts the member submitted as the value itself", async () => {
+    const { dsl } = scriptedRuntime("agent-choice-exact", ['"completed"']);
+    await expect(dsl.agent("Route.", { choice: ["completed", "failed"] })).resolves.toBe("completed");
   });
 });

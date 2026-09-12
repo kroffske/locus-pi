@@ -64,7 +64,10 @@ export const AGENT_FAILURE_CAUSES = [
   "workspace-allocation",
   /** The child completed with empty final text — a decomposition signal, not a dropped channel. */
   "empty-answer",
-  /** The child answered past the call's declared `maxAnswerChars` bound. */
+  /** HISTORICAL. The child answered past the call's declared `maxAnswerChars` bound.
+   *  Nothing produces it any more — the runtime owns no answer-size policy — but the
+   *  list stays closed over it so a journal or result written before that removal still
+   *  validates and stays readable instead of degrading to `unclassified`. */
   "answer-too-long",
   /** A replayed answer the CURRENT workflow script validator rejects. */
   "script-rejected",

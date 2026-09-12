@@ -13,7 +13,6 @@ import { workflowRootDir } from "../runtime/workflow-run-layout.js";
 import type { ExtensionContext, ModelLike } from "../../_shared/host/pi-api.js";
 import { getProjectRoot } from "../../_shared/host/pi-api.js";
 import {
-  WORKFLOW_FUSION_MAX_MEMBERS,
   WORKFLOW_FUSION_MIN_MEMBERS,
   type WorkflowFusionMember,
   type WorkflowFusionMode,
@@ -113,9 +112,9 @@ export function validateFusionConfig(
   config: FusionConfig,
   available: readonly AvailableFusionModel[],
 ): ValidatedFusionConfig {
-  if (config.members.length < WORKFLOW_FUSION_MIN_MEMBERS || config.members.length > WORKFLOW_FUSION_MAX_MEMBERS) {
+  if (config.members.length < WORKFLOW_FUSION_MIN_MEMBERS) {
     throw new Error(
-      `Fusion requires ${WORKFLOW_FUSION_MIN_MEMBERS}-${WORKFLOW_FUSION_MAX_MEMBERS} member models; configured ${config.members.length}.`,
+      `Fusion requires at least ${WORKFLOW_FUSION_MIN_MEMBERS} member models; configured ${config.members.length}.`,
     );
   }
   const memberSet = new Set(config.members);

@@ -264,7 +264,7 @@ function agentToolCardStatus(value: unknown, isPartial: boolean, isError: boolea
   if (isPartial) return "working";
   if (value === "completed") return "done";
   if (value === "cancelled") return "cancelled";
-  if (value === "failed" || value === "blocked") return "error";
+  if (value === "failed" || value === "blocked" || value === "storage-failed") return "error";
   return isError ? "error" : "done";
 }
 

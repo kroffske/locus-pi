@@ -69,8 +69,33 @@ export type {
 
 export const WORKFLOW_OPERATOR_HANDOFF_VERSION = "locus.workflow.operator-handoff.v1" as const;
 export const WORKFLOW_HANDOFF_CLAIM_VERSION = "locus.workflow.operator-handoff-claim.v1" as const;
-export const DEFAULT_WORKFLOW_HANDOFF_PRESTART_STALE_MS = 5 * 60 * 1000;
 const WORKFLOW_HANDOFF_CLAIM_LOCK_VERSION = "locus.workflow.operator-handoff-claim-lock.v1" as const;
+
+/**
+ * The two lease timers of this module, kept together because they are read together
+ * and are constantly mistaken for each other.
+ *
+ * Neither bounds anybody's work, and neither one alone hands a claim to a second
+ * operator:
+ *
+ *  - PRESTART lease (5 minutes): how long a claim with no continuation run bound to
+ *    it is treated as still being prepared. Expiry only makes the claim ELIGIBLE for
+ *    takeover. The takeover itself happens under the exclusive lock below, after
+ *    re-reading the claim state, and only while `childRunId` is still absent — i.e.
+ *    only while no run exists whose liveness could be checked. Once a run is bound,
+ *    time never decides anything: `readWorkflowRunSummary` does, and only a `failed`
+ *    or `cancelled` child releases the claim.
+ *  - LOCK lease (30 seconds): how long an unreleased claim-transition lock file is
+ *    honoured before a peer may break it. A broken lock never grants ownership by
+ *    itself either: every mutation re-checks `ownerToken` through
+ *    `assertClaimLockOwned`, and every lease-driven mutation re-checks the claim's
+ *    own `claimId` through `assertClaimOwnedByLease`. A displaced holder therefore
+ *    fails loudly on its next write instead of silently writing beside the winner.
+ *
+ * Both are overridable per call (`prestartStaleMs`, `lockStaleMs`) for tests and for
+ * an operator surface that knows better.
+ */
+export const DEFAULT_WORKFLOW_HANDOFF_PRESTART_STALE_MS = 5 * 60 * 1000;
 const DEFAULT_WORKFLOW_HANDOFF_LOCK_STALE_MS = 30 * 1000;
 const HANDOFF_CLAIM_FILE = "operator-handoff-claim.json";
 const HANDOFF_CLAIM_LOCK_FILE = "operator-handoff-claim.lock";
@@ -152,7 +177,10 @@ export function createWorkflowOperatorHandoffEnvelope(input: {
   const declaration = normalizeWorkflowOperatorHandoffDeclaration(input.declaration);
   const target = normalizeTarget(input.target, true);
   const scriptIdentity = normalizeScriptIdentity(input.scriptIdentity, true);
-  const terminalRefs = normalizeArtifactRefs(input.terminalArtifactRefs, true, 20);
+  // The complete published/primary set of the terminal run, not the compact
+  // projection result.json prints. A run that published more artifacts than the
+  // summary shows can still hand any of them to its continuation.
+  const terminalRefs = normalizeArtifactRefs(input.terminalArtifactRefs, true);
   for (const ref of declaration.continuationArtifactRefs) {
     if (ref.runId !== input.runId) {
       throw new Error("Every operatorHandoff continuation artifact must belong to the terminal source run");
@@ -252,12 +280,14 @@ export function readWorkflowOperatorHandoff(value: unknown, projectRoot?: string
     if (!sameScriptIdentity(normalizeScriptIdentity(value.scriptIdentity, true), handoff.scriptIdentity)) {
       throw new Error("operatorHandoff script identity does not match the result script identity");
     }
-    const terminalRefs = normalizeArtifactRefs(value.artifactRefs, true, 20);
-    if (
-      handoff.continuationArtifactRefs.some((ref) => !terminalRefs.some((candidate) => sameArtifactRef(candidate, ref)))
-    ) {
-      throw new Error("operatorHandoff continuation artifacts are not present in the terminal projection");
-    }
+    // result.json carries only the display projection of artifactRefs, so a
+    // continuation artifact published earlier in the run is legitimately absent from
+    // it. Identity, digest and provenance of each continuation ref are verified where
+    // the bytes are read (`consumeText` against the source run's full index), so
+    // membership in this projection is not a precondition here — it would only
+    // re-impose the ceiling this envelope was built to survive. Every ref is still
+    // structurally validated and confined to the origin run above.
+    normalizeArtifactRefs(value.artifactRefs, true);
     return { status: "ready", handoff };
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowRuntime,
   WorkflowAgentExecutionError,
+  WorkflowOutputCapabilityError,
   type WorkflowAgentResult,
   type WorkflowAgentReportOptions,
 } from "../../../../../extensions/workflows/runtime/workflow-runtime.js";
@@ -75,7 +76,7 @@ describe("explicit plain-text execution reports", () => {
     );
   });
 
-  it.each(["provider-error", "empty-answer", "answer-too-long"] as const)(
+  it.each(["provider-error", "empty-answer"] as const)(
     "captures classified terminal %s only when opted in",
     async (cause) => {
       const { dsl } = createWorkflowRuntime({ runId: cause, agentRunner: async () => failure(cause) });
@@ -101,10 +102,16 @@ describe("explicit plain-text execution reports", () => {
     "unknown-agent",
     "script-rejected",
     "unparseable-answer",
+    // Historical only: nothing produces it any more, and a report must not capture it.
+    "answer-too-long",
     "unclassified",
   ] as const)("does not capture %s", async (cause) => {
     const { dsl } = createWorkflowRuntime({ runId: cause, agentRunner: async () => failure(cause) });
-    await expect(dsl.agent("review", report)).rejects.toBeInstanceOf(WorkflowAgentExecutionError);
+    // A transport that cannot carry a shaped result raises its own named capability
+    // error; every other cause stays an ordinary execution failure.
+    const expected =
+      cause === "output-contract-unavailable" ? WorkflowOutputCapabilityError : WorkflowAgentExecutionError;
+    await expect(dsl.agent("review", report)).rejects.toBeInstanceOf(expected);
   });
 
   it("does not capture cancellation even if paired with an eligible cause", async () => {
@@ -235,7 +242,7 @@ describe("report replay boundaries", () => {
     expect(replay.counts()).toMatchObject({ divergedAtCall: 0, freshCalls: 2 });
   });
 
-  it("fails closed when a replayed answer violates a tighter current bound", async () => {
+  it("refuses the removed answer-size option by name, before touching the record", async () => {
     const source = await recorded();
     const runner = vi.fn(async () => success());
     const { dsl } = createWorkflowRuntime({
@@ -243,7 +250,24 @@ describe("report replay boundaries", () => {
       replay: createWorkflowReplayController({ runDir: runDir(), recorded: source.entries }),
       agentRunner: runner,
     });
-    await expect(dsl.agent("review", { ...report, maxAnswerChars: 1 })).rejects.toThrow(/answerChars/i);
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("review", {
+        ...report,
+        maxAnswerChars: 1,
+      }),
+    ).rejects.toThrow(/maxAnswerChars was removed/u);
+    expect(runner).not.toHaveBeenCalled();
+  });
+
+  it("replays a long recorded answer instead of refusing it for its length", async () => {
+    const source = await recorded();
+    const runner = vi.fn(async () => success());
+    const { dsl } = createWorkflowRuntime({
+      runId: "resume-long",
+      replay: createWorkflowReplayController({ runDir: runDir(), recorded: source.entries }),
+      agentRunner: runner,
+    });
+    await expect(dsl.agent("review", report)).resolves.toContain("Agent answer:");
     expect(runner).not.toHaveBeenCalled();
   });
 });

@@ -237,6 +237,87 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     }
   });
 
+  it("registers exactly the return tool on a real tool-free SDK session", async () => {
+    // Item 2's decision, proved on the real host rather than on a structural mock.
+    //
+    // Pi builds the child's tool REGISTRY from the allowlist (`tools`, or `[]` when
+    // `noTools: "all"` and no list is given), so a custom tool that is not named there is
+    // filtered out before `setActiveToolsByName` could ever enable it. Clearing the list
+    // is what made a shaped tool-free Fusion judge impossible: every member answered, and
+    // only then did the judge fail for a receipt the session never carried.
+    //
+    // Naming the return tool — and nothing else — keeps "tool-free" exactly as strict: no
+    // built-ins, no extensions, no skills. The readback below is the proof.
+    const sdk = await import("@earendil-works/pi-coding-agent");
+    const { getModel } = await import("@earendil-works/pi-ai/compat");
+    const { Type } = await import("@sinclair/typebox");
+    const cwd = tmpReportsDir();
+    const settings = sdk.SettingsManager.inMemory({ retry: { enabled: false } });
+    const model = { ...getModel("openai", "gpt-4o-mini"), baseUrl: "cli://fixture" };
+    const returnTool = {
+      name: "workflow_return",
+      label: "Return",
+      description: "Return the shaped result to the workflow.",
+      parameters: Type.Object({ value: Type.String() }),
+      execute: async () => ({ output: "recorded" }),
+    };
+    const runtime = await sdk.ModelRuntime.create({
+      authPath: path.join(cwd, "auth.json"),
+      modelsPath: null,
+      modelsStorePath: path.join(cwd, "models-store.json"),
+      refreshOnCreate: false,
+    });
+    const { session } = await sdk.createAgentSession({
+      cwd,
+      model,
+      modelRuntime: runtime,
+      settingsManager: settings,
+      sessionManager: sdk.SessionManager.inMemory(),
+      noTools: "all",
+      tools: ["workflow_return"],
+      excludeTools: ["spawn_agent", "ask"],
+      customTools: [returnTool] as never,
+    });
+    try {
+      expect(session.getActiveToolNames()).toEqual(["workflow_return"]);
+      // The acceptance restriction the host applies before each turn still holds.
+      session.setActiveToolsByName(["workflow_return"]);
+      expect(session.getActiveToolNames()).toEqual(["workflow_return"]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("leaves a real tool-free SDK session with no tools at all when no shape is declared", async () => {
+    const sdk = await import("@earendil-works/pi-coding-agent");
+    const { getModel } = await import("@earendil-works/pi-ai/compat");
+    const cwd = tmpReportsDir();
+    const settings = sdk.SettingsManager.inMemory({ retry: { enabled: false } });
+    const model = { ...getModel("openai", "gpt-4o-mini"), baseUrl: "cli://fixture" };
+    const runtime = await sdk.ModelRuntime.create({
+      authPath: path.join(cwd, "auth.json"),
+      modelsPath: null,
+      modelsStorePath: path.join(cwd, "models-store.json"),
+      refreshOnCreate: false,
+    });
+    const { session } = await sdk.createAgentSession({
+      cwd,
+      model,
+      modelRuntime: runtime,
+      settingsManager: settings,
+      sessionManager: sdk.SessionManager.inMemory(),
+      noTools: "all",
+      tools: [],
+      excludeTools: ["spawn_agent", "ask"],
+      customTools: [],
+    });
+    try {
+      expect(session.getActiveToolNames()).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it.each([
     ["cli://local", {}, 86_400_000],
     ["cli://local", { httpIdleTimeoutMs: 45_000 }, 45_000],
@@ -367,9 +448,9 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     }
   });
 
-  it("injects enabled memory extras with 200-line clipping", () => {
+  it("injects enabled memory extras whole, however long the file is", () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-context-extras-memory-"));
-    const memoryLines = Array.from({ length: 205 }, (_, index) =>
+    const memoryLines = Array.from({ length: 300 }, (_, index) =>
       index === 0 ? "MEMORY_SENTINEL" : `line-${index + 1}`,
     );
     const memoryPath = path.join(root, "MEMORY.md");
@@ -392,8 +473,31 @@ describe("agent SDK session executor (insurance, not proof)", () => {
 
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("MEMORY_SENTINEL");
-    expect(prompt).toContain("First 200 lines kept.");
-    expect(prompt).not.toContain("line-201");
+    // Selected context is passed whole: no line budget, no trailing clip marker.
+    expect(prompt).toContain("line-300");
+    expect(prompt).not.toContain("First 200 lines kept.");
+    expect(prompt).not.toContain("[truncated]");
+  });
+
+  it("reports the size of large context extras instead of cutting them", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "locus-context-extras-large-"));
+    const memoryPath = path.join(root, "MEMORY.md");
+    const body = `MEMORY_SENTINEL\n${"M".repeat(40 * 1024)}\nMEMORY_TAIL`;
+    const filesystem = inMemoryFileSystem(new Map([[memoryPath, body]]));
+
+    const prompt = buildAgentSystemPrompt(
+      { ...requestWithSystemPrompt(), projectRoot: root, workingDirectory: root },
+      {
+        env: { LOCUS_AGENT_CONTEXT_EXTRAS: "1" },
+        readFile: filesystem.readFile,
+        exists: filesystem.exists,
+      },
+    );
+
+    expect(prompt).toContain("MEMORY_SENTINEL");
+    expect(prompt).toContain("MEMORY_TAIL");
+    expect(prompt).toMatch(/Context extras are large: \d+ bytes passed whole/u);
+    expect(prompt).toContain("Nothing was truncated.");
   });
 
   it("injects enabled skill extras from simple names with canonical source path", () => {
@@ -564,13 +668,14 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(prompt).toContain("# Context extras");
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain("MEMORY_SENTINEL");
-    expect(prompt).toContain("First 200 lines kept.");
     expect(prompt).toContain("## Skill: reviewer");
     expect(prompt).toContain(`Source: ${skillPath}`);
     expect(prompt).toContain("Requested: reviewer");
     expect(prompt).toContain("SKILL_SENTINEL");
-    expect(prompt).not.toContain("memory-line-201");
-    expect(prompt).not.toContain("skill-line-201");
+    expect(prompt).toContain("memory-line-201");
+    expect(prompt).toContain("skill-line-201");
+    expect(prompt).not.toContain("First 200 lines kept.");
+    expect(prompt).not.toContain("[context extras truncated]");
   });
 
   it("appends extras when the agent has no systemPrompt", () => {
@@ -701,7 +806,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       createSession: async () => ({ session }),
       reportsDir,
       now: () => "fixed",
-      turnTimeoutMs: 60_000,
+      childTimeoutMs: 60_000,
       live: { rowId: "sdk-overlap", label: "execution A", slotKey: "verify", round: 1 },
       onLiveExecution: (execution) => observedExecutions.push(execution),
     });
@@ -1153,6 +1258,80 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(kickoff).not.toContain("SKILL_SENTINEL");
   });
 
+  it("keeps exactly the return tool on a shaped tool-free child and accepts its receipt", async () => {
+    // A Fusion judge with a `schema` runs tool-free like the rest of its panel. Clearing
+    // `customTools` removed the ONE tool such a judge needs, so the panel paid for every
+    // member and then failed the judge on a transport question. The return tool performs
+    // no external effect — it records the declared value — so keeping it registered does
+    // not make the child able to act, and the readback below still proves it has nothing
+    // else.
+    const { normalizeWorkflowReturnContract } =
+      await import("../../../extensions/workflows/runtime/workflow-return.js");
+    const { createWorkflowReturnController } = await import("../../../extensions/workflows/runtime/workflow-return.js");
+    const contract = normalizeWorkflowReturnContract({ output: { type: "string", singleLine: true } });
+    const { tool, acceptance } = createWorkflowReturnController(contract);
+    let active: string[] = [tool.name];
+    let prompts = 0;
+    let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+    const exportDir = tmpReportsDir();
+    const session: SdkAgentSessionLike = {
+      sessionId: "sdk-child",
+      subscribe(fn) {
+        listener = fn;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt() {
+        prompts += 1;
+        listener?.({ type: "turn_start" });
+        listener?.({ type: "tool_execution_start", toolName: tool.name, toolCallId: "t1" });
+        await tool.execute("t1", { value: "the panel verdict" }, new AbortController().signal);
+        listener?.({ type: "agent_end", willRetry: false });
+      },
+      getSessionStats: () => ({ sessionId: "sdk-child", toolCalls: 1, toolResults: 1 }),
+      getLastAssistantText: () => "narrative the host must not accept",
+      getActiveToolNames: () => active,
+      setActiveToolsByName(names) {
+        active = [...names];
+      },
+      exportToJsonl(outputPath) {
+        const target = outputPath ?? path.join(exportDir, "session.jsonl");
+        writeFileSync(target, "{}\n", "utf8");
+        return target;
+      },
+      dispose: vi.fn(),
+      abort: vi.fn(async () => {}),
+    };
+    let capturedOptions: SdkCreateSessionOptionsLike | undefined;
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async (options) => {
+        capturedOptions = options;
+        return { session };
+      },
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(
+      {
+        ...request(),
+        capabilityMode: "tool-free",
+        agent: { ...reviewer, readOnly: true, allowedTools: [], tools: [] },
+        allowedTools: [],
+        customTools: [tool],
+        responseAcceptance: acceptance,
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.text).toBe(JSON.stringify("the panel verdict"));
+    expect(prompts).toBe(1);
+    expect(capturedOptions).toMatchObject({ noTools: "all", tools: [tool.name] });
+    expect(capturedOptions?.customTools?.map(({ name }) => name)).toEqual([tool.name]);
+  });
+
   it("constructs the real SDK resource-loader seam with closed discovery overrides", async () => {
     const fake = fakeSession({
       toolCalls: 0,
@@ -1303,6 +1482,34 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(capturedOptions?.tools).toBeUndefined();
     expect(capturedOptions?.excludeTools).toEqual(["spawn_agent"]);
     expect(capturedOptions?.excludeTools).not.toContain("workflow");
+    // "All tools" is never a bare claim: the receipt names what is still excluded.
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining(['Tool access "*" means every host tool except: spawn_agent.']),
+    );
+  });
+
+  it('names the stacked exclusions in the capability receipt of a tools:["*"] child', async () => {
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "Wide answer." });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+    });
+
+    const result = await executor.run(
+      {
+        ...requestWithSystemPrompt(),
+        agent: { ...reviewer, readOnly: false, allowedTools: ["*"], tools: ["*"] },
+        allowedTools: ["*"],
+        additionalExcludeTools: ["ask"],
+      },
+      new AbortController().signal,
+    );
+
+    expect(result.status).toBe("completed");
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining(['Tool access "*" means every host tool except: ask, spawn_agent.']),
+    );
   });
 
   it("enforces read-only child capabilities and rejects Git mutations without a shell", async () => {
@@ -1516,7 +1723,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       createSession,
       reportsDir: tmpReportsDir(),
       now: () => "fixed",
-      turnTimeoutMs: 5, // times out fast; budget = 5ms * maxTurns
+      childTimeoutMs: 5, // times out fast: the whole child gets 5 ms
     });
 
     const result = await executor.run(request(), new AbortController().signal);
@@ -1546,7 +1753,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     const executor = createAgentSdkSessionExecutor({
       createSession: async () => ({ session }),
       reportsDir: tmpReportsDir(),
-      turnTimeoutMs: 1000,
+      childTimeoutMs: 1000,
     });
     const result = await executor.run({ ...request(), maxTurns }, new AbortController().signal);
     expect(result.status).toBe(status);
@@ -1560,15 +1767,34 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     }
   });
 
-  it("refuses an overflowing computed timer before creating a session", async () => {
-    const createSession = vi.fn<CreateAgentSessionFactory>();
-    const executor = createAgentSdkSessionExecutor({ createSession, turnTimeoutMs: 2_147_483_647 });
+  it("does not multiply the deadline by the turn count any more", async () => {
+    // The former `turnTimeoutMs * maxTurns` turned a legal per-turn value into an
+    // unrepresentable product and refused the child before it started. One number
+    // in, one deadline out: the same inputs now simply run.
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done" });
+    const createSession = vi.fn<CreateAgentSessionFactory>(async () => ({ session }));
+    const executor = createAgentSdkSessionExecutor({
+      createSession,
+      reportsDir: tmpReportsDir(),
+      childTimeoutMs: 2_147_483_647,
+    });
     const result = await executor.run({ ...request(), maxTurns: 2 }, new AbortController().signal);
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("run-policy-blocked");
-    expect(result.reason).toContain("cannot be represented by Node timers");
-    expect(createSession).not.toHaveBeenCalled();
-    expect(result.executedModel).toBeUndefined();
+    expect(result.status).toBe("completed");
+    expect(createSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("honours a deadline longer than one Node timer as a chain of representable waits", async () => {
+    // 48 hours. A single `setTimeout` would clamp this to 1 ms and abort the child
+    // immediately, which is exactly the failure the chain removes.
+    const { session, abortSpy } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done" });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      childTimeoutMs: 48 * 60 * 60 * 1000,
+    });
+    const result = await executor.run(request(), new AbortController().signal);
+    expect(result.status).toBe("completed");
+    expect(abortSpy).not.toHaveBeenCalled();
   });
 
   it("fails closed when the child starts a tool call beyond its configured budget", async () => {
@@ -1588,7 +1814,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       createSession: async () => ({ session }),
       reportsDir: tmpReportsDir(),
       now: () => "fixed",
-      turnTimeoutMs: 60_000,
+      childTimeoutMs: 60_000,
       maxToolCalls: 3,
     });
 
@@ -1598,6 +1824,173 @@ describe("agent SDK session executor (insurance, not proof)", () => {
     expect(result.reason).toContain("exceeded the 3 tool-call budget");
     expect(abortSpy).toHaveBeenCalledTimes(1);
     expect(disposeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses the over-budget tool call before it runs, not after", async () => {
+    // Counting `tool_execution_start` and then aborting told the host a budget had been
+    // breached only once the child had already taken the action — Pi emits that event
+    // before the tool is prepared, so the (N+1)-th `bash` could still execute while the
+    // abort was in flight. Pi's agent loop exposes a pre-dispatch admission hook, so the
+    // refusal now happens there: the extra call never runs, and the named budget stop and
+    // the evidence already gathered are exactly what they were.
+    const executed: string[] = [];
+    const blocked: (string | undefined)[] = [];
+    const hooks: {
+      beforeToolCall?: (
+        context: unknown,
+        signal?: AbortSignal,
+      ) => Promise<{ block?: boolean; reason?: string; terminate?: boolean } | undefined>;
+    } = {};
+    const { session, abortSpy } = fakeSession({
+      toolCalls: 3,
+      toolResults: 2,
+      lastAssistantText: undefined,
+      neverEnds: true,
+    });
+    Object.defineProperty(session, "agent", { value: hooks });
+    const listeners: ((event: SdkAgentSessionEventLike) => void)[] = [];
+    vi.spyOn(session, "subscribe").mockImplementation((fn) => {
+      listeners.push(fn);
+      return () => {
+        listeners.splice(listeners.indexOf(fn), 1);
+      };
+    });
+    vi.spyOn(session, "prompt").mockImplementation(async () => {
+      for (const id of ["t1", "t2", "t3"]) {
+        // Pi's own order: the start event is emitted, THEN the call is prepared and the
+        // admission hook decides whether it may run.
+        for (const listener of [...listeners]) listener({ type: "tool_execution_start", toolName: "bash" });
+        const decision = await hooks.beforeToolCall?.({ toolCall: { id, name: "bash" }, args: {} });
+        if (decision?.block === true) {
+          blocked.push(decision.reason);
+          break;
+        }
+        executed.push(id);
+      }
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      childTimeoutMs: 60_000,
+      maxToolCalls: 2,
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(executed).toEqual(["t1", "t2"]);
+    expect(blocked).toEqual([expect.stringContaining("2 tool-call budget")]);
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("tool-call-budget");
+    expect(abortSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps enforcing the tool budget on a host that exposes no admission hook", async () => {
+    // The fallback stays exactly as it was: no loop object, no veto, and the budget is
+    // still enforced by counting and aborting — one action late, and now documented.
+    const { session } = fakeSession({
+      toolCalls: 3,
+      toolResults: 2,
+      lastAssistantText: undefined,
+      neverEnds: true,
+      events: [
+        { type: "tool_execution_start", toolName: "bash" },
+        { type: "tool_execution_start", toolName: "bash" },
+        { type: "tool_execution_start", toolName: "bash" },
+      ],
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      childTimeoutMs: 60_000,
+      maxToolCalls: 2,
+    });
+
+    const result = await executor.run(request(), new AbortController().signal);
+
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("tool-call-budget");
+  });
+
+  it("ends the loop before the turn that would exceed the assistant-turn budget", async () => {
+    const stopDecisions: boolean[] = [];
+    const hooks: {
+      shouldStopAfterTurn?: (context: unknown, signal?: AbortSignal) => boolean | Promise<boolean>;
+    } = {};
+    const { session } = fakeSession({
+      toolCalls: 1,
+      toolResults: 1,
+      lastAssistantText: undefined,
+      neverEnds: true,
+    });
+    Object.defineProperty(session, "agent", { value: hooks });
+    const listeners: ((event: SdkAgentSessionEventLike) => void)[] = [];
+    vi.spyOn(session, "subscribe").mockImplementation((fn) => {
+      listeners.push(fn);
+      return () => {
+        listeners.splice(listeners.indexOf(fn), 1);
+      };
+    });
+    vi.spyOn(session, "prompt").mockImplementation(async () => {
+      for (let turn = 0; turn < 5; turn += 1) {
+        for (const listener of [...listeners]) listener({ type: "turn_start" });
+        const stop = await hooks.shouldStopAfterTurn?.({ toolResults: [{ role: "toolResult" }] });
+        stopDecisions.push(stop === true);
+        if (stop === true) break;
+      }
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      childTimeoutMs: 60_000,
+    });
+
+    const result = await executor.run({ ...request(), maxTurns: 2 }, new AbortController().signal);
+
+    // Two turns generated, and the third never started.
+    expect(stopDecisions).toEqual([false, true]);
+    expect(result.status).toBe("failed");
+    expect(result.failureCause).toBe("assistant-turn-budget");
+  });
+
+  it("lets a final turn end on its own instead of calling it a turn-budget stop", async () => {
+    const hooks: {
+      shouldStopAfterTurn?: (context: unknown, signal?: AbortSignal) => boolean | Promise<boolean>;
+    } = {};
+    const { session } = fakeSession({
+      toolCalls: 0,
+      toolResults: 0,
+      lastAssistantText: "done",
+      neverEnds: true,
+    });
+    Object.defineProperty(session, "agent", { value: hooks });
+    const listeners: ((event: SdkAgentSessionEventLike) => void)[] = [];
+    vi.spyOn(session, "subscribe").mockImplementation((fn) => {
+      listeners.push(fn);
+      return () => {
+        listeners.splice(listeners.indexOf(fn), 1);
+      };
+    });
+    vi.spyOn(session, "prompt").mockImplementation(async () => {
+      for (const listener of [...listeners]) listener({ type: "turn_start" });
+      // A turn with no tool results: the agent loop was going to stop anyway.
+      const stop = await hooks.shouldStopAfterTurn?.({ toolResults: [] });
+      expect(stop).toBe(false);
+      for (const listener of [...listeners]) listener({ type: "agent_end", willRetry: false });
+    });
+    const executor = createAgentSdkSessionExecutor({
+      createSession: async () => ({ session }),
+      reportsDir: tmpReportsDir(),
+      now: () => "fixed",
+      childTimeoutMs: 60_000,
+    });
+
+    const result = await executor.run({ ...request(), maxTurns: 1 }, new AbortController().signal);
+
+    expect(result.status).toBe("completed");
+    expect(result.text).toBe("done");
   });
 
   it("aborts an in-flight child turn when the signal fires mid-run", async () => {
@@ -1618,7 +2011,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
       createSession: async () => ({ session }),
       reportsDir: tmpReportsDir(),
       now: () => "fixed",
-      turnTimeoutMs: 60_000, // long enough that the abort, not the timeout, wins
+      childTimeoutMs: 60_000, // long enough that the abort, not the timeout, wins
     });
 
     const result = await executor.run(request(), controller.signal);
@@ -1644,7 +2037,7 @@ describe("agent SDK session executor (insurance, not proof)", () => {
         createSession: async () => ({ session }),
         reportsDir: tmpReportsDir(),
         now: () => "fixed",
-        turnTimeoutMs: 60_000,
+        childTimeoutMs: 60_000,
         live: { rowId: "fleet-cancel-row", label: "cancel me" },
       });
 

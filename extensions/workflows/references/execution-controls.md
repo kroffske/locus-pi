@@ -1,14 +1,14 @@
 # Execution controls and mapping identity
 
-Audience: workflow authors and launcher/UI integrators. Runtime owners: `workflow-runtime.ts`, `workflow-budget.ts`, `workflow-journal.ts`; the [existing runtime manual](../REFERENCE.md) owns unchanged APIs/defaults.
+Audience: workflow authors and launcher/UI integrators. Runtime owners: `workflow-runtime.ts`, `workflow-budget.ts`, `workflow-journal.ts`; the [existing runtime manual](../REFERENCE.md) owns the unchanged APIs and the run-budget axes.
 
 ## Existing parallel with explicit options
 
-`parallel(thunks, { concurrency?, keys?, title? })` keeps its existing one-argument behavior. Options are closed. Concurrency is a positive safe integer. The default local scheduling width is unchanged; an explicit width changes this group's local scheduling only. Every physical child must still acquire the shared global leaf gate. A group wrapper reserves no agent slot, so nested groups do not deadlock by holding parent slots while waiting for children.
+`parallel(thunks, { concurrency?, keys?, title? })` keeps its existing one-argument behavior. Options are closed. Concurrency is a positive safe integer. A group without one is scheduled at the run's own effective concurrency — there is no second, private scheduling width beside it — and an explicit `concurrency` changes this group's local scheduling only. Every physical child must still acquire the shared global leaf gate. A group wrapper reserves no agent slot, so nested groups do not deadlock by holding parent slots while waiting for children.
 
-`keys` must be a full ordered list matching the number of branches, locally unique, nonblank, at most 240 characters per key and without control characters. Validation happens before any member starts. Nested business identity is the complete path; unkeyed nested levels contribute an explicit positional component. Keyed paths participate in replay request identity. Reordered keys do not silently reuse another item's answer. Unkeyed old calls retain their existing canonical shape.
+`keys` must be a full ordered list matching the number of branches, locally unique, nonblank and free of control characters. There is no length ceiling on a key: control characters are refused because a key enters branch identity and the replay key, while length was never an identity property, and an awkwardly long title is a display problem the renderer already solves by clipping what it draws. Validation happens before any member starts. Nested business identity is the complete path; unkeyed nested levels contribute an explicit positional component. Keyed paths participate in replay request identity. Reordered keys do not silently reuse another item's answer. Unkeyed old calls retain their existing canonical shape.
 
-`title` is bounded display text. A child `agent(..., { label, title })` keeps a literal callsite label and may derive title from author-known records. Titles do not affect replay identity. `parallel` results are in input order, not completion order; files and other effects are not implicitly ordered.
+`title` is display text under the same rule: non-blank, no control characters, no length ceiling. A child `agent(..., { label, title })` keeps a literal callsite label and may derive title from author-known records. Titles do not affect replay identity. `parallel` results are in input order, not completion order; files and other effects are not implicitly ordered.
 
 ```js
 const FIELDS = [
@@ -29,9 +29,11 @@ This is the existing `parallel` primitive, not a new `parallel.map`. `pipeline` 
 
 ## Shared run budget at the tool boundary
 
-The existing `workflow` tool accepts optional `budget` with the existing seven axes: concurrency, totalAgents, runtimeMs, timeoutMs, toolCalls, turns and answerChars. Values are validated by the same runtime budget owner and displayed in the approval details. There is no second adaptive budget and no USD-cost claim. The command launcher carries this object for structured callers; the slash CLI syntax has not gained budget flags.
+The existing `workflow` tool accepts optional `budget` with the six axes: concurrency, totalAgents, runtimeMs, timeoutMs, toolCalls and turns. There is no answer-size axis: a run does not bound how LONG an answer may be, and a real size limit is declared on the call as a consumer contract (`output.maxLength`, or `maxLength`/`maxItems` inside a `schema`). A budget object that still carries `answerChars` is refused by name rather than ignored. Values are validated by the same runtime budget owner and displayed in the approval details. There is no second adaptive budget and no USD-cost claim. The command launcher carries this object for structured callers; the slash CLI syntax has not gained budget flags.
 
-For the three-round refinement example with tool-return decisions, `totalAgents: 9` permits at most nine physical workflow children when transport retries are not enabled. In-session corrections still consume that child's cumulative turns/tools/time. With legacy text choice repair, reserve up to twelve physical children instead. Choose time/tool/answer bounds for the actual workload; do not reinterpret the package emergency defaults as an economical policy.
+For the three-round refinement example, `totalAgents: 9` permits at most nine physical workflow children when transport retries are not enabled. Every shaped decision is corrected inside its own child session, so a format correction never costs another physical child — it consumes that child's cumulative turns/tools/time.
+
+Every axis is explicit or absent. The package declares no default for any of them: an axis nobody set is **unbounded**, the run header and journal print it as `unbounded`, and the run stops on an axis only when someone chose a number for it. So choose time, tool and agent bounds for the actual workload — a headless run left entirely unbounded will keep spending until the work ends or the operator stops it. Reaching a declared bound is _stopped by budget_: the answers and artifacts produced up to that point are kept, and none of them is retroactively wrong. See [the principle](output-acceptance.md#the-principle) and [run budget](../REFERENCE.md#run-budget).
 
 A complete structured invocation can narrow the budget, for example:
 
@@ -45,8 +47,7 @@ A complete structured invocation can narrow the budget, for example:
     "runtimeMs": 600000,
     "timeoutMs": 180000,
     "toolCalls": 100,
-    "turns": 10,
-    "answerChars": 30000
+    "turns": 10
   }
 }
 ```

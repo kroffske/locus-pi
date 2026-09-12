@@ -32,10 +32,14 @@ export default async function runWorkflow(dsl, input) {
         "Do not repeat completed work or drop unmet requirements to fit the allowance. Return no items only when no work remains. " +
         "Return proposed scope changes as explicit unresolved work for the owner; do not authorize them.",
       {
+        // `handoffs` declares the TYPE of this answer: an array of complete, non-blank
+        // work briefs the script indexes and passes on. It declares no count and no item
+        // length, because no consumer here has one: the loop takes `queue[0]` and carries
+        // the rest to the owner. A ceiling would ask this stage to drop unmet requirements
+        // to fit a number, which is exactly what its prompt forbids.
         label: "cut",
         title: `Re-cut remaining work after ${completed} slices`,
-        handoffs: { maxItems: 100 },
-        returnVia: "tool",
+        handoffs: {},
       },
     );
     const scopeAssessment = await dsl.agent(
@@ -50,7 +54,6 @@ export default async function runWorkflow(dsl, input) {
       label: "scope",
       title: "Route remaining scope",
       choice: ["work", "complete", "needs_owner", "blocked"],
-      returnVia: "tool",
     });
     if (scope === "needs_owner" || scope === "blocked") {
       return { ok: false, status: scope, remaining: queue, lastAccepted, baseline, scopeAssessment };
@@ -86,7 +89,6 @@ export default async function runWorkflow(dsl, input) {
           label: "verdict",
           title: "Route final delivery",
           choice: ["complete", "incomplete", "needs_owner"],
-          returnVia: "tool",
         },
       );
       const evidence = dsl.publishPrimaryArtifact("implementation-handoff.md", finalDecision);
@@ -145,7 +147,6 @@ export default async function runWorkflow(dsl, input) {
           label: "route",
           title: "Route slice decision",
           choice: ["accept", "fix", "retry_review", "needs_owner", "stop"],
-          returnVia: "tool",
         });
         if (route === "needs_owner" || route === "stop")
           return { ok: false, status: route, remaining: queue, currentWork, history, baseline, decision };

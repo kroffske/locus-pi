@@ -111,9 +111,21 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
   if (journal.length === 0 && !summary.hasResult) {
     return workflowWarningBlock(`Workflow run not found: ${runId}`, "Recovery: /workflows status");
   }
+  // What the run was ALLOWED to spend, beside what it spent. An undeclared axis
+  // reads `unbounded`, which is the one fact a headless operator cannot infer from
+  // anything else in this block: nothing on that axis will stop the run.
+  const appliedBudgetLine =
+    persisted?.budget === undefined
+      ? null
+      : `budget applied: ${Object.entries(persisted.budget)
+          .map(([axis, value]) => `${axis}=${String(value)}`)
+          .join(" ")}`;
   const budgetLine =
     summary.usage !== null
-      ? `budget: tokens=${summary.usage.totalTokens} (in ${summary.usage.input} / out ${summary.usage.output}) cost=$${summary.usage.costTotal.toFixed(4)}`
+      ? `budget: tokens=${summary.usage.totalTokens} (in ${summary.usage.input} / out ${summary.usage.output}) ` +
+        // The host reports no price. "unavailable" is the honest word; "$0.0000"
+        // told every reader the run was free.
+        `cost=${summary.usage.costTotal === undefined ? "unavailable" : `$${summary.usage.costTotal.toFixed(4)}`}`
       : null;
   // Stated as evidence provenance, not as a performance note: these agents did
   // not run in this run, so this run's green is partly inherited.
@@ -184,6 +196,7 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
             : [compactWorkflowLine(formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref))]),
           ...(phaseLine === null ? [] : [compactWorkflowLine(phaseLine)]),
           ...(replayLine === null ? [] : [compactWorkflowLine(replayLine)]),
+          ...(appliedBudgetLine === null ? [] : [compactWorkflowLine(appliedBudgetLine)]),
           ...(budgetLine === null ? [] : [compactWorkflowLine(budgetLine)]),
           compactWorkflowLine(compactResult),
           ...failureLines,
@@ -200,6 +213,7 @@ export function buildRunDetailBlock(projectRoot: string, runId: string, compact 
             : [formatOperatorScriptIdentity(scriptIdentity, persisted?.target?.ref)]),
           ...(phaseLine === null ? [] : [phaseLine]),
           ...(replayLine === null ? [] : [replayLine]),
+          ...(appliedBudgetLine === null ? [] : [appliedBudgetLine]),
           ...(budgetLine === null ? [] : [budgetLine]),
           resultDetail,
           ...failureLines,

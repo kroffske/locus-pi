@@ -7,8 +7,9 @@ This is the advanced implementation reference for the `workflows` extension. New
 This file remains the compatibility index and owner of unchanged DSL semantics
 and numeric defaults. New, separately owned extensions are:
 
-- [Output acceptance](references/output-acceptance.md): opt-in `workflow_return`,
-  same-session clarification and persisted decision origin; no new global judge.
+- [Output acceptance](references/output-acceptance.md): `workflow_return`, the only
+  transport for a shaped result, with same-session clarification and persisted
+  decision origin; no new global judge.
 - [Execution controls](references/execution-controls.md): local concurrency,
   business keys/titles, branch phases, queued/started evidence and tool budget.
 - [Recovery and continuation](references/recovery-and-continuation.md): explicit
@@ -35,11 +36,13 @@ One way a workflow reaches a model:
 - **`agent()`** — spawns a full catalog or workflow-local child session and returns
   its exact non-empty final text, routed through the same code path as the `task`
   tool. With `opts.choice` it returns one declared exact string; with
-  `opts.handoffs` it returns a bounded list of complete text work units. Both use
-  the runtime-owned repair path. A choice, a handoff list or a compatibility
-  schema may opt into `returnVia: "tool"`, which validates the value inside one
-  child session; see [output acceptance](references/output-acceptance.md). Trusted compatibility scripts may still use
-  `opts.schema` for a larger validated value.
+  `opts.handoffs` it returns a list of complete text work units. Every shaped
+  call — `choice`, `handoffs`, `output` and the compatibility `schema` — is
+  carried by the same same-session acceptance tool, which validates the value
+  inside the one child session that produced it; see
+  [output acceptance](references/output-acceptance.md). There is no text-parsed
+  transport and no fresh-child format repair. Trusted compatibility scripts may
+  still use `opts.schema` for an arbitrary validated value.
 - **`fusion()`** — validates a panel of 2–10 explicit model selectors and one
   homogeneous capability mode, runs isolated members, and asks a separate judge
   call for one final answer. `mode: "tool-free"` gives every leg an empty active
@@ -360,7 +363,7 @@ operator explicitly enables it.
 
 ```text
 /fusion                                      # interactive menu or passive status
-/fusion configure                            # choose one mode, 2–10 members, and one judge
+/fusion configure                            # choose one mode, at least 2 members, and one judge
 /fusion set --mode tool-free --members provider/a,provider/b --judge provider/judge
 /fusion enable
 /fusion disable
@@ -571,9 +574,11 @@ Authors can add or connect deterministic text evidence through four surfaces:
 - `agent(prompt, { artifact: "report.md" })` names the automatic answer artifact.
   Without `artifact`, the runtime derives a safe name from the label or agent.
 
-Artifact names are 1-128 ASCII characters, begin with a letter or digit, and
-otherwise contain only letters, digits, `.`, `_`, or `-`; they are logical names,
-not paths. Text artifacts are limited to 2 MiB. Repeated logical names are
+Artifact names are display labels: any non-empty text that is not itself a path
+(no separators, no control characters). The storage identity is `artifactId`,
+which the runtime generates and which every file path is derived from, so a name
+needs no alphabet or length policy. Text artifacts carry no size policy: a write
+that cannot be stored fails with the real storage error. Repeated logical names are
 allowed because `artifactId` is the portable identity; duplicate artifact ids or
 destinations are refused. The source run target and source artifact kind/stage
 returned by `consumeTextArtifact()` let a consumer enforce workflow-specific
@@ -584,7 +589,7 @@ that referenced bytes were the terminal string output rather than merely a
 same-name indexed artifact.
 
 The artifact index is single-owner and append-only during a run. External index
-changes, duplicate identities, symlink escapes, unsafe names, oversized text,
+changes, duplicate identities, symlink escapes, unsafe names,
 tampered bytes, or malformed transcript headers fail closed.
 The same owner resolves the project root and rejects symlinks in every ancestor
 through the selected execution directory before any artifact read, write, or
@@ -594,12 +599,17 @@ children and resume attempts live below that group at
 
 At run completion, `runtime/result.json` and the model-callable `workflow` tool project
 up to the newest 20 explicitly published/primary refs as `artifactRefs`; an
-`artifactRefsOmitted` count makes truncation explicit. Each projected item is the
+`artifactRefsOmitted` count makes the omission explicit. Each projected item is the
 same complete `{runId, artifactId, name, sha256}` identity verified by the index.
-This bounded projection is the handoff for a later workflow; the full inventory
-remains in `runtime/artifacts/index.json` for inspection only. The caller must use a
-terminally projected ref, not infer an id from a logical filename or consume an
-index-only record.
+
+That projection is a summary for display, not an admission list. Consumption
+resolves any artifact of the source run through the full verified index in
+`runtime/artifacts/index.json`: `consumeTextArtifact()` checks the id, the byte
+digest and the source run's terminal envelope, so an artifact published earlier
+than the newest twenty stays consumable for as long as its bytes exist. An
+operator handoff is likewise built from the run's complete published/primary set.
+The caller must still use a complete verified ref, never an id inferred from a
+logical filename.
 
 In an interactive Pi TUI, `/workflows dashboard`, `/workflows status`, and
 `/workflows status <runId>` open the persisted run viewer. It navigates
@@ -764,10 +774,14 @@ remains the compatibility/script-result boolean. `dsl.awaitOperator({ reason,
 operatorHandoff? })` records one bounded run-local declaration and does not
 modify the script's returned `result`; the last declaration wins. A reason-only
 declaration remains readable but is not directly actionable.
-`operatorHandoff` declares a title, one or more bounded select/text questions,
-and exact continuation artifact refs owned by the current run. A question may
-also name one unchanged published ref as `detailArtifactRef`, but that ref must
-appear in the same continuation list. The runner
+`operatorHandoff` declares a title, one or more select/text questions, and exact
+continuation artifact refs owned by the current run. Identity, types, uniqueness
+and confinement are checked; the human-facing text is not counted. There is no
+maximum number of questions, options or refs, and no character ceiling on a
+title, prompt or option label — a surface that can only draw so much bounds its
+own rendering and says how much it left out. A question may also name one
+unchanged published ref as `detailArtifactRef`, but that ref must appear in the
+same continuation list. The runner
 supplies the version, stable handoff id, origin, and verified
 self-contained-static target/script identity. At finalization, controlling
 signal cancellation wins over failure, failure wins over a handoff declaration,
@@ -1009,7 +1023,7 @@ opening a human launch prompt.
 ```
 
 The tool's `input` is the same optional semantic string as `/workflows run`,
-bounded at 16000 characters and preserved unchanged. `items` is a separate
+preserved unchanged and not bounded by a character count. `items` is a separate
 optional array of strings exposed as a frozen snapshot by `dsl.items()`. It
 preserves order and exact values, including whitespace, empty strings, and
 duplicates, and adds no count or character limit. The tool's strict
@@ -1365,9 +1379,11 @@ own locations.
 
 ### Workflow input and host continuation
 
-`input` is absent or one semantic string of at most 16000 characters, handed to
+`input` is absent or one semantic string of any length, handed to
 `runWorkflow(dsl, input)` unchanged by the tool and outer-trimmed only by the
-slash-command parser. It contains the operator request or answers. It is not a
+slash-command parser. The runtime declares no character ceiling on it: an input
+too large for a model is a provider-side failure with real evidence, not a
+runtime guess made before the run starts. It contains the operator request or answers. It is not a
 JSON command, marker grammar, or generic parameter bag. An object is rejected by
 the tool schema and guarded again by the runner; nested `dsl.workflow()` calls
 have the same string-only bound before their callback starts.
@@ -1501,12 +1517,11 @@ Fusion defaults to prompt-only context and never reads ambient chat history.
 Explicit `context: { mode: "provided", text }` is copied verbatim into the
 Fusion packet artifact. When reconnaissance is needed, run it as an ordinary
 visible `agent()` or child-workflow stage and pass its bounded text through this
-explicit context field; Fusion does not discover it automatically. Member
-answers default to 8,000 characters, the judge
-answer to 16,000, and the complete judge prompt has a fixed 160,000-character
-ceiling. All declared members are required; a member failure stops before the
-judge runs. Larger panels may need a lower member answer bound because preflight
-reserves the worst-case escaped candidate size. The production runner resolves
+explicit context field; Fusion does not discover it automatically. No character
+cap applies to a member answer, to the judge answer, or to the assembled judge
+prompt: a panel returns what its members wrote. A panel declares at least two
+members. All declared members are required; a member failure stops before the
+judge runs. The production runner resolves
 all declared model selectors before the first child, and overlapping Fusion
 calls reserve their complete worst-case invocation counts atomically. A resume
 tries recorded answers without requiring the old models to remain configured;
@@ -1517,8 +1532,8 @@ the declared mode and exact host readback in per-call evidence, the workflow
 journal, and the readable run report. Run without `--resume` to execute a new
 panel.
 
-`awaitOperator()` accepts exactly one non-empty compact reason of at most 200
-characters. It is a control declaration, not model output and not a thrown
+`awaitOperator()` accepts exactly one non-empty reason, of any length. It is a
+control declaration, not model output and not a thrown
 pause. Call it only after durable handoff artifacts exist, immediately before
 returning the unchanged handoff payload. An abort or semantic/infrastructure
 failure still wins at finalization. Under the run-level no-operator mode
@@ -1612,7 +1627,8 @@ the Package entry first and then requires the child launch to match that exact
 canonical path and source hash, so a higher-precedence shadow fails closed rather
 than replacing the installed child.
 The root and children share cancellation, global concurrency, one physical-call
-counter, one 24-hour emergency deadline, and one fenced workflow-workspace lease.
+counter, whatever run deadline the launch declared (none by default), and one
+fenced workflow-workspace lease.
 The lease excludes concurrent runs on the same namespace and prevents a stale
 owner from committing a checkpoint after takeover. Keys are compact stable
 identities, not payloads.
@@ -1748,28 +1764,27 @@ contract, not an enforcement or security boundary.
 
 `opts` for `agent()`:
 
-| Field              | Type                                   | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------ | -------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `agent`            | string                                 | — (clean child)                       | Optional project/user catalog name. Omit it to run without a role profile.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `ask`              | `true`                                 | — (off)                               | Lets THIS child ask the operator live clarifying questions through the injected `workflow_ask` tool: the question renders in the parent session, the answer returns as the tool result, and the same child continues. Interactive parents only — with no UI the call **fails closed** with `failureCause: "ask-unavailable"`. See "Live operator questions" below.                                                                                                                                                                       |
-| `maxToolCalls`     | positive safe integer                  | 1,000 tool calls per attempt          | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary.                                                                                                                                                                                                                                                                                                                                                                  |
-| `timeoutMs`        | integer 1..2147383628                  | 24 hours per attempt                  | Emergency fuse for one child attempt, not an ordinary task deadline. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child.                                                                                                                                                                                                                                                                                                             |
-| `maxTurns`         | positive safe integer                  | 1,000 turns per attempt               | Cumulative SDK model cycles for one child, including tool use and output clarification; not workflow restarts or returned answers. Applies to text and tool-return paths. The computed timeout/turn pair must fit Node timers.                                                                                                                                                                                                                                                                                                           |
-| `maxAnswerChars`   | positive safe integer                  | 500,000 characters per answer         | Runtime answer fuse, also enforced on replayed answers. Omit a per-call override unless an explicit user budget or measured consumer constraint requires it; ordinary narrative needs no author-guessed length target.                                                                                                                                                                                                                                                                                                                   |
-| `attempts`         | safe integer 1–3                       | `1`                                   | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, outside 1–3. Never re-asks an answer the child did produce.                                                                                                                                                                                                                                                                                                        |
-| `label`            | string                                 | —                                     | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `artifact`         | string                                 | safe label or agent name              | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `phase`            | string                                 | current phase                         | Overrides the active phase tag                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `workspaceMode`    | string                                 | `"project"`                           | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                                                                                                                                                                                                                                                                                                                                                                      |
-| `workspaceHandle`  | string                                 | —                                     | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `sandbox`          | string                                 | —                                     | Deprecated workspace alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `workspaceMode` wins. It does not restrict tools.                                                                                                                                                                                                                                                                                                                                        |
-| `model`            | string                                 | the resolved tier, else session model | Per-call CONCRETE selector `provider/id` with an optional `:off\|minimal\|low\|medium\|high\|xhigh` child reasoning-effort suffix. The resolved model and requested effort are passed to the child session. A selector this host's registry cannot resolve **fails the call** by name, with no child spawned — it never falls back to `ctx.model`.                                                                                                                                                                                       |
-| `modelRole`        | string                                 | the resolved tier, else session model | Per-call TIER: a name in the roles table (`smol`, `slow`, `task`, …), never a provider selector. The package ships no assignments, so an operator layer has to say what the name means; a role nothing assigns degrades to `ctx.model` and records `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run report. A role that IS assigned but whose value is not a parseable selector is a config error, not an unassigned role: it fails the call by name, quoting the value and the layer.                      |
-| `requireModelRole` | `true`                                 | absent                                | Requires an explicit `modelRole` on the same call, cannot be combined with `model`, and refuses an unassigned role before a fresh child starts. Use only when the stage's evidence contract depends on the declared tier; ordinary portable workflows keep the recorded session-model fallback. The flag is part of replay identity and appears on `agent_start`; replay starts no child and may reuse original evidence.                                                                                                                |
-| `choice`           | string[] (2–32 unique values)          | none                                  | **Standard machine-routing form.** Desugars to a string-enum schema before request canonicalization, so repair, replay, journal evidence, budgets, and fail-closed exhaustion are identical to the existing shape path. Cannot be combined with `schema` or `validate`.                                                                                                                                                                                                                                                                  |
-| `handoffs`         | `{minItems?, maxItems, maxItemChars?}` | none                                  | **Standard dynamic-decomposition form.** Returns 0–100 complete non-blank text units with author-declared bounds; defaults to `minItems: 0` and `maxItemChars: 8000`, requiring a positive safe integer and a safely representable canonical JSON allowance. Desugars to the existing unique trimmed string-array schema path, so runtime owns repair, replay, evidence, budgets, and fail-closed exhaustion. Cannot be combined with `choice`, `schema`, or `validate`. May opt into `returnVia: "tool"` for same-session shape repair. |
-| `schema`           | object (JSON Schema)                   | none                                  | **Advanced compatibility.** Declare an arbitrary answer shape: the call returns the validated value instead of text, retries up to `SCHEMA_MAX_ATTEMPTS`, and throws `SchemaValidationError` on exhaustion. Standard generated source uses `choice` instead. May opt into `returnVia: "tool"` (same validator, one child session); `validate` is not available there.                                                                                                                                                                    |
-| `validate`         | `(value) => string[]`                  | none                                  | **Advanced compatibility, requires `schema`.** Cross-field rules the subset cannot declare. Runs only on a schema-valid parsed value; a non-empty return re-asks the child in its own labelled block. Standard generated source does not emit validators.                                                                                                                                                                                                                                                                                |
+| Field              | Type                        | Default                               | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------ | --------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`            | string                      | — (clean child)                       | Optional project/user catalog name. Omit it to run without a role profile.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `ask`              | `true`                      | — (off)                               | Lets THIS child ask the operator live clarifying questions through the injected `workflow_ask` tool: the question renders in the parent session, the answer returns as the tool result, and the same child continues. Interactive parents only — with no UI the call **fails closed** with `failureCause: "ask-unavailable"`. See "Live operator questions" below.                                                                                                                                                  |
+| `maxToolCalls`     | positive safe integer       | — (unbounded)                         | Per-child-attempt runaway safety fuse. Do not set it to zero. The first over-budget tool start aborts the child; this is not a normal work target or security boundary. Absent means no counter at all.                                                                                                                                                                                                                                                                                                             |
+| `timeoutMs`        | positive safe integer       | — (unbounded)                         | Wall clock for one child attempt, operator `ask` waits included. On expiry the runtime **aborts the child** and the call fails closed; it never resolves to a partial answer. `maxToolCalls` cannot end a stalled child. A value above Node's maximum timer delay runs as a chain of representable waits.                                                                                                                                                                                                           |
+| `maxTurns`         | positive safe integer       | — (unbounded)                         | Cumulative SDK model cycles for one child, including tool use and output clarification; not workflow restarts or returned answers. Applies to text and tool-return paths. It is a separate axis from `timeoutMs` and is never multiplied by it.                                                                                                                                                                                                                                                                     |
+| `attempts`         | positive safe integer       | `1`                                   | Physical child attempts for this one call when the **transport** failed — the child never got to answer, or lost the channel while answering. Refused, never clamped, when it is not a positive safe integer. Never re-asks an answer the child did produce.                                                                                                                                                                                                                                                        |
+| `label`            | string                      | —                                     | Journal / UI label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `artifact`         | string                      | safe label or agent name              | Logical name for the exact automatic answer artifact. It must be a safe single component; transcript/result names derive from it.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `phase`            | string                      | current phase                         | Overrides the active phase tag                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `workspaceMode`    | string                      | `"project"`                           | Workspace intent: `"project"`, `"worktree"`, or `"temporary-worktree"`. Worktree modes allocate an isolated git worktree for file-change review UX.                                                                                                                                                                                                                                                                                                                                                                 |
+| `workspaceHandle`  | string                      | —                                     | Opaque handle returned by `workspace(label, ref)`; reuses one runtime-owned linked worktree across agent calls.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `sandbox`          | string                      | —                                     | Deprecated workspace alias. `"read-only"` maps to `workspaceMode: "project"`; `"workspace-write"` maps to `workspaceMode: "worktree"`. Explicit `workspaceMode` wins. It does not restrict tools.                                                                                                                                                                                                                                                                                                                   |
+| `model`            | string                      | the resolved tier, else session model | Per-call CONCRETE selector `provider/id` with an optional `:off\|minimal\|low\|medium\|high\|xhigh` child reasoning-effort suffix. The resolved model and requested effort are passed to the child session. A selector this host's registry cannot resolve **fails the call** by name, with no child spawned — it never falls back to `ctx.model`.                                                                                                                                                                  |
+| `modelRole`        | string                      | the resolved tier, else session model | Per-call TIER: a name in the roles table (`smol`, `slow`, `task`, …), never a provider selector. The package ships no assignments, so an operator layer has to say what the name means; a role nothing assigns degrades to `ctx.model` and records `modelRoleFallback` on `agent_end`, in the run-result artifact and in the run report. A role that IS assigned but whose value is not a parseable selector is a config error, not an unassigned role: it fails the call by name, quoting the value and the layer. |
+| `requireModelRole` | `true`                      | absent                                | Requires an explicit `modelRole` on the same call, cannot be combined with `model`, and refuses an unassigned role before a fresh child starts. Use only when the stage's evidence contract depends on the declared tier; ordinary portable workflows keep the recorded session-model fallback. The flag is part of replay identity and appears on `agent_start`; replay starts no child and may reuse original evidence.                                                                                           |
+| `choice`           | string[] (2+ unique values) | none                                  | **Standard machine-routing form.** The declared members travel in the return contract, and the child submits one of them through the acceptance tool, so replay, journal evidence, budgets and fail-closed exhaustion are the ordinary shaped path. There is no ceiling on the number of options and no length limit on one option. Cannot be combined with `schema`, `handoffs`, `output` or `validate`.                                                                                                           |
+| `handoffs`         | `{minItems?, maxItems?}`    | none                                  | **Standard dynamic-decomposition form.** Returns complete non-blank text units. Both bounds are optional author declarations about the CONSUMER (`minItems` defaults to 0; omitting `maxItems` accepts any number of items), and there is no per-item character bound — `maxItemChars` is refused by name. Runtime owns acceptance, replay, evidence, budgets and fail-closed exhaustion. Cannot be combined with `choice`, `schema`, `output` or `validate`.                                                       |
+| `schema`           | object (JSON Schema)        | none                                  | **Advanced compatibility.** Declare an arbitrary answer shape: the call returns the validated value instead of text, corrects the format inside the same child session, and throws `SchemaValidationError` when the contract is exhausted. Standard generated source uses `choice` instead. `validate` is available alongside it.                                                                                                                                                                                   |
+| `validate`         | `(value) => string[]`       | none                                  | **Advanced compatibility, requires `schema`.** Cross-field rules the subset cannot declare. Runs on a schema-valid value; a non-empty return asks the same child to correct it in its own labelled block. Standard generated source does not emit validators.                                                                                                                                                                                                                                                       |
 
 Standard workflows inherit the full host-exposed tool surface and the parent
 permission mode; agent catalog roles choose prompt/model identity, not
@@ -1787,27 +1802,34 @@ the provider stopped at its output-token limit. The host therefore fails that
 agent call as `provider-error` and preserves the transcript evidence instead of
 publishing the partial answer or passing it to the next workflow stage.
 
-Every default above comes from ONE object — `DEFAULT_WORKFLOW_BUDGET` in
-`extensions/workflows/runtime/workflow-budget.ts` — which the runner applies to every run.
-An explicit per-call value always wins: below the default it applies silently,
-above it the runtime writes a journal line naming the axis, the default and the
-requested value. There is no small authoring ceiling such as the former 100-call cap.
+None of these axes has a package default. An axis nobody declared — on the run or
+on the call — is unbounded, and the run header prints the word. `workflow-budget.ts`
+owns the axis list and the one package value (`concurrency`), and the runner applies
+whatever the launch declared. An explicit per-call value always wins: below the
+run-level one it applies silently, above it the runtime writes a journal line naming
+the axis, the applied value and the requested one.
 See "Run budget" for the run-level axes and for what the report shows.
 
 **CLI provider request timeout.** For a resolved model whose `baseUrl` uses `cli://`, the SDK child receives the declared `timeoutMs` as its provider request timeout through an in-memory child settings overlay. This prevents Pi's implicit 300,000 ms HTTP idle default from limiting a whole nested CLI agent run. An explicit smaller provider setting, HTTP idle setting (when no provider setting overrides it), or per-request timeout remains effective. Zero HTTP idle timeout means disabled, as in Pi. The adapter may enforce its own smaller process limit. Native HTTP providers, retries, abort propagation, saved settings, and replay inputs keep their existing behavior.
 
 **Replay policy for the bounds.** `timeoutMs` and `maxTurns` are part of the
 canonical request, exactly like `maxToolCalls`: they shape execution, so changing
-one makes a different call and the earlier record is not reused. Because
-`timeoutMs` and `maxTurns` gained package defaults, records written before those
-defaults existed are no longer replayed — reusing them would serve text produced
-by an unbounded child as if a fuse had been in force. `maxAnswerChars` is
-deliberately _not_ part of the request — it is a runtime gate applied to whatever
-answer arrives, fresh or replayed, so an old recording stays replayable and a
-tightened bound fails the run loudly instead of passing text the next stage
-cannot hold.
+one makes a different call and the earlier record is not reused. A record written
+while a package default was in force therefore does not match a run that declares
+nothing, and vice versa — reusing it would serve text produced under one fuse as if
+another had been in force. The record stays readable and the boundary is named.
+There is no answer-size
+gate at all any more: the runtime never rejects an answer, fresh or replayed, for
+its length. A real size limit belongs to a consumer and is declared as one
+(`output.maxLength`, or `maxLength` / `maxItems` inside a `schema`), where the
+child is told about it and can correct the value in the same session.
 
-`attempts` follows `maxAnswerChars`, not `timeoutMs`: it never joins the canonical
+The shaped **return contract** is part of the request, and it carries a version.
+A record written under contract v1 no longer matches a v2 key; the replay reports
+`return-contract-changed`, names the release boundary in the journal, and runs
+that call fresh instead of blaming the script for a key mismatch it did not cause.
+
+`attempts` does not follow `timeoutMs`: it never joins the canonical
 request, so a recording written before the option existed still replays, and a call
 that adds a retry budget keeps the key it already had. The retry itself is invisible
 to replay by construction — the replay envelope opens once per **logical** `agent()`
@@ -1821,23 +1843,23 @@ The runtime has exactly two retry loops, and they answer different questions. Ne
 re-asks a child because its prose was thin: when an answer needs judging, the answer is
 another agent whose job is that judgement.
 
-| Loop                             | Question it answers                                             | Declared by                                    | Bound                                     | On exhaustion                                   |
-| -------------------------------- | --------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------- | ----------------------------------------------- |
-| **Value repair** (pre-existing)  | "The child answered — is the answer the declared choice/shape?" | `choice`, or advanced `schema` plus `validate` | 2 attempts, 3 when `validate` is declared | `SchemaValidationError`                         |
-| **Transport retry** (`attempts`) | "Did the child get to answer at all?"                           | `attempts`                                     | the declared 1–3                          | the call fails closed with the last cause named |
+| Loop                             | Question it answers                                             | Declared by                                    | Bound                                                                                                                  | On exhaustion                                   |
+| -------------------------------- | --------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| **Value repair** (pre-existing)  | "The child answered — is the answer the declared choice/shape?" | `choice`, or advanced `schema` plus `validate` | one same-session clarification turn by package default; `repair.maxAttempts` sets more, with no package upper bound    | `SchemaValidationError`                         |
+| **Transport retry** (`attempts`) | "Did the child get to answer at all?"                           | `attempts`                                     | exactly what the author declared — explicit only, with no package upper bound; an undeclared `attempts` is one attempt | the call fails closed with the last cause named |
 
 The value repair is described under [exact choice](#standard-exact-choice--agent-choice)
 and [advanced shaped answers](#advanced-compatibility-shaped-answers--agent-schema)
-below. It re-sends a **different** prompt — the previous validator errors
-come back to the child in a labelled repair block — so each of its attempts is its own
-logical call with its own replay ordinal. The transport retry re-sends the **identical**
-prompt, because there is nothing to repair: the child never answered.
+below. It stays inside the same child session — the previous validator errors come back
+to the child as a clarification turn, so no fresh child is spawned to fix the shape of an
+answer that already exists. The transport retry re-sends the **identical** prompt in a new
+child, because there is nothing to repair: the child never answered.
 
-The two multiply rather than add. A shaped call declaring `validate` and `attempts: 2`
-can run up to `2 x 3 = 6` children, and every one of them is charged to
-`maxTotalAgentInvocations` and writes its own transcript and result envelope. A transport
-budget exhausted inside a shape attempt ends the run there rather than handing the shape
-loop a rejected answer — there is no answer to reject.
+The two do not multiply children. A shaped call declaring `attempts: 2` can run at most
+two children, each charged to `totalAgents` with its own transcript and result envelope;
+clarification turns happen inside whichever child answered. A transport budget exhausted
+before an answer ends the run there rather than handing the acceptance path a rejected
+answer — there is no answer to reject.
 
 **Which failures the transport retry owns.** An allowlist of two named causes, not
 "everything the never-retry list forgot":
@@ -1939,11 +1961,16 @@ rules:
 - **Concurrent questions queue FIFO.** One workflow question is mounted at a
   time; children asking in parallel are serialized oldest-first, and a question
   evicted by the operator's own editor interaction is re-mounted, not dropped.
-- **The fuse pauses while the operator thinks.** The per-call `timeoutMs` fuse
-  measures the child's effective run time, not the human's thinking time. The
-  SDK backstop cannot pause, so an `ask: true` call widens it by a fixed
-  24-hour allowance; a single wait longer than that still dies by the backstop
-  (named residual).
+  One call may carry any number of questions: they are served one at a time, and
+  a count is not a reason to refuse a call the workflow already decided to make.
+- **The operator's wait counts against the deadline.** `timeoutMs` is wall clock
+  and includes the time a human spends answering. One clock, so the bridge and the
+  SDK host cannot disagree about how much time has passed, and there is no hidden
+  24-hour allowance to cover a pause the host could not honour. The wait itself is
+  recorded in the call's diagnostics (`workflow_ask: operator wait of N ms counted
+against the call deadline`), so a call that dies on its deadline while someone was
+  thinking says so instead of looking like a slow model. An `ask: true` stage that
+  needs thinking time declares a timeout that allows for it, or declares none.
 - **Evidence is durable.** Each answered call records one indexed `operator-ask`
   artifact (questions, answers, declined flag) through the run artifact store;
   viewer readback verifies its digest. If persistence fails after the question
@@ -1969,26 +1996,24 @@ const route = await agent("Choose the next step.", {
 });
 ```
 
-The declaration contains 2–32 unique, non-empty strings, each at most 200
-characters. It cannot be combined with `schema` or `validate`. The runtime
-desugars it to `{ type: "string", enum: [...] }` before canonicalizing the
-request. Without `choiceFallback`, the equivalent hand-written schema therefore
-produces the same prompt, replay key, journal evidence, repair bound, and
-fail-closed error. An optional `choiceFallback` must exactly equal one declared
-choice. The runtime returns it only after both schema attempts fail, records a
-runtime-owned journal line with the validation errors, and never masks child
-execution or transport failures. Standard generated workflows use this form for
-machine routing and exact text for every narrative result.
+The declaration contains at least 2 unique, non-empty strings. There is no ceiling
+on how many, and no length limit on one of them: a routing list is a statement
+about the branches the script actually has, and a runtime that refused the 33rd
+branch would be inventing a policy the consumer never asked for. It cannot be
+combined with `schema`, `handoffs`, `output` or `validate`. The members travel in
+the return contract, and the child selects one through the acceptance tool. An
+optional `choiceFallback` must exactly equal one declared choice. The runtime
+returns it only after the in-session contract is exhausted, records a runtime-owned
+journal line with the validation errors, and never masks child execution or
+transport failures. Standard generated workflows use this form for machine routing
+and exact text for every narrative result.
 
-The runtime reads an exact-choice answer strictly but not pedantically. The
-quoted JSON string `"accept"`, the bare word `accept` (fence-stripped, optionally
-in one pair of backticks), and the schema-echo object
-`{"type":"string","value":"accept"}` all select `accept`; the two unquoted
-readings stamp `coercion: "bare-text" | "wrapper-object"` on that attempt's
-`schemaValidation` instead of spending a repair attempt. Prose around a member, a
-near-miss, an unlisted value, and any other object key remain a mismatch. The
-same readings apply to a hand-written root `{ type: "string", enum }` schema and
-to no other shape.
+An exact-choice answer is now read strictly, because there is nothing left to read
+loosely: the child submits the value as the tool argument, so the member IS the
+argument. The old text dialects — a bare word, a backticked word, a fenced block,
+a `{"type":"string","value":"accept"}` schema echo — were readings a final MESSAGE
+forced on the runtime, and they disappeared with that transport. A submission that
+is not a declared member is a mismatch and is corrected in the same session.
 
 ### Standard dynamic decomposition — `agent({ handoffs })`
 
@@ -1998,7 +2023,7 @@ visible downstream workers:
 ```js
 const MAX_DAGS_IN_SCOPE = 12;
 const dags = await agent("Return one complete text handoff per DAG.", {
-  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE, maxItemChars: 4000 },
+  handoffs: { minItems: 1, maxItems: MAX_DAGS_IN_SCOPE },
 });
 
 const descriptions = await parallel(
@@ -2006,16 +2031,17 @@ const descriptions = await parallel(
 );
 ```
 
-The declaration requires `maxItems` from 1–100. `minItems` defaults to 0 and
-cannot exceed `maxItems`; `maxItemChars` defaults to 8000 and must be a positive safe integer whose worst-case canonical JSON allowance is also safely representable. Runtime requires every returned member to be non-blank and unique after
-trimming, then desugars the declaration to the equivalent array schema before
-request canonicalization. Its prompt, repair attempts, replay key, journal
-evidence, budget accounting, and fail-closed error are therefore identical to
-that existing path. Workflow JavaScript receives `string[]`; it does not parse
-model prose or own a domain schema. The Design derives a clearly named small
-maximum from the domain. It is transport safety for one structured response,
-not a default business limit; the runtime repairs one invalid value response,
-then fails closed.
+Both bounds are optional. `minItems` defaults to 0 and cannot exceed `maxItems`;
+`maxItems` may be omitted entirely, and then the call accepts as many units as the
+work has. There is no per-item character bound: `maxItemChars` is refused by name,
+because a handoff is one complete work unit and truncating it to a guessed width
+destroys the work rather than protecting anything. Runtime requires every returned
+member to be non-blank, then states the declaration as the equivalent array shape in
+the return contract. Its prompt, same-session corrections, replay key, journal
+evidence, budget accounting, and fail-closed error are therefore the ordinary shaped
+path. Workflow JavaScript receives `string[]`; it does not parse model prose or own a
+domain schema. Declare `maxItems` only when the CONSUMER genuinely cannot take more —
+a fixed number of downstream slots, for instance — not as a general tidiness target.
 
 `handoffs` enables dynamic fan-out but not recursive manager delegation. SDK
 children still cannot call `spawn_agent` or `task`; the approved source must
@@ -2088,12 +2114,17 @@ What the runtime does, in order:
    the script trims labels afterwards, or a value the validator accepted can
    still collapse into a duplicate in the normalizer.
 
-2. Appends a deterministic shape block (the JSON Schema plus "one JSON value,
-   no prose") to the prompt the child receives.
+2. Registers the `workflow_return` acceptance tool for this one child and appends
+   a deterministic contract block naming it, the declared shape, and how many
+   same-session correction turns the child gets. If the transport cannot register
+   that tool and read the active tool set back, the call is **refused before the
+   child starts** with a named capability error — there is no text fallback to
+   quietly degrade into.
 3. Runs the child exactly as an ordinary `agent()` call — same catalog agent,
    same capability options, same live row, same `agent_start`/`agent_end` lines.
-4. Parses the child's final text as JSON (a `json` code fence is tolerated) and
-   validates it with the DSL's JSON-Schema subset validator:
+4. Takes the value the child submitted to the tool — the argument IS the value, so
+   nothing is parsed out of prose — and validates it with the DSL's JSON-Schema
+   subset validator:
    `type` (object/array/string/number/integer/boolean), `required`, `properties`,
    `additionalProperties:false`, `items`, `enum`, the size/pattern bounds, and
    the uniqueness/blankness keywords. Bound violations are reported by value
@@ -2111,24 +2142,26 @@ What the runtime does, in order:
      (the count, not the value: a blank string can be hundreds of characters, and
      echoing them would splice junk into the retry prompt)
 
-5. When the call declared `validate`, calls it with the parsed, schema-valid
-   value. It never runs on a child that failed, returned empty text, overflowed
-   `maxAnswerChars`, or produced an answer that did not parse or did not
-   validate — a cross-field rule presupposes the shape holds, so author code
-   never receives an off-shape value. A non-empty return is a mismatch owned by
-   the script.
-6. On mismatch, retries with a fresh child whose prompt carries the previous
-   attempt's errors. A call without `validate` gets `SCHEMA_MAX_ATTEMPTS` (2)
-   child runs total; a call with `validate` gets one dedicated extra attempt, 3.
+5. When the call declared `validate`, calls it with the schema-valid value. It
+   never runs on a child that failed, returned empty text, or submitted a value
+   that did not validate — a cross-field rule presupposes the shape holds, so
+   author code never receives an off-shape value. A non-empty return is a
+   mismatch owned by the script.
+6. On mismatch, asks the **same child** to correct it: the errors come back as the
+   tool result, the session keeps its context, and the child submits again. The
+   package default is exactly one such correction turn; `repair.maxAttempts` raises
+   it, and the applied number is journaled on every shaped call, so it is a stated
+   default rather than a hidden one.
 7. Resolves to the validated value, or throws `SchemaValidationError` carrying
    `errors` and `attempts`.
 
-**The host cannot force the child to answer in shape; the runtime enforces it
-after the fact.** The Pi agent-session surface exposes no forced tool choice, so
-the prompt block is advice and the parse/validate/retry/fail-closed boundary is
-the actual contract. Practical consequence for authors: keep shaped stages small
-and closed (`enum`, `additionalProperties: false`, few required fields) — a wide
-schema is where a weak model spends both attempts.
+**The host cannot force the child to answer in shape; acceptance enforces it
+inside the session.** The Pi agent-session surface exposes no forced tool choice,
+so the contract block is advice and the tool's accept/reject boundary is the actual
+contract — but a rejection now costs a turn in the session that already holds the
+work, not a fresh child that has to redo it. Practical consequence for authors:
+keep shaped stages closed (`enum`, `additionalProperties: false`, few required
+fields), because a wide schema is where a weak model spends its correction turns.
 
 **Fail closed.** There is no partial and no untyped fallback: either the value
 validated, or the call throws. Inside `parallel()` / `pipeline()` the throw
@@ -2141,11 +2174,11 @@ type.
 
 **Evidence.** Every attempt stamps `schemaValidation`
 (`{status: "valid"|"mismatch", attempts, errors}`, plus `source: "schema" |
-"script"` on a mismatch when the call declared `validate`, plus `coercion:
-"bare-text" | "wrapper-object"` on a valid exact-choice attempt read from the bare
-member text or a schema-echo object) on its own `agent_end` journal line, so a
-run's evidence shows whether a stage was shape-checked, which authority rejected
-it, how the answer was read, and how many tries it took. `attempts` is the 1-based loop
+"script"` on a mismatch when the call declared `validate`) on its own `agent_end`
+journal line, so a run's evidence shows whether a stage was shape-checked, which
+authority rejected it, and how many submissions it took. The `coercion` stamp is
+gone with the text transport — a tool argument needs no dialect reading — and
+survives only as a readable field on journals written before the deletion. `attempts` is the 1-based loop
 position of the attempt, not a count of live child runs: a replayed attempt
 occupies an ordinal and increments it while contributing no `usage`. Each attempt
 counts against `maxTotalAgentInvocations`; a call without `schema` counts exactly
@@ -2193,9 +2226,12 @@ The contract:
   already downgrade the script to `unproven`. Filesystem and network reads are
   **not** detectable and are forbidden by this contract. Calling back into the DSL
   throws: `agent() must not be called from inside a validate callback`.
-- **The runtime bounds what it returns**: at most 32 errors, at most 500
-  characters each, no empty string, no Promise. A breach fails the run closed and
-  spends no retry — truncating would silently rewrite the replay key.
+- **The runtime checks the TYPE of what it returns**, not its size: a `string[]`
+  with no empty string and no Promise. There is no cap on how many errors a
+  validator may report or how long one may be — accumulating every violation is
+  exactly what makes a repairable answer repairable, and a runtime that truncated
+  the list would silently rewrite the replay key. A non-list, a non-string member
+  or a blank message fails the run closed and spends no retry.
 - **A throw is an author bug, not a model failure.** It propagates unchanged, ends
   the run, consumes no retry, and is journaled as `{kind: "error", source: "script"}`.
 
@@ -2220,8 +2256,7 @@ wrote, are likewise not this child's to repair and stay fatal.
 drops functions silently, so including it would produce an identical key for two
 different validators with no divergence signal. Its _body_ is covered instead: the
 entry bytes are hashed and any change refuses the whole resume. It **is** re-applied
-to replayed answers, held to the caller's current rule the way `maxAnswerChars` is;
-and when the current validator rejects a replayed answer the run **fails closed**
+to replayed answers, held to the caller's current rule; and when the current validator rejects a replayed answer the run **fails closed**
 rather than re-asking. Re-asking would form an attempt-2 prompt whose key misses at
 that ordinal, trip the one-way divergence latch and silently convert the operator's
 resume into a full live run. Because the error strings are spliced into the retry
@@ -2232,30 +2267,49 @@ absolute path in a message is a replay defect, not a cosmetic one.
 
 ## Run budget
 
-Every run is bounded on seven axes without the script saying anything.
-`DEFAULT_WORKFLOW_BUDGET` (`extensions/workflows/runtime/workflow-budget.ts`) is the single
-source, and `runWorkflowScript` applies it to the runtime on every run:
+A workflow run is bounded on six axes, and **none of them has a package default**.
+A budget stops spending, and spending is the author's or the operator's money, so
+an axis nobody declared is UNBOUNDED: no timer is armed, no counter refuses a
+child, and the axis prints as the literal `unbounded`. None of them bounds the
+SIZE of an answer either: that is a consumer contract, declared on the call.
 
-| Axis          | Default                       | What it bounds                                                                                                                                                                                                                    |
-| ------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `concurrency` | 4 attempts at once            | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Equal to `SCHEDULER_WIDTH`, so a flat fan-out behaves exactly as before and only nested fan-out is newly bounded. |
-| `totalAgents` | 10,000 physical attempts/run  | Every implementation, review, transport-retry, and value-repair attempt across the root and saved children. The next attempt above this fuse throws `WorkflowInvocationCapError` and exits the run.                               |
-| `runtimeMs`   | 24-hour new-child-start gate  | Emergency wall-clock gate over the root and saved-child agent chain. It is checked before a new child starts; it does not abort an in-flight child.                                                                               |
-| `timeoutMs`   | 24 hours per child attempt    | Emergency fuse for one child attempt. The workflow aborts first; the SDK timeout is a later transport backstop.                                                                                                                   |
-| `toolCalls`   | 1,000 calls per child attempt | Tool calls per child attempt.                                                                                                                                                                                                     |
-| `turns`       | 1,000 turns per child attempt | Cumulative SDK model cycles per child attempt, shared by ordinary work and output clarification. This emergency allowance is not a target.                                                                                        |
-| `answerChars` | 500,000 characters per answer | Characters in one child answer.                                                                                                                                                                                                   |
+`concurrency` is the one exception and it is not a stop — exceeding it makes a
+child WAIT, never fail:
 
-The SDK transport backstop is a per-host-turn timer computed as
-`ceil(timeoutMs / maxTurns) + 5_000` milliseconds. The `5_000` is a five-second
-safety **margin per turn**, not a five-second workflow timeout. With the shipped
-defaults, each host turn gets 4,325,000 ms (72 minutes 5 seconds); across 20
-turns that is 24 hours plus 100 seconds, so the workflow's own 24-hour
-per-attempt fuse remains the first named deadline.
+| Axis          | Package value      | What it bounds                                                                                                                                                                                                                     |
+| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concurrency` | 4 attempts at once | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Also the default width of a `parallel()`/`pipeline()` group whose author declared none.                            |
+| `totalAgents` | none — unbounded   | FRESH physical attempts across the root and saved children: implementation, review, transport retry, value repair. A replayed call starts no child and is not charged. The attempt that would exceed an explicit cap never starts. |
+| `runtimeMs`   | none — unbounded   | Wall-clock gate over the root and saved-child agent chain. Checked before a new child starts; it does not abort an in-flight child.                                                                                                |
+| `timeoutMs`   | none — unbounded   | Wall clock for one child attempt, operator waits included. On expiry the runtime aborts the child.                                                                                                                                 |
+| `toolCalls`   | none — unbounded   | Tool calls per child attempt. The call that would exceed an explicit budget is refused BEFORE it runs, not counted after it started.                                                                                               |
+| `turns`       | none — unbounded   | Cumulative SDK model cycles per child attempt, shared by ordinary work and output clarification. The generation past an explicit budget is never started.                                                                          |
 
-Review and retry attempts consume `totalAgents` exactly like implementation
-attempts. The budget counts physical attempts, not only authored `agent()` call
-sites.
+**`toolCalls` and `turns` are admission, not accounting.** The host installs a
+pre-dispatch hook on the child's agent loop: the (N+1)-th tool call is refused
+before the tool executes, and the turn after the last declared one is never
+generated. Either way the run ends with the same named budget stop
+(`tool-call-budget`, `assistant-turn-budget`) and everything the child already
+produced is kept. A host that does not expose that seam keeps the older
+behaviour — the budget is still enforced, but the over-budget action may have
+started before the stop lands.
+
+**One deadline per child.** A declared `timeoutMs` reaches the SDK host unchanged.
+There is no derived per-turn backstop any more: the host used to be handed
+`ceil(timeoutMs / maxTurns) + 5_000` and multiply it back, which produced a
+deadline nobody wrote and, at the former defaults, a product larger than Node's
+maximum timer delay — which `setTimeout` answers by firing after one millisecond.
+Turn count and wall clock are separate axes and are no longer multiplied.
+
+**Long deadlines are honoured, not refused.** A timeout above Node's maximum delay
+(2,147,483,647 ms ≈ 24.8 days) runs as a chain of representable waits, so a 48-hour
+deadline is a 48-hour deadline. The former `WORKFLOW_MAX_TIMEOUT_MS` policy ceiling
+is gone; representability is checked only when a timeout was chosen, and only to
+reject a value that is not a positive whole number of milliseconds.
+
+Review and retry attempts consume an explicit `totalAgents` exactly like
+implementation attempts: the axis counts physical fresh attempts, not only authored
+`agent()` call sites.
 
 **What `runtimeMs` does and does not bound.** It is a shared emergency deadline
 for the root and saved children, checked after a child acquires the run-wide concurrency slot and immediately before the
@@ -2269,20 +2323,26 @@ Nothing in the runtime bounds workflow script code today either; this is a
 pre-existing limit stated rather than a new one introduced. "Bounded on every
 axis" therefore means **the agent chain**.
 
-**Narrowing versus raising.** A per-call value below the default applies silently.
-A value above it applies too — a down-only rule would make a legitimately long
-stage unauthorable, and the operator would answer by raising the package default
-for everyone — but never silently: the runtime writes a `[workflow:budget] call
-raised …` journal line naming the axis, the default and the requested value.
+**Narrowing versus raising.** A per-call value below the run's declared one applies
+silently. A value above it applies too — a down-only rule would make a legitimately
+long stage unauthorable — but never silently: the runtime writes a
+`[workflow:budget] call raised …` journal line naming the axis, the applied value
+and the requested one. An explicit value on an axis the run left unbounded is
+always a narrowing, so it is never reported as a raise.
+
+**Stopping is not a verdict.** Reaching an explicit budget ends the run as
+`stopped by budget <axis>`, journaled by name, with every answer already received
+kept and readable. It never means the work was wrong, and it never turns a received
+answer into an invalid one.
 
 **Which axes a script can override.** The four per-call axes — `maxToolCalls`,
-`timeoutMs`, `maxTurns`, `maxAnswerChars` — remain ordinary `agent()` options.
+`timeoutMs` and `maxTurns` — remain ordinary `agent()` options.
 The three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — remain
 host-owned rather than writable from workflow JavaScript. The structured
 `workflow` tool and command launcher now accept an optional `budget` object
 forwarded to the existing `RunWorkflowScriptOptions.budget`; approval displays
-the resolved values. Unspecified axes keep the defaults above. There are no
-new slash-command flags. See [execution controls](references/execution-controls.md)
+the declared values. Unspecified axes stay unbounded. There are
+no new slash-command flags. See [execution controls](references/execution-controls.md)
 for the exact boundary and local group concurrency.
 
 **Evidence.** Every run's journal opens with one runtime-source line listing the
@@ -2293,16 +2353,16 @@ attempts use their fixed nested execution directories. The measured values are:
 agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
 concurrency. The peak comes from the concurrency gate rather than from journal
 intervals. `agent_queued` records demand; `agent_start` is now emitted only
-after gate admission. Neither event claims a provider token has arrived. Replayed calls
-are counted only where they really spend: one invocation against `totalAgents`,
-but no child, so the row reads `N invocations (M replayed, no child ran)` and
-their durations and tokens are excluded — a run served entirely from records
-reports its longest child as "not recorded". Per-child tool
-calls, turns and answer characters are enforced but counted by nobody, so they
-print as "not recorded" rather than `0`. Tokens are printed when the host reports
-them; cost prints as unavailable because `costTotal` is a hardcoded `0`, and a
-limit over a stub reports "under budget" forever. Neither tokens nor cost is
-enforced.
+after gate admission. Neither event claims a provider token has arrived. Replayed
+calls are counted apart and charged to nothing: the row reads
+`N fresh + M replayed (not charged)`, and their durations and tokens are excluded —
+a run served entirely from records reports its longest child as "not recorded".
+Per-child tool calls and turns are enforced but counted by nobody, so they print as
+"not recorded" rather than `0`. Tokens are printed when the host reports them; cost
+prints as unavailable because the host reports no price at all, and a limit over an
+unknown would report "under budget" forever. Neither tokens nor cost is enforced.
+`result.json` carries the same six axes, so a later reader cannot mistake an
+undeclared axis for a missing field.
 
 ---
 
@@ -2447,13 +2507,20 @@ author never labeled cannot be located in a program that changed under it.
 | `side-effecting-call` | the call writes to a worktree, so its record cannot stand in for it   |
 | `diverged`            | the latch is already set by one of the above                          |
 
-A `fusion()` group standing after the divergence point does not run fresh: every
-member and the judge are replay-required for the whole of any resume, so the
-group ends the run with `fusion resume cannot mix recorded and fresh agent calls`.
-The panel's rule against mixing recorded and live answers is kept at the cost of
-a terminal error. The same rule costs one case that used to work — a
-byte-identical resume no longer replays a fusion tail standing after a recorded
-failure.
+A `fusion()` group standing after the divergence point runs as an ordinary fresh
+panel: the latch guarantees no later call can be served from the record, so every
+leg is fresh and the panel takes its model preflight like any other fresh call.
+What the panel still refuses is a MIXED set of legs — some recorded, some fresh —
+before the divergence point, which ends the run with `fusion resume cannot mix
+recorded and fresh agent calls`. The rule against mixing recorded and live answers
+inside one panel is kept at the cost of that terminal error.
+
+A panel served entirely from the record is not charged against `totalAgents` and
+does not reserve against it: a replayed leg starts no child (see
+`spendInvocation("replayed")`). Only a fresh panel reserves its worst case up
+front, so a resume can replay a three-member panel under `totalAgents: 1`, and a
+leg that diverges into fresh work still meets the cap at its own admission,
+through the same `stopped by budget totalAgents` journal line.
 
 The strict `orchestration-only` source mode requires every `agent()` call to
 declare a unique literal `label`. That rule, not the recorded name, is what
@@ -2625,8 +2692,8 @@ selected project-local workflow workspace. Fresh workflows default to
 
 `agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
 `schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared
-`validate`, and `coercion` on an exact-choice answer read from unquoted text or a schema
-echo), plus full answer/transcript/result artifact references when
+`validate`; the `coercion` field appears only on journals written before the text transport
+was deleted), plus full answer/transcript/result artifact references when
 those records exist. `/workflows status` shows `agents=…` and sums the run budget from those
 `usage` values. Journals written before 0.2.x may still contain `llm_start` / `llm_end` /
 `llm_delta` lines; they parse but are no longer counted or specially rendered.
@@ -2786,6 +2853,6 @@ The initial capture set is deliberately narrow: terminal `failed`/`blocked` outc
 
 Cancellation, unclassified/raw thrown errors, uncertain timeout/shutdown, global invocation/deadline limits, workspace/permission/operator failures, unavailable SDK, output protocol failures and persistence errors propagate. Failures classified on replayed answers also propagate: tightening the current answer bound cannot silently turn a previously successful review into a failure report and rerun the suffix.
 
-`result` accepts only `"report"` or omission. It cannot combine with `choice`, `choiceFallback`, `handoffs`, `schema`, `validate`, `returnVia`, `output` or `repair`. Invalid declarations fail before child execution. `maxAnswerChars` applies to the actual answer before the host wraps it; report mode does not impose an output schema or a new answer limit. Author the option as the literal `result: "report"`. The source checker validates directly declared option pairs and keeps returned text opaque; it does not resolve option objects reached through variables or spreads. Runtime validation applies to every call.
+`result` accepts only `"report"` or omission. It cannot combine with `choice`, `choiceFallback`, `handoffs`, `schema`, `validate`, `returnVia`, `output` or `repair`. Invalid declarations fail before child execution. Report mode does not impose an output schema or any answer limit. Author the option as the literal `result: "report"`. The source checker validates directly declared option pairs and keeps returned text opaque; it does not resolve option objects reached through variables or spreads. Runtime validation applies to every call.
 
 The real child status and raw answer remain in journal/artifact/replay records. Captured failures remain replay `ok:false`, so resume reruns that call and the following suffix. Successful reports omit volatile run/call ids and live-only metadata, keeping their rendered bytes stable when the raw answer is replayed. A runtime log records when a failed child was captured as an observation. Reports do not change result/partial semantics or `consumeTextArtifact` admission: the latter still requires a successful source run and verified artifact provenance, not completed independent review.

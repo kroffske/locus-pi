@@ -40,7 +40,7 @@ import {
   resolveWorkflowRunDir,
   workflowRunOutputsDir,
 } from "./workflow-run-layout.js";
-import type { WorkflowBudget } from "./workflow-budget.js";
+import { WORKFLOW_BUDGET_UNBOUNDED, type WorkflowBudget } from "./workflow-budget.js";
 import type { WorkflowJournalLine } from "./workflow-runtime.js";
 import { assertWorkflowRootLease, writeWorkflowWorkspaceRunLink, type WorkflowRootLease } from "./workflow-output.js";
 
@@ -702,30 +702,34 @@ function budgetSection(input: WorkflowRunReportInput): string[] {
   if (input.budget === undefined) return [];
   const { applied, peakConcurrency } = input.budget;
   const spend = journalSpend(input.journal);
+  const axis = (name: keyof WorkflowBudget, suffix = ""): string => {
+    const value = applied[name];
+    return value === undefined ? WORKFLOW_BUDGET_UNBOUNDED : `${String(value)}${suffix}`;
+  };
+  const freshAgents = spend.agents - spend.replayedAgents;
   const rows: Array<[string, string, string]> = [
-    ["`concurrency`", String(applied.concurrency), `${String(peakConcurrency)} peak (gate-owned)`],
+    ["`concurrency`", axis("concurrency"), `${String(peakConcurrency)} peak (gate-owned)`],
     [
       "`totalAgents`",
-      String(applied.totalAgents),
-      // "invocations", not "started": a replayed call spends one against this cap
-      // (the runtime counts it before the replay lookup) while starting no child,
-      // so the count is right and the word "started" would have been the lie.
+      axis("totalAgents"),
+      // Three numbers, because they answer three different questions and only one of
+      // them is the charge: logical calls are what the script asked for, fresh
+      // attempts are what this axis bounds, and replayed ones started no child at all.
       spend.replayedAgents === 0
-        ? `${String(spend.agents)} invocations`
-        : `${String(spend.agents)} invocations (${String(spend.replayedAgents)} replayed, no child ran)`,
+        ? `${String(freshAgents)} fresh`
+        : `${String(freshAgents)} fresh + ${String(spend.replayedAgents)} replayed (not charged)`,
     ],
-    ["`runtimeMs`", `${String(applied.runtimeMs)} ms`, `${String(spend.runMs)} ms over the journal`],
+    ["`runtimeMs`", axis("runtimeMs", " ms"), `${String(spend.runMs)} ms over the journal`],
     [
       "`timeoutMs`",
-      `${String(applied.timeoutMs)} ms`,
+      axis("timeoutMs", " ms"),
       // Fresh children only. A replayed attempt's durationMs measures projecting a
       // recorded answer, which never ran against this fuse; a run served entirely
       // from records therefore has no longest child at all and says so.
       spend.longestChildMs === undefined ? NOT_RECORDED : `${String(spend.longestChildMs)} ms longest child`,
     ],
-    ["`toolCalls`", String(applied.toolCalls), NOT_RECORDED],
-    ["`turns`", String(applied.turns), NOT_RECORDED],
-    ["`answerChars`", String(applied.answerChars), NOT_RECORDED],
+    ["`toolCalls`", axis("toolCalls"), NOT_RECORDED],
+    ["`turns`", axis("turns"), NOT_RECORDED],
     ["tokens", "not enforced", spend.tokens === undefined ? NOT_RECORDED : `${String(spend.tokens)} observed`],
     ["cost", "not enforced", "not available"],
   ];
@@ -735,16 +739,30 @@ function budgetSection(input: WorkflowRunReportInput): string[] {
     "",
     "| Axis | Applied | Spend |",
     "| --- | --- | --- |",
-    ...rows.map(([axis, appliedText, spendText]) => `| ${axis} | ${appliedText} | ${spendText} |`),
+    ...rows.map(([axisName, appliedText, spendText]) => `| ${axisName} | ${appliedText} | ${spendText} |`),
     "",
-    `Spend is read from this run's own journal, so it can only report what the journal carries. \`toolCalls\`, ` +
-      `\`turns\` and \`answerChars\` are enforced per child and counted by nobody, so they read "${NOT_RECORDED}" ` +
-      `rather than \`0\`. Cost is unavailable because the host reports a constant zero, and a limit over a stub ` +
-      "would report “under budget” forever.",
+    `An axis that reads \`${WORKFLOW_BUDGET_UNBOUNDED}\` was declared by nobody, so nothing stops this run on it: ` +
+      "no timer is armed and no counter refuses a child. There are no package defaults for these axes — a budget " +
+      "spends someone's money, so the author or the operator sets it, on the workflow header, the launch, or the " +
+      "individual call.",
     "",
-    "A replayed call spends an invocation against `totalAgents` but starts no child, so it is counted there and " +
-      "excluded from the longest-child duration and from the observed tokens. A run served entirely from records " +
-      `reports its longest child as "${NOT_RECORDED}", because no child ran.`,
+    `Spend is read from this run's own journal, so it can only report what the journal carries. \`toolCalls\` ` +
+      `and \`turns\` are enforced per child and counted by nobody, so they read "${NOT_RECORDED}" ` +
+      `rather than \`0\`. Cost is unavailable because the host reports no price at all, and a limit over an ` +
+      "unknown would report “under budget” forever.",
+    "",
+    "There is no answer-size axis. A completed child's answer is never refused for its length; a consumer that " +
+      "needs a bounded value declares it as a contract on the call (`output.maxLength`, or `maxLength`/`maxItems` " +
+      "inside a schema), where the child is told and can correct it before it finishes.",
+    "",
+    "A replayed call starts no child, so it is NOT charged against `totalAgents` and is excluded from the " +
+      "longest-child duration and from the observed tokens. A resume of a finished run therefore cannot die on a " +
+      `cap the original run satisfied, and a run served entirely from records reports its longest child as ` +
+      `"${NOT_RECORDED}", because no child ran.`,
+    "",
+    "An explicit axis is checked BEFORE the next spend — before the next child starts, before the next turn, " +
+      "before the next tool call. Reaching one ends the run as “stopped by budget”, with every answer already " +
+      "received kept and readable; it is never a statement that the work was wrong.",
     "",
     "`runtimeMs` bounds the agent chain: it is checked when a child starts, so a run is bounded by it plus at " +
       "most one child's own `timeoutMs`, and script code that calls no further agent is not bounded by it.",
@@ -752,7 +770,7 @@ function budgetSection(input: WorkflowRunReportInput): string[] {
 }
 
 interface WorkflowJournalSpend {
-  /** Agent invocations, replayed ones included — they spend the `totalAgents` cap. */
+  /** Agent invocations, replayed ones included. Only the fresh ones are charged. */
   agents: number;
   /** How many of those were served from a record, so the count above cannot be
    *  read as "children that ran". */

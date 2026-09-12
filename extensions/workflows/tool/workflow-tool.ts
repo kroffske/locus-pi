@@ -26,9 +26,7 @@ import { resolveWorkflowTarget, type ResolvedWorkflowTarget } from "../runtime/w
 import { WORKFLOW_SAVED_NAME_MAX_CHARS, WORKFLOW_SAVED_NAME_PATTERN } from "../runtime/workflow-saved-name.js";
 import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "../runtime/workflow-runtime.js";
 import {
-  WORKFLOW_OUTPUT_DIR_MAX_CHARS,
   WORKFLOW_RUN_NAME_MAX_CHARS,
   WORKFLOW_RUN_NAME_PATTERN,
   resolveNamedWorkflowWorkspacePath,
@@ -54,6 +52,7 @@ import {
   readWorkflowRunTextFile,
   WORKFLOW_NESTED_RUN_STORAGE_PATTERN,
   WORKFLOW_RUN_GROUP_STORAGE_PATTERN,
+  WORKFLOW_ARTIFACT_DISPLAY_NAME_PATTERN,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   WORKFLOW_WORKSPACES_STORAGE_PREFIX,
   workflowRunOutputsDir,
@@ -61,18 +60,19 @@ import {
 import {
   resolveWorkflowBudget,
   formatWorkflowBudgetPrelude,
+  removedWorkflowBudgetKeyMessage,
   WORKFLOW_AGENT_MAX_TURNS,
-  WORKFLOW_MAX_TIMEOUT_MS,
 } from "../runtime/workflow-budget.js";
 const WorkflowBudgetParams = Type.Object(
   {
     concurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     totalAgents: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     runtimeMs: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
-    timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: WORKFLOW_MAX_TIMEOUT_MS })),
+    // No policy ceiling: a long explicit deadline runs as a chain of representable
+    // waits, so the only bound left is what a number can be.
+    timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     toolCalls: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     turns: Type.Optional(Type.Integer({ minimum: 1, maximum: WORKFLOW_AGENT_MAX_TURNS })),
-    answerChars: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
   },
   { additionalProperties: false },
 );
@@ -80,7 +80,13 @@ const WorkflowArtifactRefParams = Type.Object(
   {
     runId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
     artifactId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
-    name: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
+    // `artifactId` is the storage id; `name` is the published display label, so it
+    // carries confinement (no path separators, no control characters, not blank) and
+    // no alphabet or length policy. `Design review.md` is a valid continuation ref.
+    name: Type.String({
+      description: "Published artifact display label, exactly as the origin run recorded it",
+      pattern: WORKFLOW_ARTIFACT_DISPLAY_NAME_PATTERN,
+    }),
     sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
   },
   { additionalProperties: false },
@@ -89,7 +95,10 @@ const WorkflowArtifactRefParams = Type.Object(
 const WorkflowContinuationParams = Type.Object(
   {
     originRunId: Type.String({ pattern: WORKFLOW_SAFE_COMPONENT_PATTERN }),
-    artifactRefs: Type.Array(WorkflowArtifactRefParams, { minItems: 1, maxItems: 8 }),
+    // At least one ref, and no upper bound: a continuation carries the work the origin
+    // run actually produced, and refusing the ninth complete reference would drop evidence
+    // the operator already paid for. Identity, completeness and same-origin stay enforced.
+    artifactRefs: Type.Array(WorkflowArtifactRefParams, { minItems: 1 }),
   },
   { additionalProperties: false },
 );
@@ -104,21 +113,21 @@ const WorkflowParams = Type.Object(
         pattern: WORKFLOW_SAVED_NAME_PATTERN,
       }),
     ),
+    // No aggregate character cap on a path. Confinement (inside the project, no
+    // traversal, no symlink escape) is the real rule, and the filesystem owns the
+    // component and path-length limits — a deep but legal tree is not a bad request.
     scriptPath: Type.Optional(
       Type.String({
         description: "Project-relative .mjs workflow script path",
-        maxLength: 400,
       }),
     ),
     script: Type.Optional(
       Type.String({
         description: "Legacy compatibility alias for name or project-relative scriptPath",
-        maxLength: 400,
       }),
     ),
     input: Type.Optional(
       Type.String({
-        maxLength: WORKFLOW_INPUT_MAX_CHARS,
         description: "Optional human semantic request passed unchanged to runWorkflow(dsl, input).",
       }),
     ),
@@ -130,7 +139,6 @@ const WorkflowParams = Type.Object(
     ),
     outputDir: Type.Optional(
       Type.String({
-        maxLength: WORKFLOW_OUTPUT_DIR_MAX_CHARS,
         description:
           "Optional workflow workspace path. Fresh workflows default to unique .locus-pi/workspaces/<generated-run-name> workspaces; resume repeats the source workspace. Existing legacy .locus-pi/plans/<name> paths are accepted only when already present. A task artifacts directory such as .tasks/<task>/artifacts is a legal explicit workspace. Absolute paths must stay inside the project; ./ paths resolve from the agent working directory; other relative paths resolve from the project root.",
       }),
@@ -197,8 +205,9 @@ function workflowApprovalDetails(args: unknown, projectRoot: string): string[] {
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
     `Workflow workspace: ${workspace}`,
-    // Only an explicit override is approval-worthy; the default budget is the run's
-    // own prelude and would otherwise repeat itself in every approval dialog.
+    // Only an explicit declaration is approval-worthy; a run that declares nothing
+    // has nothing to approve here and its prelude already prints every axis as
+    // `unbounded` where the rest of the run evidence lives.
     ...(record.budget !== null &&
     typeof record.budget === "object" &&
     Object.keys(record.budget as Record<string, unknown>).length > 0
@@ -215,6 +224,16 @@ function workflowApprovalDetails(args: unknown, projectRoot: string): string[] {
     "Trust: reviewed JavaScript with full Node.js/module access in the Pi host process",
     "Isolation: none — exec approval is consent, not a sandbox",
   ];
+}
+
+/** First removed budget option named by a raw tool argument object, if any. */
+function removedWorkflowBudgetKeyName(params: unknown): string | undefined {
+  if (typeof params !== "object" || params === null) return undefined;
+  const budget = (params as { budget?: unknown }).budget;
+  if (typeof budget !== "object" || budget === null || Array.isArray(budget)) return undefined;
+  return Object.entries(budget as Record<string, unknown>).find(
+    ([key, value]) => value !== undefined && removedWorkflowBudgetKeyMessage(key) !== undefined,
+  )?.[0];
 }
 
 export interface WorkflowToolDependencies {
@@ -259,6 +278,14 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
     renderCall: () => new EmptyWorkflowToolCallComponent(),
     renderResult: renderWorkflowToolResultCard,
     async execute(_toolCallId, params, signal, update, ctx) {
+      // BEFORE the schema, because the schema's closed key set would answer a removed
+      // budget option with "unexpected property" — true, and useless. The runtime has
+      // one named sentence per removed key saying what replaced it; a caller that
+      // reaches this surface deserves the same sentence rather than a shape complaint.
+      const removedBudgetKey = removedWorkflowBudgetKeyName(params);
+      if (removedBudgetKey !== undefined) {
+        return errorResult(`workflow: ${removedWorkflowBudgetKeyMessage(removedBudgetKey)!}`, { owner: "workflows" });
+      }
       const valid = validateParams(WorkflowParams, params);
       if (!valid.ok) return valid.result;
       const targetFields = [valid.value.name, valid.value.scriptPath, valid.value.script].filter(

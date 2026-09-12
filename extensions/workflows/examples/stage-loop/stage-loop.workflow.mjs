@@ -57,7 +57,6 @@ export default async function runWorkflow(dsl, input) {
         title: `Stage gate (round ${round})`,
         choice: ["ready", "needs_fix", "blocked"],
         choiceFallback: "blocked",
-        returnVia: "tool",
       },
     );
 

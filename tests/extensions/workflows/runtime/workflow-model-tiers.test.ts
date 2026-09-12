@@ -114,7 +114,7 @@ function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
       ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
       createSession: async (options) => {
         captured.push(options);
-        return { session: fakeSession(sessionModel, answer) };
+        return { session: fakeSession(sessionModel, answer, options) };
       },
       reportsDir,
       now: () => "fixed",
@@ -122,9 +122,22 @@ function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
   return { createExecutor, captured };
 }
 
-function fakeSession(model: unknown, answer = "tier answer"): SdkAgentSessionLike {
+/**
+ * A child session on a host that CAN carry a shaped result: it registers the custom tools
+ * it was given, reports its active tool set back, and — when a `workflow_return` tool is
+ * present — submits the scripted answer through it, the way a real child would. Without
+ * that readback the host refuses every shaped call by capability, which is a different
+ * test from the ones here.
+ */
+function fakeSession(
+  model: unknown,
+  answer = "tier answer",
+  options?: { customTools?: Array<{ name: string; execute: (...args: never[]) => unknown }> },
+): SdkAgentSessionLike {
   const exportDir = mkdtempSync(path.join(tmpdir(), "locus-model-tiers-export-"));
   let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+  const returnTool = options?.customTools?.find((tool) => tool.name === "workflow_return");
+  let activeTools = (options?.customTools ?? []).map((tool) => tool.name);
   return {
     sessionId: "tier-child",
     // Absent on purpose when the caller passes nothing: an older peer or a
@@ -136,7 +149,26 @@ function fakeSession(model: unknown, answer = "tier answer"): SdkAgentSessionLik
         listener = undefined;
       };
     },
+    getActiveToolNames() {
+      return [...activeTools];
+    },
+    setActiveToolsByName(names: string[]) {
+      activeTools = [...names];
+    },
     async prompt() {
+      if (returnTool !== undefined) {
+        let value: unknown = answer;
+        try {
+          value = JSON.parse(answer);
+        } catch {
+          // A non-JSON scripted answer is submitted verbatim, as a child would.
+        }
+        (returnTool.execute as (id: string, input: unknown, signal: AbortSignal) => unknown)(
+          "tool-call-1",
+          { value },
+          new AbortController().signal,
+        );
+      }
       listener?.({ type: "agent_end", willRetry: false });
     },
     getSessionStats() {
@@ -1110,6 +1142,9 @@ describe("executed-model evidence", () => {
         agent: request.agent,
         executedModel: "test/fast",
         usage: { input: 20, output: 10, totalTokens: 30, costTotal: 0 },
+        ...(request.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
       }),
     });
 

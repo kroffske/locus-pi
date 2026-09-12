@@ -39,6 +39,7 @@ import {
   type WorkflowResultPersistence,
 } from "./workflow-result.js";
 import { assertWorkflowPhysicalWorkspaceIdentity, isWorkflowPathWithinRoot } from "./workflow-output.js";
+import { WORKFLOW_BUDGET_AXES, WORKFLOW_BUDGET_UNBOUNDED } from "./workflow-budget.js";
 
 import {
   assertWorkflowRunId,
@@ -53,6 +54,7 @@ import {
   readWorkflowRunFile,
   workflowRunFileExists,
   writeWorkflowRunFile,
+  isWorkflowArtifactDisplayName,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   workflowJournalFile,
   workflowLegacyRunMigrationMessage,
@@ -334,6 +336,10 @@ export interface WorkflowRunResultEnvelope {
   artifactRefsInvalid?: string;
   artifactRefsOmitted?: number;
   artifactRefsOmittedInvalid?: string;
+  /** Every budget axis this run applied; an undeclared axis reads `"unbounded"`. */
+  budget?: Record<string, number | string>;
+  /** Read-side marker: a present budget envelope was not the complete axis record. */
+  budgetInvalid?: string;
   resultPersistence?: WorkflowResultPersistence;
   resultPersistenceInvalid?: string;
   target?: {
@@ -386,6 +392,7 @@ export function workflowPersistedResultInvalidity(result: WorkflowRunResultEnvel
     ["artifact references are malformed", result.artifactRefsInvalid],
     ["artifactRefsOmitted is malformed", result.artifactRefsOmittedInvalid],
     ["result persistence is malformed", result.resultPersistenceInvalid],
+    ["budget envelope is malformed", result.budgetInvalid],
   ];
   const invalid = invalidFields.find(([, message]) => message !== undefined);
   return invalid === undefined ? undefined : `${invalid[0]}: ${invalid[1]}`;
@@ -751,9 +758,9 @@ function workflowJournalLineProblem(value: unknown, expectedRunId: string): stri
     const values = value[field];
     if (
       values !== undefined &&
-      (!isStringArray(values) || values.some((entry) => entry.trim() === "" || entry.length > 240))
+      (!isStringArray(values) || values.some((entry) => entry.trim() === "" || /[\p{Cc}]/u.test(entry)))
     ) {
-      return `Field ${field} must be an array of non-blank bounded strings.`;
+      return `Field ${field} must be an array of non-blank strings without control characters.`;
     }
   }
   if (
@@ -1084,7 +1091,11 @@ function isArtifactRef(value: unknown): boolean {
     typeof value.sha256 === "string" &&
     WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.runId) &&
     WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.artifactId) &&
-    WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.name) &&
+    // `name` is the author's DISPLAY label and `artifactId` is the storage id: the
+    // reader holds the name to the same confinement rule the writer applies and to no
+    // alphabet or length policy, so a published `Design review.md` stays a readable
+    // reference here instead of failing the validator that never wrote it.
+    isWorkflowArtifactDisplayName(value.name) &&
     /^[a-f0-9]{64}$/u.test(value.sha256)
   );
 }
@@ -1097,8 +1108,10 @@ function workflowContinuationProblem(value: unknown, currentRunId: string): stri
   if (typeof value.originRunId !== "string" || !WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value.originRunId)) {
     return "Field continuation.originRunId is invalid.";
   }
-  if (!Array.isArray(value.artifacts) || value.artifacts.length < 1 || value.artifacts.length > 8) {
-    return "Field continuation.artifacts must contain 1-8 pairs.";
+  // At least one pair, and no upper bound: the record describes what the origin run
+  // produced, and a ninth complete pair is evidence, not an overflow.
+  if (!Array.isArray(value.artifacts) || value.artifacts.length < 1) {
+    return "Field continuation.artifacts must contain at least one pair.";
   }
   const identities = new Set<string>();
   for (const pair of value.artifacts) {
@@ -1158,7 +1171,11 @@ function isSchemaValidation(value: unknown): boolean {
 
 function isWorkflowUsage(value: unknown): boolean {
   if (!isRecord(value)) return false;
-  return [value.input, value.output, value.totalTokens, value.costTotal].every(
+  // `costTotal` is optional: absent means the price is unknown. A historical record
+  // that carries the old hardcoded number is still valid, so both shapes read.
+  if (value.costTotal !== undefined && !(typeof value.costTotal === "number" && Number.isFinite(value.costTotal)))
+    return false;
+  return [value.input, value.output, value.totalTokens].every(
     (item) => typeof item === "number" && Number.isFinite(item) && item >= 0,
   );
 }
@@ -1395,6 +1412,8 @@ export function readWorkflowRunResult(
     let artifactRefsOmittedInvalid: string | undefined;
     let resultPersistence: WorkflowResultPersistence | undefined;
     let resultPersistenceInvalid: string | undefined;
+    let budget: WorkflowRunResultEnvelope["budget"];
+    let budgetInvalid: string | undefined;
     if (Object.prototype.hasOwnProperty.call(record, "ok") && typeof record.ok !== "boolean") {
       okInvalid = "ok must be a boolean when present";
     }
@@ -1418,6 +1437,14 @@ export function readWorkflowRunResult(
         record.artifactRefsOmitted < 1
       ) {
         artifactRefsOmittedInvalid = "artifactRefsOmitted must be a positive safe integer when present";
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(record, "budget")) {
+      budget = parsePersistedBudgetEnvelope(record.budget);
+      if (budget === undefined) {
+        budgetInvalid =
+          `budget must name exactly the axes ${WORKFLOW_BUDGET_AXES.join(", ")}, ` +
+          `each a positive safe integer or ${JSON.stringify(WORKFLOW_BUDGET_UNBOUNDED)}`;
       }
     }
     if (Object.prototype.hasOwnProperty.call(record, "resultPersistence")) {
@@ -1620,6 +1647,10 @@ export function readWorkflowRunResult(
       ...(artifactRefsOmittedInvalid === undefined ? {} : { artifactRefsOmittedInvalid }),
       ...(exposeBindingMetadata && resultPersistence !== undefined ? { resultPersistence } : {}),
       ...(resultPersistenceInvalid === undefined ? {} : { resultPersistenceInvalid }),
+      // Not gated on `exposeBindingMetadata`: the applied budget describes what the run
+      // was ALLOWED to spend, which is true of the envelope whatever its runId says.
+      ...(budget === undefined ? {} : { budget }),
+      ...(budgetInvalid === undefined ? {} : { budgetInvalid }),
       ...(exposeBindingMetadata && target !== undefined ? { target } : {}),
       ...(targetInvalid === undefined ? {} : { targetInvalid }),
       ...(scriptIdentityInvalid === undefined ? {} : { scriptIdentityInvalid }),
@@ -1629,6 +1660,38 @@ export function readWorkflowRunResult(
   } catch {
     return null;
   }
+}
+
+/**
+ * The applied-budget envelope, read back exactly as strictly as it is written.
+ *
+ * The writer emits EVERY axis — an undeclared one as the literal `"unbounded"` —
+ * precisely so a reader cannot mistake "nobody declared it" for "this envelope
+ * predates the field". A partial or unknown-keyed record would put that ambiguity
+ * back, and a reader that rendered it would quietly under-report what a run was
+ * allowed to spend. So the key set is closed in both directions: exactly the axes,
+ * no more and no fewer, each a positive safe integer or that one word.
+ *
+ * Returns `undefined` for anything else; the caller records it as `budgetInvalid`
+ * rather than throwing, because a malformed budget line does not make the rest of
+ * a stored result unreadable.
+ */
+function parsePersistedBudgetEnvelope(value: unknown): Record<string, number | string> | undefined {
+  if (!isRecord(value)) return undefined;
+  const keys = Object.keys(value);
+  if (keys.length !== WORKFLOW_BUDGET_AXES.length) return undefined;
+  const envelope: Record<string, number | string> = {};
+  for (const axis of WORKFLOW_BUDGET_AXES) {
+    if (!Object.prototype.hasOwnProperty.call(value, axis)) return undefined;
+    const axisValue = value[axis];
+    if (axisValue === WORKFLOW_BUDGET_UNBOUNDED) {
+      envelope[axis] = WORKFLOW_BUDGET_UNBOUNDED;
+      continue;
+    }
+    if (typeof axisValue !== "number" || !Number.isSafeInteger(axisValue) || axisValue < 1) return undefined;
+    envelope[axis] = axisValue;
+  }
+  return envelope;
 }
 
 function isArtifactRefArray(value: unknown): value is WorkflowArtifactRef[] {
@@ -1978,6 +2041,9 @@ export function readWorkflowRunSummary(
   let usageOutput = 0;
   let usageTotal = 0;
   let usageCost = 0;
+  /** Latched false by the first usage line without a price: an unknown summand
+   *  makes the SUM unknown, and a partial total would read as the whole. */
+  let sawCost = true;
   let sawUsage = false;
   for (const line of lines) {
     if (line.kind === "phase" && line.groupId === undefined && typeof line.phase === "string") phase = line.phase;
@@ -2004,11 +2070,20 @@ export function readWorkflowRunSummary(
       usageInput += line.usage.input;
       usageOutput += line.usage.output;
       usageTotal += line.usage.totalTokens;
-      usageCost += line.usage.costTotal;
+      // A priced line contributes; an unpriced one makes the SUM unknown rather than
+      // smaller. Adding zero for an unknown price would report a total that is
+      // arithmetically wrong and reads as authoritative.
+      if (line.usage.costTotal === undefined) sawCost = false;
+      else if (sawCost) usageCost += line.usage.costTotal;
     }
   }
   const usage: WorkflowUsage | null = sawUsage
-    ? { input: usageInput, output: usageOutput, totalTokens: usageTotal, costTotal: usageCost }
+    ? {
+        input: usageInput,
+        output: usageOutput,
+        totalTokens: usageTotal,
+        ...(sawCost ? { costTotal: usageCost } : {}),
+      }
     : null;
   const last = lines.length > 0 ? lines[lines.length - 1] : undefined;
 

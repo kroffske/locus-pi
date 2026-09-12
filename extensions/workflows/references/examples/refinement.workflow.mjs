@@ -28,7 +28,6 @@ export default async function runWorkflow(dsl, input) {
         label: "decision",
         title: "Completion decision",
         choice: ["complete", "continue_progress", "continue_stalled", "needs_operator", "failed"],
-        returnVia: "tool",
       },
     );
     const evidence = dsl.publishArtifact(

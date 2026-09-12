@@ -1,6 +1,32 @@
 # Workflow output acceptance
 
-Audience: authors using a strict scalar or shaped result and bridge/host maintainers. This file owns the new opt-in output API. The legacy text/schema behavior remains documented in [REFERENCE.md](../REFERENCE.md#dsl-surface-v0).
+Audience: authors using a strict scalar or shaped result and bridge/host maintainers. This file owns the output API. It is no longer opt-in: same-session acceptance is the ONLY way a shaped value reaches workflow code. The text-parsed transport — a shape block appended to the prompt, the final message parsed as JSON, a fresh child spawned to repair the format — has been deleted. Plain `agent(prompt)` still returns the child's exact full text and is untouched.
+
+## The principle
+
+Stated here once. Every other workflow document links to this section instead of
+repeating it, so there is one place to correct if it ever changes.
+
+1. **The runtime never rejects or truncates an answer because of its own size policy.**
+   A bound on answer length, item count or artifact size is either a consumer's declared
+   contract, a provider's real API parameter, or it does not exist. A removed bound is
+   not replaced by a smaller number, and not by a prompt asking the child to "keep it
+   under N characters" — that is the same policy rewritten in English, and it fails the
+   same way: the work is already paid for when the bound bites.
+2. **Budgets stop spending, not answers.** Time, turns, tool calls and agents are
+   declared by the author or the operator, checked before the next spend, and printed as
+   `unbounded` on every axis nobody declared. A run that ends on one is _stopped by
+   budget_ — a statement about what it may still spend, never a verdict on the answers
+   it already produced, all of which stay stored and readable. See
+   [run budget](../REFERENCE.md#run-budget) for the axes.
+3. **A capability that cannot be honoured is refused before the child starts.** If a
+   transport or model cannot carry a declared contract, the call fails by name up front
+   (`output-contract-unavailable`) rather than imitating the capability by grading the
+   finished answer.
+
+Three things stay separate throughout, and the journal keeps them separate: whether
+execution FINISHED, whether the result is ACCEPTABLE to its consumer, and whether the
+stored data is AVAILABLE. An invalid result is still stored and still readable.
 
 ## API
 
@@ -9,13 +35,13 @@ const route = await agent("Classify the candidate", {
   label: "classify",
   title: "Orders · classification",
   choice: ["dag", "not-a-dag", "unresolved"],
-  returnVia: "tool",
   repair: { maxAttempts: 3, clarification: "Reuse the existing evidence; correct the value only." },
 });
 const value = await agent("Return the exact identifier", {
   label: "identifier",
+  // Both bounds name a real consumer: the identifier is one line in a status row, and
+  // the record it is written into refuses more than 200 characters.
   output: { type: "string", singleLine: true, maxLength: 200 },
-  returnVia: "tool",
 });
 const verdict = await agent("Check the actual result against the original goal", {
   label: "verifier",
@@ -25,24 +51,29 @@ const verdict = await agent("Check the actual result against the original goal",
     required: ["decision", "summary"],
     properties: {
       decision: { type: "string", enum: ["complete", "needs-work", "unknown"] },
-      summary: { type: "string", minLength: 1, maxLength: 4000 },
+      // Present and non-blank, with no ceiling: nothing downstream breaks on a longer
+      // summary, and the prompt is where its length is asked for.
+      summary: { type: "string", minLength: 1, nonBlank: true },
     },
   },
-  returnVia: "tool",
   repair: { maxAttempts: 2 },
 });
 const units = await agent("Return complete independent work instructions", {
   label: "discover",
-  handoffs: { minItems: 1, maxItems: 20, maxItemChars: 2000 },
-  returnVia: "tool",
+  // Counts, not sizes: zero units leaves the next stage nothing to do, and this caller
+  // has exactly 20 workers to give them to. Drop `maxItems` when no such consumer
+  // exists — a queue is not too long merely because it is long.
+  handoffs: { minItems: 1, maxItems: 20 },
 });
 ```
 
-`returnVia: "tool"` accepts exactly one of `choice`, `output`, `schema` or `handoffs`. String output is nonblank; `singleLine` rejects line breaks, not every possible Markdown token. `maxLength` is a positive safe integer up to 500,000; the default is 100,000. The outer existing answer/tool/time bounds also apply. No model-specific fence-stripping parser is added.
+A shaped call declares exactly one of `choice`, `output`, `schema` or `handoffs`; declaring two is refused by name before any child starts. String output is nonblank; `singleLine` rejects line breaks, not every possible Markdown token. `maxLength` is an optional positive safe integer with **no package default**: omit it and the value is accepted at whatever length the work needs. Declare it only when a real consumer cannot take more — a status line, a filename, a field in someone else's record — because the number enters the child's contract as a promise, not as a guess. The outer tool/time bounds still apply.
 
-`schema` uses the same supported keyword subset and the same validator as the text path; `handoffs` desugars to the same bounded unique string array as the text path (`minItems` default 0, `maxItems` 1..100, `maxItemChars` default 8,000, positive safe integer). The contract's `maxLength` bounds the canonical JSON of the accepted value. Raw schemas and handoffs up to 32,000 characters retain their existing 100,000-character canonical allowance and unchanged replay identity. Explicit handoffs above 32,000 receive an allowance derived from their item bounds, including worst-case JSON escaping. Unsafe derived arithmetic is rejected before any child starts; the outer answer/tool/time budgets still apply. The default item limit stays 8,000. An oversized record is corrected in the same session rather than after the child ends. The value is the JSON value itself: a string that contains JSON is a shape mismatch and is repaired in the same session, not parsed. No fence stripping or prose parsing is added.
+`returnVia` is gone as a decision. `returnVia: "tool"` is accepted for one release and journaled as a redundant, ignored option; `returnVia: "text"` is refused by name, because it selects a transport that no longer exists.
 
-`repair.maxAttempts` includes the first proposal or a turn with no proposal, defaults to 2 and is limited to 1..3. Optional clarification is nonblank text up to 4,000 characters. Both option objects are closed. `output` and `repair` without tool return are refused. Tool return does not combine with `validate` or transport `attempts` greater than one; choice fallback exists only for `choice`.
+`schema` uses the supported keyword subset and its validator. `handoffs` states an array of complete non-blank text units: `minItems` defaults to 0, `maxItems` may be omitted entirely, and there is no per-item character bound — `maxItemChars` is refused by name, because truncating one work unit to a guessed width destroys the work rather than protecting a consumer. A `maxLength` on a schema-shaped contract bounds the canonical JSON only when the author declared one; the runtime derives no allowance of its own and performs no size arithmetic before the call. The value is the JSON value itself: a string that contains JSON is a shape mismatch and is corrected in the same session, not parsed. No fence stripping or prose parsing exists anywhere on this path.
+
+`repair.maxAttempts` counts submissions, including the first proposal or a turn with no proposal. It defaults to **2 — one proposal plus exactly one same-session correction turn** — and has no upper bound beyond being a positive safe integer. That default is visible, not hidden: every shaped call journals `[workflow:return] <label>: contract v2, N same-session clarification turn(s)` and says whether N is the package default or the author's declaration. Optional `clarification` is nonblank text of any length. Both option objects are closed. `validate` and transport `attempts` combine with shaped output normally; choice fallback exists only for `choice`.
 
 The workflow child alone receives `workflow_return({ value })`. The closure, not tool arguments, owns this call's contract and identity. The tool accepts no file path, call ID or routing target. The first valid proposal is fixed; identical duplicates are idempotent, contradictory second proposals fail the call.
 
@@ -68,7 +99,7 @@ The agent must fill that container with its existing schema-matching content;
 the host never parses a JSON string into an accepted array or object. Correction
 examples do not change the initial prompt or the completed-call replay key.
 
-Legacy `choice`, `schema` and `schema + validate` keep their current fresh-session shape repair; ordinary text calls are unchanged. Tool return is opt-in. A semantic `continue` still requires a new worker call and a new conversation.
+There is no fresh-session shape repair left to fall back to: `choice`, `handoffs`, `output`, `schema` and `schema + validate` all correct the format inside the child that produced the value. Ordinary text calls are unchanged. A semantic `continue` still requires a new worker call and a new conversation.
 
 ## Canonical value and evidence
 
@@ -76,7 +107,7 @@ The SDK emits canonical JSON for the accepted value (scalar, object or array); r
 
 `agent_end.outputAcceptance` contains `{ source: "tool", toolName: "workflow_return", attempts }` only on success. `callId`, child session evidence and group `itemPath` bind it to the execution. Missing fresh-execution acceptance receipts fail closed. Replayed calls use recorded validated canonical answers and existing replay provenance; they do not invent a new session receipt.
 
-Choice decisions emit a runtime journal log with `message: "[workflow:choice]"` and `choiceDecision`: `value`, `source: "validated" | "fallback"`, `returnVia: "text" | "tool"`, optional attempts and fallback reason. The transcript shows the source, transport and attempts. Fallback is not ordinary model judgment.
+Choice decisions emit a runtime journal log with `message: "[workflow:choice]"` and `choiceDecision`: `value`, `source: "validated" | "fallback"`, `returnVia` (always `"tool"` on a fresh run; `"text"` appears only in journals written before the text transport was deleted), optional attempts and fallback reason. The transcript shows the source, transport and attempts. Fallback is not ordinary model judgment.
 
 An explicitly declared `choiceFallback` in tool mode applies only to `output-contract-exhausted`. It never turns provider, authorization, cancellation or infrastructure errors into `not-a-dag` or another domain decision. With asymmetric false-negative costs, select an explicit uncertainty value or fail closed. A valid negative classification may still require semantic re-review; output acceptance proves shape, not truth.
 
@@ -102,7 +133,6 @@ const result = await agent(
     label: "compose",
     title: "Compose output files",
     choice: ["success", "failed"],
-    returnVia: "tool",
     repair: { maxAttempts: 2 },
   },
 );
@@ -116,8 +146,10 @@ and repeated invalid values. Mock graph and syntax checks alone cannot prove mod
 compliance. A simple narrative lookup still uses plain `agent(prompt, { label, title })`;
 do not add tools or extra verification agents to it.
 
-Legacy text choices remain supported. They now show individual allowed values
-rather than an enum schema; validation still rejects a schema with no selected
-value. This wording changes their replay request identity. Updating the runtime
-can end prefix reuse at the first affected text-choice call; it does not preserve
-only the failed suffix of every old run.
+**Replay across this deletion.** The return contract carries a version, and this
+release is v2. A record written under v1 no longer matches the key its call now
+computes, so the replay reports `return-contract-changed`, names the release
+boundary in the journal, and runs that call fresh. Prefix reuse ends at the first
+shaped call in an old run — the calls before it still replay byte for byte, and a
+plain-text call is unversioned and unaffected. No historical record is rewritten,
+and no historically failed call becomes an accepted one.

@@ -352,7 +352,11 @@ describe("npm public package boundary", () => {
     // Adaptive authoring replaces the omnibus manual with focused references and
     // adds a public authoring guide, two runnable source examples and style cards.
     // Error diagnostics add one shared writer and one shared diagnostic reference.
-    expect(dryRun.files).toHaveLength(266);
+    // Explicit-only budgets add one shared timer module, so a long deadline can run
+    // as a chain of representable waits instead of being refused by a policy ceiling.
+    // One more shared module answers "can this transport host session tools", so a
+    // shaped call on a route that cannot is refused before the child starts.
+    expect(dryRun.files).toHaveLength(268);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
