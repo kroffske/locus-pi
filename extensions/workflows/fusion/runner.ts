@@ -6,7 +6,7 @@ import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.j
 import type { WorkflowAgentBridgeOptions } from "../runtime/workflow-agent-bridge.js";
 import { createWorkflowAgentPreflight, createWorkflowAgentRunner } from "../runtime/workflow-agent-bridge.js";
 import { createWorkflowArtifactStore, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
-import { DEFAULT_WORKFLOW_BUDGET, formatWorkflowBudgetPrelude } from "../runtime/workflow-budget.js";
+import { formatWorkflowBudgetPrelude, resolveWorkflowBudget } from "../runtime/workflow-budget.js";
 import { claimNewWorkflowRun } from "../runtime/workflow-journal.js";
 import {
   acquireWorkflowRootLease,
@@ -32,6 +32,14 @@ import {
   type WorkflowFusionMode,
   type WorkflowJournalLine,
 } from "../runtime/workflow-runtime.js";
+
+/**
+ * A direct `/fusion` declares no budget, so every stop axis is unbounded and only
+ * the queueing width applies. The prelude prints all six axes, five of them as
+ * `unbounded`, which is the point: an operator sees that nothing will stop this run
+ * on time, turns, tool calls or fan-out instead of inheriting numbers nobody chose.
+ */
+const FUSION_BUDGET = resolveWorkflowBudget().budget;
 
 export interface DirectFusionRunOptions {
   pi: ExtensionAPI;
@@ -75,7 +83,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     runId: mintedRunId,
     kind: "log",
     source: "runtime",
-    message: formatWorkflowBudgetPrelude(DEFAULT_WORKFLOW_BUDGET),
+    message: formatWorkflowBudgetPrelude(FUSION_BUDGET),
   }));
   options.onEvent?.(prelude);
 
@@ -99,13 +107,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     preflightAgentRequests: createWorkflowAgentPreflight(bridgeOptions),
     artifactPorts: artifactStore,
     journal: journalSink,
-    maxConcurrentAgents: DEFAULT_WORKFLOW_BUDGET.concurrency,
-    maxTotalAgentInvocations: DEFAULT_WORKFLOW_BUDGET.totalAgents,
-    runtimeMs: DEFAULT_WORKFLOW_BUDGET.runtimeMs,
-    defaultTimeoutMs: DEFAULT_WORKFLOW_BUDGET.timeoutMs,
-    defaultMaxToolCalls: DEFAULT_WORKFLOW_BUDGET.toolCalls,
-    defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
-    defaultMaxAnswerChars: DEFAULT_WORKFLOW_BUDGET.answerChars,
+    maxConcurrentAgents: FUSION_BUDGET.concurrency,
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
   });
   const workspaceLease = acquireWorkflowRootLease({ projectRoot, output: workspace, rootRunId: runId });
@@ -187,7 +189,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
       result: prepared,
       ...(finalError === undefined ? {} : { error: finalError }),
       journal,
-      budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: runtime.peakAgentConcurrency() },
+      budget: { applied: FUSION_BUDGET, peakConcurrency: runtime.peakAgentConcurrency() },
     },
     artifactStore,
   );

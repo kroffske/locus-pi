@@ -170,6 +170,95 @@ describe("workflow continuation", () => {
     expect(result.continuation).toEqual(binding);
   });
 
+  it("carries nine refs from handoff through continuation to journal readback", async () => {
+    // Eight was a count gate in three separate places: the tool schema, the runtime binding
+    // and the journal reader. A ninth complete reference is evidence the origin run already
+    // produced and the operator already paid for, so nothing here counts any more —
+    // identity, origin and digest still decide what is usable.
+    const root = project();
+    const { continuation, refs } = sourceContinuation(root, 9);
+    expect(refs).toHaveLength(9);
+    const harness = createHarness(root);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "continuation",
+      input: "nine",
+      continuation,
+      createExecutor: executor(),
+    });
+
+    expect(result.ok).toBe(true);
+    const binding = result.journal.find((line) => line.message === "[workflow:continuation]")?.continuation;
+    expect(binding?.artifacts).toHaveLength(9);
+    // Readback from the journal FILE, which is where the reader's own count gate lived.
+    const state = readWorkflowRunJournalState(root, result.runId);
+    const persisted = state.lines.find((line) => line.message === "[workflow:continuation]")?.continuation;
+    expect(state.diagnostics).toEqual([]);
+    expect(persisted?.artifacts.map((entry) => entry.sourceRef)).toEqual(refs);
+  });
+
+  it("round-trips a published display label through result.json and the tool schema", async () => {
+    // The writer accepts display labels for `name` and keeps `artifactId` as the storage id.
+    // The readers still demanded the storage alphabet, so publishing `Design review.md` made
+    // the artifact unreferenceable: the result reader and the tool's continuation parameter
+    // both rejected the run's own output.
+    const root = project();
+    const runId = "display-source-run";
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId, runDir: runDir(root, runId) });
+    const ref = store.publishText("Design review, round 2.md", "the review", "prepare");
+    expect(ref.name).toBe("Design review, round 2.md");
+    writeFileSync(
+      workflowResultFile(runDir(root, runId)),
+      `${JSON.stringify({
+        runId,
+        ok: true,
+        result: { mode: "prepared", artifactRefs: [ref] },
+        artifactRefs: [ref],
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
+    );
+    const harness = createHarness(root);
+    workflows(harness.pi);
+    const schema = harness.tools.get("workflow")!.parameters;
+    const continuation: WorkflowContinuation = { originRunId: runId, artifactRefs: [ref] };
+
+    // The tool accepts the label it was given...
+    expect(Value.Check(schema, { name: "continuation", continuation })).toBe(true);
+    // ...while a name that acts like a path is still refused.
+    expect(
+      Value.Check(schema, {
+        name: "continuation",
+        continuation: { ...continuation, artifactRefs: [{ ...ref, name: "nested/Design review.md" }] },
+      }),
+    ).toBe(false);
+    expect(
+      Value.Check(schema, {
+        name: "continuation",
+        continuation: { ...continuation, artifactRefs: [{ ...ref, name: "   " }] },
+      }),
+    ).toBe(false);
+
+    const result = await runWorkflowScript({
+      pi: harness.pi,
+      ctx: harness.ctx,
+      signal: new AbortController().signal,
+      name: "continuation",
+      input: "continue the review",
+      continuation,
+      createExecutor: executor(),
+    });
+
+    expect(result.ok).toBe(true);
+    const state = readWorkflowRunJournalState(root, result.runId);
+    expect(state.diagnostics).toEqual([]);
+    const persisted = state.lines.find((line) => line.message === "[workflow:continuation]")?.continuation;
+    expect(persisted?.artifacts[0]?.sourceRef.name).toBe("Design review, round 2.md");
+    expect(persisted?.artifacts[0]?.consumedRef.name).toBe("Design review, round 2.md");
+  });
+
   it.each([
     ["origin mismatch", (value: WorkflowContinuation) => ({ ...value, originRunId: "other-run" })],
     [
@@ -263,12 +352,21 @@ describe("workflow continuation", () => {
         continuation: { ...continuation, artifactRefs: [{ ...continuation.artifactRefs[0], extra: true }] },
       }),
     ).toBe(false);
+    // Count is NOT a schema bound. A continuation carries the work its origin run
+    // actually produced; refusing the ninth complete reference would drop evidence
+    // the operator already paid for. Identity, completeness and same-origin still
+    // decide what is usable, one level down.
     expect(
       Value.Check(schema, {
         name: "continuation",
         continuation: { ...continuation, artifactRefs: Array(9).fill(continuation.artifactRefs[0]) },
       }),
-    ).toBe(false);
+    ).toBe(true);
+    // The LOWER bound is a real contract and stays: a continuation with no reference
+    // continues nothing.
+    expect(Value.Check(schema, { name: "continuation", continuation: { ...continuation, artifactRefs: [] } })).toBe(
+      false,
+    );
   });
 
   it("rejects non-string nested input before entering the nested workflow callback", async () => {

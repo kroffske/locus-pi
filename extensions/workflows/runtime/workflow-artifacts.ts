@@ -10,6 +10,7 @@ import {
   readWorkflowRunFile,
   removeWorkflowRunFile,
   renameWorkflowRunFile,
+  isWorkflowArtifactDisplayName,
   WORKFLOW_SAFE_COMPONENT_PATTERN,
   writeWorkflowRunFile,
   workflowRunArtifactsDir,
@@ -19,7 +20,6 @@ import {
 } from "./workflow-run-layout.js";
 
 export const WORKFLOW_ARTIFACT_INDEX_VERSION = "locus.workflow.artifacts.v1" as const;
-export const DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT = 2 * 1024 * 1024;
 const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
 
 export interface WorkflowArtifactRef {
@@ -164,8 +164,8 @@ export function assertWorkflowContinuation(value: unknown): asserts value is Wor
     throw new Error("Workflow continuation has unexpected fields.");
   }
   assertSafeComponent(value.originRunId as string, "continuation originRunId");
-  if (!Array.isArray(value.artifactRefs) || value.artifactRefs.length < 1 || value.artifactRefs.length > 8) {
-    throw new Error("Workflow continuation must contain 1-8 artifactRefs.");
+  if (!Array.isArray(value.artifactRefs) || value.artifactRefs.length < 1) {
+    throw new Error("Workflow continuation must contain at least one artifactRef.");
   }
   const identities = new Set<string>();
   for (const candidate of value.artifactRefs) {
@@ -205,7 +205,6 @@ export interface CreateWorkflowArtifactStoreOptions {
   runId: string;
   runDir: string;
   now?: () => string;
-  maxTextBytes?: number;
 }
 
 export type WorkflowArtifactIndexRead =
@@ -278,10 +277,6 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   const artifactsDir = workflowRunArtifactsDir(options.runDir);
   const indexPath = path.join(artifactsDir, "index.json");
   const now = options.now ?? (() => new Date().toISOString());
-  const maxTextBytes = options.maxTextBytes ?? DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT;
-  if (!Number.isSafeInteger(maxTextBytes) || maxTextBytes < 1) {
-    throw new Error("Workflow text artifact limit must be a positive safe integer.");
-  }
   ensureWorkflowDirectoryNoSymlink(options.runDir, runtimeDir);
   ensureWorkflowDirectoryNoSymlink(runtimeDir, artifactsDir);
   const existingIndexBytes = workflowRunFileExists(options.runDir, indexPath)
@@ -436,7 +431,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     assertArtifactName(input.name);
     const evidence: WorkflowAgentEvidence = {};
     if (input.text !== undefined && input.text.trim() !== "") {
-      const bytes = boundedText(input.text, maxTextBytes);
+      const bytes = Buffer.from(input.text, "utf8");
       evidence.answer = addRecord({
         artifactId: `${input.callId}-answer`,
         name: input.name,
@@ -508,7 +503,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       name: `operator-ask-${ordinal}.json`,
       kind: "operator-ask",
       mediaType: "application/json",
-      bytes: boundedText(serialized, maxTextBytes),
+      bytes: Buffer.from(serialized, "utf8"),
       relativePath: path.join("operator-asks", callId, `operator-ask-${ordinal}.json`),
       provenance: "fresh",
       callId,
@@ -535,7 +530,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       name,
       kind,
       mediaType: "text/markdown; charset=utf-8",
-      bytes: boundedText(text, maxTextBytes),
+      bytes: Buffer.from(text, "utf8"),
       relativePath: path.join("published", `${artifactId}-${markdownFilename(name)}`),
       provenance: "published",
       ...(stage !== undefined ? { stage } : {}),
@@ -552,11 +547,12 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     if (sourceRead.status !== "ready") throw new Error(sourceRead.message);
     const sourceRecord = sourceRead.record;
     if (!sameRef(sourceRecord, ref)) throw new Error("Workflow artifact reference does not match its source index.");
-    if (!sourceEnvelope.terminal.artifactRefs.some((projected) => sameArtifactRef(projected, ref))) {
-      throw new Error("Workflow artifact reference is not present in the source run terminal projection.");
-    }
+    // Admission is the source run's FULL verified index, not the compact projection
+    // result.json carries for display: `readWorkflowArtifactRecord` above proved the
+    // id, the byte digest and the record's provenance, and the envelope read proved
+    // the source run is a real terminal run of a known target. An artifact older than
+    // the newest few therefore stays consumable for as long as its bytes exist.
     if (!sourceRecord.mediaType.startsWith("text/")) throw new Error("Workflow artifact is not text media.");
-    if (sourceRecord.size > maxTextBytes) throw new Error("Workflow text artifact exceeds the configured size limit.");
     const bytes = sourceRead.bytes;
     const text = bytes.toString("utf8");
     const ordinal = index.artifacts.filter((entry) => entry.kind === "input").length + 1;
@@ -851,12 +847,6 @@ function validateTranscript(bytes: Buffer, childSessionId?: string): void {
   }
 }
 
-function boundedText(text: string, limit: number): Buffer {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.byteLength > limit) throw new Error(`Workflow text artifact exceeds ${limit} bytes.`);
-  return bytes;
-}
-
 function normalizeRelativePath(value: string): string {
   const normalized = path.normalize(value);
   if (
@@ -875,17 +865,38 @@ function assertSafeComponent(value: unknown, field: string): asserts value is st
     throw new Error(`Invalid workflow artifact ${field}: ${JSON.stringify(value)}`);
 }
 
+/**
+ * An artifact name is the author's DISPLAY label, not the storage id. `artifactId`
+ * is the storage id: it is generated here, it is safe by construction, and it is
+ * what every path is built from. So the name carries no length or alphabet policy —
+ * "Design review, round 2" is a legitimate name. What it may not do is act like a
+ * path or a control sequence, which is confinement, not size. The predicate is shared
+ * with every reader (`workflow-journal.ts`, the `workflow` tool schema) so a name this
+ * writer accepts cannot become an unreadable reference one layer later.
+ */
 function assertArtifactName(value: unknown): asserts value is string {
-  assertSafeComponent(value, "name");
+  if (!isWorkflowArtifactDisplayName(value)) {
+    throw new Error(`Invalid workflow artifact name: ${JSON.stringify(value)}`);
+  }
 }
 
+/**
+ * The longest filename component this derivation emits. Not a policy about the
+ * name — the full label stays in the index and in every ref — but the real limit
+ * common filesystems enforce on one component (255 bytes), left room for the
+ * `artifactId` prefix and an extension.
+ */
+const MAX_ARTIFACT_FILENAME_COMPONENT_CHARS = 120;
+
 function safeFilename(value: string): string {
-  return (
+  const base =
     value
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/gu, "-")
-      .replace(/^-+|-+$/gu, "") || "artifact"
-  );
+      .replace(/^-+|-+$/gu, "") || "artifact";
+  return base.length > MAX_ARTIFACT_FILENAME_COMPONENT_CHARS
+    ? base.slice(0, MAX_ARTIFACT_FILENAME_COMPONENT_CHARS).replace(/-+$/u, "")
+    : base;
 }
 
 function markdownFilename(value: string): string {
@@ -943,15 +954,6 @@ function sameRef(record: WorkflowArtifactRecord, ref: WorkflowArtifactRef): bool
     record.artifactId === ref.artifactId &&
     record.name === ref.name &&
     record.sha256 === ref.sha256
-  );
-}
-
-function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifactRef): boolean {
-  return (
-    left.runId === right.runId &&
-    left.artifactId === right.artifactId &&
-    left.name === right.name &&
-    left.sha256 === right.sha256
   );
 }
 

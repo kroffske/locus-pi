@@ -54,5 +54,7 @@ Workflow modules execute in the Pi Node.js host and are not sandboxed. Review pr
 - [Operator workflow guide](../../docs/workflows.md)
 - [Readable authoring contract](../../docs/locus-pi-workflows.md)
 - [Advanced runtime and DSL reference](REFERENCE.md)
+- [Output acceptance](references/output-acceptance.md) — the shaped-result API, and the
+  single statement of what the runtime does and does not bound
 - [Packaged examples](examples/README.md)
 - [Manifest](manifest.json)

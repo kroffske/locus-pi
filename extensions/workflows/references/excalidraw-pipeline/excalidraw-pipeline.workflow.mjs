@@ -75,11 +75,28 @@ const AUTHOR_MODEL_ROLE = "agent";
  */
 const DRAFT_MODEL_ROLE = "smol";
 
-/** Bounded fan-out. A request that wants more sections is a different diagram. */
+/**
+ * Bounded fan-out. A request that wants more sections is a different diagram. This is a
+ * pre-request scope decision owned by THIS workflow — what it agrees to draw — not a cap
+ * on anything a child answers; no size policy is applied to a returned section.
+ */
 const MAX_SECTIONS = 6;
 /** Attempts after the first authoring attempt before a section is given up on. */
 const MAX_SECTION_REPAIRS = 2;
 
+/**
+ * Two explicit declarations, and neither is about the size of an answer.
+ *
+ * `workspaceMode: "project"` is a CAPABILITY: every stage below delivers by writing a
+ * section source file into the run directory and the script then executes that file, so
+ * a stage confined away from the project checkout cannot do its job at all.
+ *
+ * `maxToolCalls: 80` is an explicit per-call SPEND budget, chosen for what one section
+ * costs: read the prompt resources, write one file, and re-read it across at most two
+ * repairs. A stage that passes 80 tool calls on one section is looping, not working, and
+ * the run stops paying for it. Nothing here bounds how long the stage's reply may be —
+ * the reply is not even the deliverable; the file it wrote is.
+ */
 const AGENT_DEFAULTS = Object.freeze({
   maxToolCalls: 80,
   workspaceMode: "project",

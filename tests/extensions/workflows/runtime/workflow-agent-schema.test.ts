@@ -23,7 +23,17 @@ function scriptedRuntime(runId: string, answers: string[]) {
     agentRunner: async (request): Promise<WorkflowAgentResult> => {
       requests.push(request);
       const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return { ok: true, status: "completed", summary: "done", text, diagnostics: [], agent: request.agent };
+      return {
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text,
+        diagnostics: [],
+        agent: request.agent,
+        ...(request.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
+      };
     },
   });
   return { ...runtime, requests };
@@ -31,7 +41,7 @@ function scriptedRuntime(runId: string, answers: string[]) {
 
 describe("agent({ schema }) structured output", () => {
   it("returns the validated value and records a valid shape check on agent_end", async () => {
-    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-happy", ['```json\n{"answer":"yes"}\n```']);
+    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-happy", ['{"answer":"yes"}']);
 
     const value = await dsl.agent("Is the diff reviewable?", {
       schema: { ...VERDICT_SCHEMA },
@@ -40,35 +50,45 @@ describe("agent({ schema }) structured output", () => {
 
     expect(value).toEqual({ answer: "yes" });
     expect(requests).toHaveLength(1);
-    // The child is told the contract; the runtime is what enforces it.
+    // The child is told the contract; the acceptance tool in its own session enforces it.
     expect(requests[0]?.prompt).toContain("Is the diff reviewable?");
-    expect(requests[0]?.prompt).toContain("## Required answer shape");
-    expect(requests[0]?.prompt).toContain('"enum"');
+    expect(requests[0]?.prompt).toContain("workflow_return");
+    expect(requests[0]?.returnContract?.schema).toEqual(VERDICT_SCHEMA);
     const ends = getJournal().filter((line) => line.kind === "agent_end");
     expect(ends).toHaveLength(1);
     expect(ends[0]?.schemaValidation).toEqual({ status: "valid", attempts: 1, errors: [] });
   });
 
-  it("retries a non-conforming answer with the validator errors and accepts the repaired one", async () => {
-    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-retry", [
-      '{"answer":"maybe"}',
-      '{"answer":"no"}',
-    ]);
+  it("states the clarification allowance in the contract and in the journal", async () => {
+    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-clarifications", ['{"answer":"yes"}']);
+    await dsl.agent("Decide.", { label: "gate", schema: { ...VERDICT_SCHEMA } });
 
-    const value = await dsl.agent("Is the diff reviewable?", { schema: { ...VERDICT_SCHEMA } });
-
-    expect(value).toEqual({ answer: "no" });
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.prompt).toContain("was REJECTED for:");
-    expect(requests[1]?.prompt).toContain("not in enum");
-    expect(getJournal().flatMap((line) => (line.kind === "agent_end" ? [line.schemaValidation] : []))).toEqual([
-      { status: "mismatch", attempts: 1, errors: ['answer: value "maybe" not in enum'] },
-      { status: "valid", attempts: 2, errors: [] },
-    ]);
+    // Visible to the child…
+    expect(requests[0]?.returnContract?.maxAttempts).toBe(2);
+    expect(requests[0]?.prompt).toContain("1 same-session correction turn(s)");
+    // …and visible to the operator, naming it as the package default rather than hiding it.
+    expect(
+      getJournal().some(
+        (line) => line.message?.includes("[workflow:return] gate") && line.message.includes("package default 1"),
+      ),
+    ).toBe(true);
   });
 
-  it("fails closed with SchemaValidationError after the retry budget instead of returning text", async () => {
-    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-fail-closed", ["Probably yes, I think."]);
+  it("carries an author-declared clarification budget with no upper bound", async () => {
+    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-repair-declared", ['{"answer":"yes"}']);
+    await dsl.agent("Decide.", {
+      label: "gate",
+      schema: { ...VERDICT_SCHEMA },
+      repair: { maxAttempts: 9, clarification: "Name the branch you chose." },
+    });
+    expect(requests[0]?.returnContract?.maxAttempts).toBe(9);
+    expect(getJournal().some((line) => line.message?.includes("8 same-session clarification turn(s) (declared)"))).toBe(
+      true,
+    );
+  });
+
+  it("fails closed with SchemaValidationError on an off-shape accepted value, in ONE child", async () => {
+    const { dsl, getJournal, requests } = scriptedRuntime("agent-schema-fail-closed", ['{"answer":"maybe"}']);
 
     let caught: unknown;
     try {
@@ -80,10 +100,9 @@ describe("agent({ schema }) structured output", () => {
     expect(caught).toBeInstanceOf(SchemaValidationError);
     const failure = caught as SchemaValidationError;
     expect(failure.name).toBe("SchemaValidationError");
-    expect(failure.attempts).toBe(2);
-    expect(failure.errors.join(" ")).toContain("not valid JSON");
-    // Bounded: exactly the retry budget, no unbounded loop, and no value reaches the script.
-    expect(requests).toHaveLength(2);
+    expect(failure.errors.join(" ")).toContain("not in enum");
+    // No fresh child is spawned to fix the form of an answer this one already produced.
+    expect(requests).toHaveLength(1);
     expect(
       getJournal().every((line) => line.kind !== "agent_end" || line.schemaValidation?.status === "mismatch"),
     ).toBe(true);
@@ -143,50 +162,56 @@ describe("agent({ schema }) structured output", () => {
   });
 
   it("accepts an integer answer and rejects a fractional one with a value-bearing error", async () => {
-    const { dsl, requests } = scriptedRuntime("agent-schema-integer", ['{"count":2.5}', '{"count":3}']);
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["count"],
+      properties: { count: { type: "integer" } },
+    } as const;
 
-    const value = await dsl.agent("How many blocking findings?", {
-      schema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["count"],
-        properties: { count: { type: "integer" } },
-      },
+    const good = scriptedRuntime("agent-schema-integer-ok", ['{"count":3}']);
+    await expect(good.dsl.agent("How many blocking findings?", { schema: { ...schema } })).resolves.toEqual({
+      count: 3,
     });
 
-    expect(value).toEqual({ count: 3 });
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.prompt).toContain("count: expected integer, got 2.5");
+    const bad = scriptedRuntime("agent-schema-integer-bad", ['{"count":2.5}']);
+    await expect(bad.dsl.agent("How many blocking findings?", { schema: { ...schema } })).rejects.toThrow(
+      "count: expected integer, got 2.5",
+    );
+    expect(bad.requests).toHaveLength(1);
   });
 
-  it("re-asks the child when a size or pattern bound is broken, instead of killing the run", async () => {
-    // The whole point of moving bounds into the schema: a script that checked
-    // these by hand after validation could only throw, ending the run on an
-    // answer the child could have corrected on its own.
-    const { dsl, requests } = scriptedRuntime("agent-schema-bounds", [
-      '{"id":"w1","tags":["a","b","c"],"summary":""}',
-      '{"id":"W1","tags":["a","b"],"summary":"ok"}',
-    ]);
-
-    const value = await dsl.agent("Name the unit.", {
-      schema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "tags", "summary"],
-        properties: {
-          id: { type: "string", pattern: "^W[1-9][0-9]*$" },
-          tags: { type: "array", items: { type: "string" }, maxItems: 2 },
-          summary: { type: "string", minLength: 1 },
-        },
+  it("names every AUTHOR-declared bound it breaks: these are consumer contracts, not budgets", async () => {
+    // `maxItems`, `maxLength`, `pattern` inside a schema stay: an author who declares one
+    // owns it as a real requirement of the next consumer. What is gone is the runtime
+    // adding bounds nobody declared.
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "tags", "summary"],
+      properties: {
+        id: { type: "string", pattern: "^W[1-9][0-9]*$" },
+        tags: { type: "array", items: { type: "string" }, maxItems: 2 },
+        summary: { type: "string", minLength: 1 },
       },
-    });
+    } as const;
 
-    expect(value).toEqual({ id: "W1", tags: ["a", "b"], summary: "ok" });
-    expect(requests).toHaveLength(2);
-    const retry = requests[1]?.prompt ?? "";
-    expect(retry).toContain('id: value "w1" does not match pattern ^W[1-9][0-9]*$');
-    expect(retry).toContain("tags: expected at most 2 item(s), got 3");
-    expect(retry).toContain("summary: expected at least 1 character(s), got 0");
+    const bad = scriptedRuntime("agent-schema-bounds", ['{"id":"w1","tags":["a","b","c"],"summary":""}']);
+    const failure = await bad.dsl
+      .agent("Name the unit.", { schema: { ...schema } })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    const reported = (failure as Error).message;
+    expect(reported).toContain('id: value "w1" does not match pattern ^W[1-9][0-9]*$');
+    expect(reported).toContain("tags: expected at most 2 item(s), got 3");
+    expect(reported).toContain("summary: expected at least 1 character(s), got 0");
+
+    const good = scriptedRuntime("agent-schema-bounds-ok", ['{"id":"W1","tags":["a","b"],"summary":"ok"}']);
+    await expect(good.dsl.agent("Name the unit.", { schema: { ...schema } })).resolves.toEqual({
+      id: "W1",
+      tags: ["a", "b"],
+      summary: "ok",
+    });
   });
 
   it.each([
@@ -246,25 +271,30 @@ describe("agent({ schema }) structured output", () => {
     // stays unavailable there, and the call stays typed as unknown rather than string.
     const shapedTool: WorkflowAgentSchemaOptions = {
       schema: { ...VERDICT_SCHEMA },
-      returnVia: "tool",
       // @ts-expect-error output is a string-only contract
       output: { type: "string" },
     };
-    expect(shapedTool.returnVia).toBe("tool");
+    expect(shapedTool.schema).toEqual(VERDICT_SCHEMA);
   });
 
-  it("keeps a shaped tool return out of Promise<string>, and refuses validate before any child starts", async () => {
+  it("keeps a shaped return out of Promise<string>, and runs validate in the same session", async () => {
     const { dsl, requests } = scriptedRuntime("agent-schema-tool-typing", ['{"answer":"yes"}']);
     const never = async (): Promise<void> => {
-      // @ts-expect-error a shaped tool return is never Promise<string>
-      const asText: Promise<string> = dsl.agent("x", { schema: VERDICT_SCHEMA, returnVia: "tool" });
+      // @ts-expect-error a shaped return is never Promise<string>
+      const asText: Promise<string> = dsl.agent("x", { schema: VERDICT_SCHEMA });
       expect(asText).toBeDefined();
     };
     expect(never).toBeTypeOf("function");
 
+    // `validate` is no longer refused: its rule is checked beside the schema, inside the
+    // child's own session, so a cross-field violation is correctable rather than fatal.
     await expect(
-      dsl.agent("Decide.", { label: "decide", schema: VERDICT_SCHEMA, returnVia: "tool", validate: () => [] }),
-    ).rejects.toThrow(/does not support validate/u);
-    expect(requests).toHaveLength(0);
+      dsl.agent("Decide.", {
+        label: "decide",
+        schema: VERDICT_SCHEMA,
+        validate: (value) => ((value as { answer: string }).answer === "yes" ? [] : ["must be yes"]),
+      }),
+    ).resolves.toEqual({ answer: "yes" });
+    expect(requests).toHaveLength(1);
   });
 });

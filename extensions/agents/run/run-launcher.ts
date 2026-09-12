@@ -48,6 +48,22 @@ export function nextAgentRunSequence(): number {
   return ++agentRunSeq;
 }
 
+/**
+ * The interactive spawn surface names its own child budget, because the library
+ * no longer invents one (L25). These are exactly the values this surface has
+ * always enforced: five assistant turns, and a ten-minute wall clock for a child
+ * nobody is watching turn by turn. They live here, at the call site, so the owner
+ * of the interactive UX can see and change them without a package default changing
+ * anyone else's run.
+ *
+ * The wall clock is stated as ONE number. It used to be written as a 120s
+ * "per-turn" value that the host multiplied by the turn count; the host never
+ * applied it per turn, so the spelling described arithmetic rather than behaviour.
+ * The effective stop is unchanged.
+ */
+export const INTERACTIVE_AGENT_MAX_TURNS = 5;
+export const INTERACTIVE_AGENT_TIMEOUT_MS = 10 * 60 * 1000;
+
 interface AgentLiveTaskBaseInput {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
@@ -58,7 +74,10 @@ interface AgentLiveTaskBaseInput {
   task: string;
   approvalTier: ApprovalTier;
   liveModel: { model?: string; thinking?: string } | undefined;
+  /** Explicit assistant-turn budget for this interactive child. */
   maxTurns: number;
+  /** Explicit wall clock for this whole interactive child. */
+  childTimeoutMs: number;
   onStarted?: (line: string) => void;
   parentContext?: { inline?: string; artifactPath?: string };
 }
@@ -135,6 +154,7 @@ export async function runAgentLiveTask(
   }
   const executor = createAgentSdkSessionExecutor({
     model: tier.model ?? (ctx as { model?: unknown }).model,
+    childTimeoutMs: input.childTimeoutMs,
     live: {
       rowId,
       label,
@@ -174,11 +194,17 @@ export async function runAgentLiveTask(
     throw err;
   }
   if (boundary.status !== "completed") boundary = recordStandaloneFailure(input, boundary);
+  // A run whose envelope could not be stored is NOT a done run — it prints as the storage
+  // failure it is, through the same failure receipt as every other non-completion. What it
+  // is also not is a lost answer: the child answered, so the row keeps that answer and the
+  // storage reason travels in `errors` beside it, instead of overwriting the one copy of
+  // the result the operator still has.
+  const answerSurvivedStorageFailure = boundary.status === "storage-failed" && boundary.resultStorage?.answerAvailable;
   const finishedRow = agentLiveStore.patchExecution(execution, {
     status: boundary.status === "completed" ? "done" : boundary.status === "cancelled" ? "cancelled" : "error",
     ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
     ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),
-    finalAnswer: boundary.reason,
+    finalAnswer: answerSurvivedStorageFailure === true && boundary.text !== undefined ? boundary.text : boundary.reason,
     errors: boundary.status === "completed" ? [] : [boundary.reason, ...boundary.diagnostics],
   });
   // REQ-011: append-only transcript event line at completion (finished / error).
@@ -356,7 +382,8 @@ export async function executeAgentRunCommand(
       approvalTier,
       liveModel,
       modelRoleResolution,
-      maxTurns: 5,
+      maxTurns: INTERACTIVE_AGENT_MAX_TURNS,
+      childTimeoutMs: INTERACTIVE_AGENT_TIMEOUT_MS,
     });
     if (hasUI) {
       panel?.render(80);

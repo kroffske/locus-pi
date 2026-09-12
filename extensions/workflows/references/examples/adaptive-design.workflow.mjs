@@ -40,7 +40,6 @@ export default async function runWorkflow(dsl, input) {
         label: "design-route",
         title: "Route the arbiter decision",
         choice: ["ready", "revise", "retry_review", "needs_owner", "stop"],
-        returnVia: "tool",
       },
     );
     if (route === "ready") {

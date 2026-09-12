@@ -57,11 +57,31 @@ export const WORKFLOW_RUN_RUNTIME_DIRNAME = "runtime";
 export const WORKFLOW_RUN_ARTIFACTS_DIRNAME = "artifacts";
 export const WORKFLOW_RUN_JOURNAL_FILENAME = "journal.ndjson";
 export const WORKFLOW_SAFE_COMPONENT_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$";
+/**
+ * An artifact `name` is the author's DISPLAY label; `artifactId` is the storage id every
+ * path is built from. So a name carries no length or alphabet policy — `Design review.md`
+ * is a legitimate name — and the only rules left are confinement ones: it must say
+ * something (a non-whitespace character), it must not act like a path (`/`, `\`), and it
+ * must not smuggle control characters. Writers and readers share this one definition so a
+ * published name cannot become an unreadable reference one layer later.
+ */
+export const WORKFLOW_ARTIFACT_DISPLAY_NAME_PATTERN =
+  "^[^\\u0000-\\u001f\\u007f/\\\\]*[^\\u0000-\\u001f\\u007f/\\\\\\s][^\\u0000-\\u001f\\u007f/\\\\]*$";
 export const WORKFLOW_RUN_GROUP_STORAGE_PATTERN = ".locus-pi/runs/<storageRootRunId>/";
 export const WORKFLOW_NESTED_RUN_STORAGE_PATTERN = ".locus-pi/runs/<storageRootRunId>/{children,attempts}/<runId>/";
 export const WORKFLOW_WORKSPACES_STORAGE_PREFIX = ".locus-pi/workspaces/";
 
 const WORKFLOW_RUN_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
+const WORKFLOW_ARTIFACT_DISPLAY_NAME_REGEX = new RegExp(WORKFLOW_ARTIFACT_DISPLAY_NAME_PATTERN, "u");
+
+/** Whether a value is a usable artifact display label — see the pattern above. */
+export function isWorkflowArtifactDisplayName(value: unknown): value is string {
+  if (typeof value !== "string" || !WORKFLOW_ARTIFACT_DISPLAY_NAME_REGEX.test(value)) return false;
+  // `.` and `..` name a directory, never a label, and the stored filename is derived
+  // from this string.
+  const trimmed = value.trim();
+  return trimmed !== "." && trimmed !== "..";
+}
 const TASK_WORKSPACE_TARGET_NAMES = new Set(["task/draft", "task/plan"]);
 
 /** One owner for the Package task workflows that create or reuse planning evidence. */

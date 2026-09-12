@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { AgentParentContext, AgentRunRequest } from "./agent-runner.js";
+import { AGENT_BUDGET_UNBOUNDED } from "./agent-runner.js";
 import type { ModelRoleResolutionRecord } from "../model/model-settings.js";
 import { modelRoleResolutionRecord } from "../model/model-settings.js";
 import { buildAgentSystemPrompt } from "./agent-system-prompt.js";
@@ -24,7 +25,12 @@ export interface AgentExecutionPromptCapsule {
   projectRoot: string;
   workingDirectory: string;
   allowedTools: string[];
-  maxTurns: number;
+  /**
+   * The declared assistant-turn budget, or the literal `"unbounded"` when the
+   * caller declared none. A literal rather than an omitted key: the child reads
+   * this capsule, and an absent field would be silence, not an honest answer.
+   */
+  maxTurns: number | typeof AGENT_BUDGET_UNBOUNDED;
   depth: number;
   maxDepth: number;
   modelRole?: ModelRoleResolutionRecord;
@@ -48,7 +54,7 @@ export function createAgentExecutionPromptCapsule(
     projectRoot: request.projectRoot ?? "",
     workingDirectory: request.workingDirectory ?? request.projectRoot ?? "",
     allowedTools: [...request.allowedTools],
-    maxTurns: request.maxTurns,
+    maxTurns: request.maxTurns ?? AGENT_BUDGET_UNBOUNDED,
     depth: request.depth,
     maxDepth: request.maxDepth,
   };
@@ -62,11 +68,28 @@ export function createAgentExecutionPromptCapsule(
     suppressContextExtras: request.capabilityMode === "tool-free",
   });
   if (agentSystemPrompt !== undefined) capsule.agentSystemPrompt = agentSystemPrompt;
-  if (diagnostics.length > 0) capsule.contextDiagnostics = [...diagnostics];
   const parentContextText = assembleParentContext(request.parentContext);
+  if (parentContextText !== undefined) {
+    // The parent selected this context deliberately and it is the CHILD'S INPUT, not a
+    // projection for a human reader: cutting it here would delete the half of the brief
+    // the child never learns it was missing. So it travels whole, and a large one is
+    // noted in the receipt instead — evidence the operator can act on (a context-window
+    // overflow now reads as one), never a silent truncation.
+    const bytes = Buffer.byteLength(parentContextText, "utf8");
+    if (bytes > PARENT_CONTEXT_SIZE_NOTE_BYTES) {
+      diagnostics.push(
+        `Parent context is ${String(bytes)} bytes and was passed to the child whole (no truncation); ` +
+          `it counts against the child model's context window.`,
+      );
+    }
+  }
+  if (diagnostics.length > 0) capsule.contextDiagnostics = [...diagnostics];
   if (parentContextText !== undefined) capsule.parentContext = parentContextText;
   return capsule;
 }
+
+/** Size at which a passed-whole parent context earns a receipt note. Not a limit. */
+const PARENT_CONTEXT_SIZE_NOTE_BYTES = OUTPUT_DEFAULTS.subagentSummaryBytes;
 
 export function assembleParentContext(
   parentContext: AgentParentContext | undefined,
@@ -84,18 +107,9 @@ export function assembleParentContext(
     }
   }
   if (parts.length === 0) return undefined;
-  return clampParentContext(parts.join("\n---\n"));
-}
-
-function clampParentContext(text: string): string {
-  const suffix = "\n...[parent context truncated]";
-  const maxBytes = OUTPUT_DEFAULTS.subagentSummaryBytes;
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  const targetBytes = Math.max(0, maxBytes - Buffer.byteLength(suffix, "utf8"));
-  let end = text.length;
-  while (end > 0 && Buffer.byteLength(text.slice(0, end), "utf8") > targetBytes) end = Math.floor(end * 0.9);
-  while (end < text.length && Buffer.byteLength(text.slice(0, end + 1), "utf8") <= targetBytes) end += 1;
-  return `${text.slice(0, end)}${suffix}`;
+  // Joined and returned unchanged: see the receipt note in
+  // `createAgentExecutionPromptCapsule` for why nothing is cut here.
+  return parts.join("\n---\n");
 }
 
 export function formatAgentKickoffPrompt(capsule: AgentExecutionPromptCapsule): string {

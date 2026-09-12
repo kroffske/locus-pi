@@ -4,7 +4,7 @@ Use this card when a worker may leave concrete work unfinished. Avoid it without
 
 Graph: fresh worker → independent reviewer → shaped decision; continue → fresh worker with exact handoff. Complete → primary output; failed, cap or no-progress → honest non-success; needs_operator → stop and return.
 
-Cost: the text-review recipe uses 3R logical calls and sequential depth 3R. With `returnVia: "tool"`, output clarification remains in that call's session and still costs tokens/turns/tools. Legacy text `choice` can use one extra physical child per decision. No transport retries are declared in the example.
+Cost: the recipe uses 3R logical calls and sequential depth 3R. Output clarification remains in that call's own session and still costs tokens/turns/tools; it never adds a physical child. No transport retries are declared in the example.
 
 Handoff: immutable original goal, constraints and criteria; previous worker result; exact reviewer feedback; completed work with evidence; precise remaining scope. Keep only useful prior-round state, not a concatenated transcript. A fresh worker has a new conversation, not a promise of an empty resource environment.
 

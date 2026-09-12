@@ -14,9 +14,11 @@ import {
  * agreement between fields, a budget summed across items and the shape of a graph
  * are joins over the whole answer, and until this option existed they were checked
  * by ordinary script code after the await, where the only available verdict was a
- * `throw` that ended the run. Every case here asks the same question from a
- * different side: does a violation the child could have repaired reach the child,
- * and does everything else still fail closed?
+ * `throw` that ended the run. It now runs inside the child's OWN session, beside the
+ * schema check, so a violation is a clarification the child can answer rather than a
+ * fresh child that remembers nothing. Every case here asks the same question from a
+ * different side: does a violation reach the child that produced it, and does
+ * everything else still fail closed?
  *
  * The never-retryable pin required by the doctrine — host-owned provenance,
  * continuation identity and prior-run text still ending the run without a re-ask —
@@ -65,7 +67,17 @@ function scriptedRuntime(runId: string, answers: string[]) {
     agentRunner: async (request): Promise<WorkflowAgentResult> => {
       requests.push(request);
       const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return { ok: true, status: "completed", summary: "done", text, diagnostics: [], agent: request.agent };
+      return {
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text,
+        diagnostics: [],
+        agent: request.agent,
+        ...(request.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
+      };
     },
   });
   return { ...runtime, requests };
@@ -77,20 +89,23 @@ function shaped(dsl: { agent: unknown }, prompt: string, opts: unknown): Promise
 }
 
 describe("agent({ schema, validate }) script validation", () => {
-  it("re-asks the child with every validator error and accepts the repaired answer", async () => {
-    const { dsl, requests, getJournal } = scriptedRuntime("agent-validate-retry", [
+  it("reaches the acceptance boundary with EVERY validator error, in one child", async () => {
+    const { dsl, requests, getJournal } = scriptedRuntime("agent-validate-reject", [
       '{"units":[{"id":"U1","dependsOn":["U7","U8"]}]}',
-      '{"units":[{"id":"U1","dependsOn":[]}]}',
     ]);
 
-    const value = await dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors });
+    const failure = await dsl
+      .agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
 
-    expect(value).toEqual({ units: [{ id: "U1", dependsOn: [] }] });
-    expect(requests).toHaveLength(2);
-    // Accumulating, not fail-fast: with one retry, reporting only the first
-    // violation turns a repairable answer into a fatal one.
-    expect(requests[1]?.prompt).toContain('units[0].dependsOn[0]: value "U7" is not a declared unit id');
-    expect(requests[1]?.prompt).toContain('units[0].dependsOn[1]: value "U8" is not a declared unit id');
+    expect(failure).toBeInstanceOf(SchemaValidationError);
+    // Accumulating, not fail-fast, and never truncated: reporting one violation of
+    // several turns a repairable answer into a fatal one.
+    const reported = (failure as Error).message;
+    expect(reported).toContain('units[0].dependsOn[0]: value "U7" is not a declared unit id');
+    expect(reported).toContain('units[0].dependsOn[1]: value "U8" is not a declared unit id');
+    expect(requests).toHaveLength(1);
     expect(getJournal().flatMap((line) => (line.kind === "agent_end" ? [line.schemaValidation] : []))).toEqual([
       {
         status: "mismatch",
@@ -101,96 +116,33 @@ describe("agent({ schema, validate }) script validation", () => {
           'units[0].dependsOn[1]: value "U8" is not a declared unit id',
         ],
       },
-      { status: "valid", attempts: 2, errors: [] },
     ]);
   });
 
-  it("puts script errors in their own labelled block, never in the schema bullet list", async () => {
-    // Frozen on first ship: this text enters the attempt-2 prompt and therefore the
-    // canonical replay key. Schema errors carry 0-indexed JSON paths and observed
-    // values; merging the two lists would hand the child two index bases and frame a
-    // cross-field violation as a shape violation.
-    const { dsl, requests } = scriptedRuntime("agent-validate-block", ['{"units":[{"id":"U1","dependsOn":["U7"]}]}']);
-
+  it("accepts the value the validator passes", async () => {
+    const { dsl, requests } = scriptedRuntime("agent-validate-accept", ['{"units":[{"id":"U1","dependsOn":[]}]}']);
     await expect(
       dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors }),
-    ).rejects.toBeInstanceOf(SchemaValidationError);
-
-    const retry = requests[1]?.prompt ?? "";
-    expect(
-      retry.endsWith(
-        [
-          "",
-          "",
-          "The previous answer (attempt 1 of 3) matched the required shape but was REJECTED by the workflow script for:",
-          '- units[0].dependsOn[0]: value "U7" is not a declared unit id',
-          "Return the corrected JSON value only.",
-        ].join("\n"),
-      ),
-      retry,
-    ).toBe(true);
-    expect(retry).not.toContain("was REJECTED for:");
+    ).resolves.toEqual({ units: [{ id: "U1", dependsOn: [] }] });
+    expect(requests).toHaveLength(1);
   });
 
-  it("keeps the schema block's own wording when the schema is what rejected", async () => {
-    const { dsl, requests } = scriptedRuntime("agent-validate-schema-block", [
+  it("names the SCHEMA as the rejecting authority when the shape is what broke", async () => {
+    const { dsl, getJournal } = scriptedRuntime("agent-validate-schema-authority", [
       '{"units":[{"id":"nope","dependsOn":[]}]}',
     ]);
 
     await expect(
       dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors }),
     ).rejects.toBeInstanceOf(SchemaValidationError);
-
-    const retry = requests[1]?.prompt ?? "";
-    // Only the rendered budget moves, and it moves because 3 is now the truth.
-    expect(retry).toContain("The previous answer (attempt 1 of 3) was REJECTED for:");
-    expect(retry).not.toContain("REJECTED by the workflow script");
-  });
-
-  it("spends the dedicated third attempt when the schema rejects first and the script second", async () => {
-    const { dsl, requests, getJournal } = scriptedRuntime("agent-validate-budget", [
-      '{"units":[{"id":"nope","dependsOn":[]}]}',
-      '{"units":[{"id":"U1","dependsOn":["U7"]}]}',
-      '{"units":[{"id":"U1","dependsOn":[]}]}',
-    ]);
-
-    // The failure the shared budget produces: a weak model misses the shape on
-    // attempt 1, fixes it on attempt 2 and breaks a cross-field rule instead. Under
-    // one shared budget the feature never engages and the run costs one extra child.
-    const value = await dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors });
-
-    expect(value).toEqual({ units: [{ id: "U1", dependsOn: [] }] });
-    expect(requests).toHaveLength(3);
+    // Never merged with script errors: schema errors carry 0-indexed JSON paths and
+    // observed values, and one merged list would hand the reader two index bases.
     expect(getJournal().flatMap((line) => (line.kind === "agent_end" ? [line.schemaValidation?.source] : []))).toEqual([
       "schema",
-      "script",
-      undefined,
     ]);
   });
 
-  it("fails closed with attempts === 3 when the validator rejects every attempt", async () => {
-    const { dsl, requests } = scriptedRuntime("agent-validate-exhausted", [
-      '{"units":[{"id":"U1","dependsOn":["U7"]}]}',
-    ]);
-
-    let caught: unknown;
-    try {
-      await dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors });
-    } catch (error) {
-      caught = error;
-    }
-
-    expect(caught).toBeInstanceOf(SchemaValidationError);
-    expect((caught as SchemaValidationError).attempts).toBe(3);
-    expect((caught as SchemaValidationError).errors).toEqual([
-      'units[0].dependsOn[0]: value "U7" is not a declared unit id',
-    ]);
-    expect(requests).toHaveLength(3);
-  });
-
-  it("keeps a schema-only call on the old budget and out of the source discriminator", async () => {
-    // Outcome 4: nothing about a call that declares no validator changes, including
-    // the rendered budget in its repair block — which is in every existing key.
+  it("keeps a schema-only call out of the source discriminator", async () => {
     const { dsl, requests, getJournal } = scriptedRuntime("agent-validate-absent", [
       '{"units":[{"id":"nope","dependsOn":[]}]}',
     ]);
@@ -198,8 +150,7 @@ describe("agent({ schema, validate }) script validation", () => {
     await expect(dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA } })).rejects.toBeInstanceOf(
       SchemaValidationError,
     );
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.prompt).toContain("The previous answer (attempt 1 of 2) was REJECTED for:");
+    expect(requests).toHaveLength(1);
     expect(getJournal().every((line) => line.kind !== "agent_end" || line.schemaValidation?.source === undefined)).toBe(
       true,
     );
@@ -260,6 +211,7 @@ describe("agent({ schema, validate }) script validation", () => {
           text: '{"units":[]}',
           diagnostics: [],
           agent: request.agent,
+          outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const },
         };
       },
     });
@@ -269,6 +221,8 @@ describe("agent({ schema, validate }) script validation", () => {
         schema: { ...PLAN_SCHEMA },
         label: "plan",
         readOnly: true,
+        // A shaped call may now declare transport retries: a same-session clarification is
+        // not a physical child, so the two no longer multiply into attempts x schema budget.
         attempts: 2,
         validate: () => {
           throw new Error("author bug: cannot read properties of undefined");
@@ -295,16 +249,6 @@ describe("agent({ schema, validate }) script validation", () => {
       "agent validate must return an array of strings, not a Promise",
     ],
     ["an empty-string error", () => ["ok", ""], "agent validate error at index 1 must be a non-empty string"],
-    [
-      "more errors than the cap",
-      () => Array.from({ length: 33 }, (_, index) => `e${String(index)}`),
-      "agent validate returned 33 error(s); at most 32 are allowed",
-    ],
-    [
-      "an error longer than the cap",
-      () => ["ok", "x".repeat(501)],
-      "agent validate error at index 1 is 501 character(s); at most 500 are allowed",
-    ],
   ])("refuses %s instead of truncating or coercing it", async (_case, validate, message) => {
     const { dsl, requests } = scriptedRuntime("agent-validate-return-contract", ['{"units":[]}']);
 
@@ -335,28 +279,41 @@ describe("agent({ schema, validate }) script validation", () => {
     expect(validatorCalls).toBe(0);
   });
 
-  it.each([
-    ["an empty answer", "   ", undefined],
-    ["an oversized answer", '{"units":[]}', 4],
-  ])("never runs the validator on %s", async (_case, answer, maxAnswerChars) => {
+  it("never runs the validator on an empty answer", async () => {
     let validatorCalls = 0;
-    const { dsl } = scriptedRuntime(`agent-validate-ungated-${_case.replace(/\s/gu, "-")}`, [answer]);
+    const { dsl } = scriptedRuntime("agent-validate-ungated-empty", ["   "]);
 
     await expect(
       shaped(dsl, "Plan the units.", {
         schema: { ...PLAN_SCHEMA },
-        ...(maxAnswerChars === undefined ? {} : { maxAnswerChars }),
         validate: () => {
           validatorCalls += 1;
           return [];
         },
       }),
-    ).rejects.toThrow(/Agent (result text is empty|answer is )/u);
+    ).rejects.toThrow(/Agent result text is empty/u);
     expect(validatorCalls).toBe(0);
   });
 
+  it("accepts an arbitrarily long list of validator errors: a violation list has no budget", async () => {
+    const many = Array.from({ length: 120 }, (_, index) => `e${String(index)}: ${"detail ".repeat(200)}`.trim());
+    const { dsl } = scriptedRuntime("agent-validate-many-errors", ['{"units":[]}']);
+
+    const failure = await dsl
+      .agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: () => many })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(SchemaValidationError);
+    // Every one of them, verbatim: a truncated list hides a violation the child is
+    // being asked to fix, and a refusal over the COUNT of real violations was a size
+    // policy over the validator's findings.
+    expect((failure as SchemaValidationError).errors).toHaveLength(120);
+    expect((failure as Error).message).toContain(many[119]!);
+  });
+
   it.each([
-    [{ validate: () => [] }, "agent validate requires a schema"],
+    [{ validate: () => [] }, "agent validate requires a schema or handoffs"],
     [{ schema: { ...PLAN_SCHEMA }, validate: "not-a-function" }, "agent validate must be a function"],
   ])("refuses a malformed validate declaration before any child runs", async (opts, message) => {
     let calls = 0;
@@ -406,8 +363,14 @@ describe("agent({ schema, validate }) script validation", () => {
     const validating = scriptedRuntime("agent-validate-key-b", ['{"units":[]}']);
     await validating.dsl.agent("Plan the units.", { schema: { ...PLAN_SCHEMA }, validate: unknownDependencyErrors });
 
-    expect(validating.requests[0]).toEqual(plain.requests[0]);
-    expect(Object.keys(validating.requests[0] ?? {})).not.toContain("validate");
+    // The callback travels beside the request as `returnValidate` so the acceptance tool
+    // can apply it in-session; `canonicalAgentRequest` is an explicit field list that
+    // omits it, and the PROMPT and contract — everything a key is built from — match.
+    expect({ ...validating.requests[0], returnValidate: undefined }).toEqual({
+      ...plain.requests[0],
+      returnValidate: undefined,
+    });
+    expect(validating.requests[0]?.returnValidate).toBeTypeOf("function");
   });
 
   it("types the validator on the shaped options the Omit widening restores", () => {

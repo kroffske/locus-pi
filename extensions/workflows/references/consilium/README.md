@@ -36,7 +36,7 @@ allowlist to edit and nothing to forget.
 question
    │
    ▼
-frame ──────────────▶ brief.md            no tools; one bounded advisory brief
+frame ──────────────▶ brief.md            one advisory brief the advisors answer
    │
    ▼
 advise  (parallel, inside a nested dsl.workflow())
@@ -83,9 +83,10 @@ terminal artifact" true rather than aspirational.
 A run is good when:
 
 - `consilium.md` exists as a published artifact, is non-empty, and is **byte-for-byte**
-  the synthesis the 12,000-character bound approved — the script publishes the validated
-  answer unchanged, because appending even one character after the gate makes the declared
-  bound false for the one length where it matters;
+  the synthesis stage's answer at any length — the script publishes what it received and
+  reformats nothing, not even a missing trailing newline, so the terminal document is the
+  answer rather than the script's rendering of it. No stage declares an answer-length
+  bound: the runtime owns no size policy, and this reference must not teach one;
 - the verifier's `verdict` is one of the two declared enum members;
 - and a `reject` verdict ends the run carrying that verdict's own `reason`, with no
   `consilium.md` published.

@@ -238,10 +238,14 @@ test("queued is not started: actual starts respect the leaf gate and live projec
       return completed(req, "done");
     },
   });
-  const running = runtime.dsl.parallel([
-    () => runtime.dsl.agent("first", { title: "First" }),
-    () => runtime.dsl.agent("second", { title: "Second" }),
-  ]);
+  // Explicit group width of 2 against a leaf gate of 1, so both calls enter the
+  // runtime and the second waits at the GATE — the state this test is about. The
+  // group pool otherwise inherits the run's single effective concurrency and would
+  // admit them one at a time, leaving nothing queued.
+  const running = runtime.dsl.parallel(
+    [() => runtime.dsl.agent("first", { title: "First" }), () => runtime.dsl.agent("second", { title: "Second" })],
+    { concurrency: 2 },
+  );
   await delay(5);
   const lines = runtime.getJournal();
   assert.equal(lines.filter((line) => line.kind === "agent_queued").length, 2);
@@ -269,7 +273,12 @@ test("new queue, title, item and decision events round-trip through the strict p
     const runtime = createWorkflowRuntime({
       runId: id,
       journal: sink,
-      agentRunner: async (req) => completed(req, '"complete"'),
+      agentRunner: async (req) => ({
+        ...completed(req, '"complete"'),
+        ...(req.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
+      }),
     });
     await runtime.dsl.parallel(
       [() => runtime.dsl.agent("route", { label: "route", title: "Decision", choice: ["complete", "continue"] })],
@@ -313,7 +322,7 @@ async function runSession(scenario: SessionScenario) {
     const messages: unknown[] = [];
     const executor = createAgentSdkSessionExecutor({
       maxToolCalls: scenario.maxToolCalls ?? 10,
-      turnTimeoutMs: 1000,
+      childTimeoutMs: 1000,
       reportsDir: path.join(root, "reports"),
       createSession: async () => {
         created += 1;
@@ -448,17 +457,28 @@ test("a string containing JSON is a shape mismatch that is repaired, not parsed"
   assert.equal(got.result.outputAcceptance?.attempts, 2);
   assert.match(got.prompts[1]!, /expected object, got string/u);
 });
-test("a shaped value over maxLength is corrected in the same session, not after the child ends", async () => {
+test("an AUTHOR-declared maxLength is corrected in the same session, not after the child ends", async () => {
+  // The bound under test is the author's own `maxLength` inside the schema, not a runtime
+  // default: there is none. A value past it is a correctable violation, not a dead child.
   const got = await runSession({
     contract: normalizeWorkflowReturnContract({
       schema: { type: "string", minLength: 1, maxLength: 200_000 },
       repair: { maxAttempts: 2 },
     }),
-    submissions: [["x".repeat(100_001)], ["short"]],
+    submissions: [["x".repeat(200_001)], ["short"]],
   });
   assert.equal(got.result.status, "completed");
   assert.equal(got.created, 1);
-  assert.match(got.prompts[1]!, /exceeds 100000 characters/u);
+  assert.match(got.prompts[1]!, /expected at most 200000 character/u);
+});
+test("a shaped value carries no runtime size policy of its own", async () => {
+  const huge = "x".repeat(400_000);
+  const got = await runSession({
+    contract: normalizeWorkflowReturnContract({ schema: { type: "string", minLength: 1 } }),
+    submissions: [[huge]],
+  });
+  assert.equal(got.result.status, "completed");
+  assert.equal(got.result.text, JSON.stringify(huge));
 });
 test("exhausted schema repair fails the call without an unvalidated value", async () => {
   const got = await runSession({
@@ -534,21 +554,37 @@ test("malformed output contracts fail before any child starts", async () => {
   });
   const invalid = [
     { returnVia: "other" },
-    { returnVia: "tool" },
-    { output: { type: "string" } },
-    { returnVia: "tool", choice: ["yes", "no"], output: { type: "string" } },
-    { returnVia: "tool", output: { type: "string" }, repair: {} },
-    { returnVia: "tool", output: { type: "string" }, repair: { maxAttempts: 4 } },
-    { returnVia: "tool", output: { type: "string", extra: true } },
-    { returnVia: "tool", output: { type: "string" }, attempts: 2 },
-    { returnVia: "tool", schema: { type: "object" }, output: { type: "string" } },
-    { returnVia: "tool", schema: { type: "object" }, handoffs: { maxItems: 2 } },
-    { returnVia: "tool", schema: { type: "object" }, validate: () => [] },
-    { returnVia: "tool", schema: { type: "object", oneOf: [] } },
-    { returnVia: "tool", handoffs: { maxItems: 101 } },
-    { returnVia: "tool", schema: { type: "object" }, attempts: 2 },
+    // The named removal: `text` promised a transport that no longer exists.
+    { returnVia: "text", output: { type: "string" } },
+    { choice: ["yes", "no"], output: { type: "string" } },
+    { output: { type: "string" }, repair: {} },
+    { output: { type: "string" }, repair: { maxAttempts: 0 } },
+    { output: { type: "string", extra: true } },
+    { output: { type: "string", maxLength: 0 } },
+    { schema: { type: "object" }, output: { type: "string" } },
+    { schema: { type: "object" }, handoffs: { maxItems: 2 } },
+    { schema: { type: "object", oneOf: [] } },
+    { handoffs: { maxItems: 0 } },
+    { handoffs: { maxItems: 4, maxItemChars: 100 } },
+    { schema: { type: "object" }, maxAnswerChars: 100 },
   ];
   for (const options of invalid) await assert.rejects(runtime.dsl.agent("work", options as never));
+  assert.equal(calls, 0);
+});
+test("options that are now redundant or newly supported start a child instead of failing", async () => {
+  let calls = 0;
+  const runtime = createWorkflowRuntime({
+    runId: "accepted-contracts",
+    agentRunner: async (req) => ({
+      ...completed(req, '"value"'),
+      outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const },
+    }),
+  });
+  // `returnVia: "tool"` is redundant and ignored with a notice for one release; a shaped
+  // call may now declare transport `attempts`, and `validate` beside a schema.
+  await runtime.dsl.agent("work", { output: { type: "string" } } as never);
+  await runtime.dsl.agent("work", { output: { type: "string" }, attempts: 2 } as never);
+  await runtime.dsl.agent("work", { schema: { type: "string" }, validate: () => [] } as never);
   assert.equal(calls, 0);
 });
 test("runtime sends the output contract and accepts only a successful receipt, preserving exact value", async () =>
@@ -561,11 +597,9 @@ test("runtime sends the output contract and accepts only a successful receipt, p
       agentRunner: async (req) => {
         assert.equal(req.returnContract?.singleLine, true);
         // These bytes are the replay key of every recorded string tool-return call.
-        assert.equal(
-          JSON.stringify(req.returnContract),
-          '{"version":1,"singleLine":true,"maxLength":100000,"maxAttempts":2}',
-        );
-        // The prompt is the other half of that replay key: a string contract keeps its 0.7.0 bytes.
+        // These bytes are the replay key of every recorded string tool-return call under
+        // contract v2: no default maxLength at all, and a stated clarification allowance.
+        assert.equal(JSON.stringify(req.returnContract), '{"version":2,"singleLine":true,"maxAttempts":2}');
         assert.ok(req.prompt.endsWith("Finish the turn normally after acceptance."));
         assert.ok(!req.prompt.includes("pass the JSON value itself"));
         return {
@@ -576,7 +610,6 @@ test("runtime sends the output contract and accepts only a successful receipt, p
     });
     const value = await runtime.dsl.agent("Extract ID", {
       label: "id",
-      returnVia: "tool",
       output: { type: "string", singleLine: true },
     });
     assert.equal(value, "orders");
@@ -599,7 +632,7 @@ test("runtime sends the output contract and accepts only a successful receipt, p
       agentRunner: async (req) => completed(req, '"orders"'),
     });
     await assert.rejects(
-      incompatible.dsl.agent("Extract", { returnVia: "tool", output: { type: "string" } }),
+      incompatible.dsl.agent("Extract", { output: { type: "string" } }),
       /acceptance|receipt|output/iu,
     );
   }));
@@ -615,7 +648,7 @@ test("runtime returns the validated record and handoff list from a tool receipt 
       };
     },
   });
-  assert.deepEqual(await shaped.dsl.agent("Verify", { label: "verify", schema: RESULT, returnVia: "tool" }), RECORD);
+  assert.deepEqual(await shaped.dsl.agent("Verify", { label: "verify", schema: RESULT }), RECORD);
   const end = shaped.getJournal().find((line) => line.kind === "agent_end");
   assert.equal(end?.outputAcceptance?.attempts, 1);
   assert.equal(end?.schemaValidation?.status, "valid");
@@ -624,10 +657,9 @@ test("runtime returns the validated record and handoff list from a tool receipt 
     agentRunner: async (req) => {
       assert.deepEqual(req.returnContract?.schema, {
         type: "array",
-        items: { type: "string", minLength: 1, maxLength: 8000, nonBlank: true },
+        items: { type: "string", minLength: 1, nonBlank: true },
         minItems: 0,
         maxItems: 3,
-        uniqueTrimmedItems: true,
       });
       assert.match(req.prompt, /workflow_return/u);
       return {
@@ -636,19 +668,18 @@ test("runtime returns the validated record and handoff list from a tool receipt 
       };
     },
   });
-  assert.deepEqual(
-    await listed.dsl.agent("Discover", { label: "discover", handoffs: { maxItems: 3 }, returnVia: "tool" }),
-    ["a", "b"],
-  );
+  assert.deepEqual(await listed.dsl.agent("Discover", { label: "discover", handoffs: { maxItems: 3 } }), ["a", "b"]);
   const offShape = createWorkflowRuntime({
     runId: "off-shape-tool",
+    // Four items against a declared maxItems of three: the AUTHOR's contract, not a
+    // runtime policy. Two identical strings would now be accepted.
     agentRunner: async (req) => ({
-      ...completed(req, '["a","a"]'),
+      ...completed(req, '["a","b","c","d"]'),
       outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
     }),
   });
   await assert.rejects(
-    offShape.dsl.agent("Discover", { label: "discover", handoffs: { maxItems: 3 }, returnVia: "tool" }),
+    offShape.dsl.agent("Discover", { label: "discover", handoffs: { maxItems: 3 } }),
     (error: unknown) => error instanceof Error && error.name === "SchemaValidationError",
   );
   const unreceipted = createWorkflowRuntime({
@@ -656,7 +687,7 @@ test("runtime returns the validated record and handoff list from a tool receipt 
     agentRunner: async (req) => completed(req, JSON.stringify(RECORD)),
   });
   await assert.rejects(
-    unreceipted.dsl.agent("Verify", { label: "verify", schema: RESULT, returnVia: "tool" }),
+    unreceipted.dsl.agent("Verify", { label: "verify", schema: RESULT }),
     /acceptance|receipt|output/iu,
   );
 });
@@ -668,7 +699,6 @@ test("fallback has structured provenance and never masks provider failures", asy
     });
     const call = runtime.dsl.agent("Classify", {
       label: "route",
-      returnVia: "tool",
       choice: ["yes", "no", "unresolved"],
       choiceFallback: "unresolved",
     });
@@ -837,7 +867,7 @@ test("a changed schema contract does not reuse the recorded record, an identical
         };
       },
     });
-    const shaped = { label: "verify", schema: RESULT, returnVia: "tool" } as const;
+    const shaped = { label: "verify", schema: RESULT } as const;
     assert.deepEqual(await record.dsl.agent("Verify", shaped), RECORD);
     const recorded = readWorkflowReplayLog(root, "shaped-source");
     const replay = createWorkflowReplayController({

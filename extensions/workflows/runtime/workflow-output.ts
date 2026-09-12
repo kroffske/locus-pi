@@ -59,8 +59,10 @@ export const WORKFLOW_OUTPUT_DIR_PATTERN =
   `\\${WORKFLOW_ROOT_DIRNAME}/(?:${WORKFLOW_WORKSPACES_DIRNAME}|${WORKFLOW_PLANS_DIRNAME})/` +
   `(?:${OUTPUT_COMPONENT_SOURCE})|` +
   `\\${WORKFLOW_TASKS_RELATIVE_ROOT}/(?:${OUTPUT_COMPONENT_SOURCE})(?:/(?:${OUTPUT_COMPONENT_SOURCE}))*)$`;
-/** Shared aggregate bound for tool, command, and direct runtime callers. */
-export const WORKFLOW_OUTPUT_DIR_MAX_CHARS = 400;
+// No aggregate character bound on outputDir. Each component is still checked against
+// the safe-component alphabet and the whole path must stay confined to the project, so
+// what is left is the filesystem's own limit on a path — which the filesystem reports
+// itself, in its own words, instead of this module inventing a number for it.
 export const WORKFLOW_RUN_NAME_MAX_CHARS = 200;
 export const WORKFLOW_RUN_NAME_PATTERN = `^${OUTPUT_COMPONENT_SOURCE}$`;
 const ITEM_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
@@ -243,9 +245,6 @@ export function isLegacyWorkflowWorkspacePath(relativePath: string): boolean {
 function normalizeRequestedOutputDir(projectRoot: string, workingDirectory: string, requested: string): string {
   if (typeof requested !== "string") {
     throw new Error("workflow outputDir must be a non-empty trimmed path");
-  }
-  if (requested.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
-    throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
   }
   const project = path.resolve(projectRoot);
   let absolute: string | undefined;
@@ -840,9 +839,6 @@ function assertRelativeOutputPath(value: unknown, label = "outputDir"): string {
 export function assertWorkflowOutputDirPath(value: unknown): string {
   if (typeof value !== "string") {
     throw new Error("workflow outputDir must be a non-empty trimmed path");
-  }
-  if (value.length > WORKFLOW_OUTPUT_DIR_MAX_CHARS) {
-    throw new Error(`workflow outputDir exceeds ${WORKFLOW_OUTPUT_DIR_MAX_CHARS} characters`);
   }
   const workspaceRoot = [WORKFLOW_WORKSPACES_RELATIVE_ROOT, WORKFLOW_LEGACY_WORKSPACES_RELATIVE_ROOT].find(
     (candidate) => value.startsWith(`${candidate}/`),

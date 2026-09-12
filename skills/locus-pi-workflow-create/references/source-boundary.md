@@ -16,7 +16,8 @@ known failure. Reports and narrative handoffs use ordinary `agent()` text.
 Reserve `choice` for routing and `handoffs` for discovered work
 units, sequential or independent. Do not wrap a report in a singleton list or guess a response-length cap.
 An author-selected bound must come from an explicit user requirement, actual
-consumer contract or measured failure. Runtime safety budgets remain in force.
+consumer contract or measured failure. The runtime adds no size policy of its
+own and no default budget: an undeclared budget axis is unbounded.
 
 ```js
 export const meta = {

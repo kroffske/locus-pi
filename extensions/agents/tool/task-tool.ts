@@ -15,7 +15,13 @@ import { installWorkflowProgress } from "../../workflows/operator/progress-widge
 import { EmptyAgentToolCallComponent, renderAgentToolResultCard } from "./agent-tool-card.js";
 import { refreshAgents, resolveAgentSelection, TaskParams } from "../catalog/catalog.js";
 import { AGENTS_WIDGET_KEY } from "../operator/operator-surface.js";
-import { nextAgentRunSequence, resolveAgentTitle, runAgentLiveTask } from "../run/run-launcher.js";
+import {
+  INTERACTIVE_AGENT_MAX_TURNS,
+  INTERACTIVE_AGENT_TIMEOUT_MS,
+  nextAgentRunSequence,
+  resolveAgentTitle,
+  runAgentLiveTask,
+} from "../run/run-launcher.js";
 import { createUnknownAgentReport } from "../run/unknown-agent-report.js";
 
 type TaskToolCtx = Parameters<ExtensionAPI["registerTool"]>[0]["execute"] extends (...args: infer Args) => unknown
@@ -122,7 +128,8 @@ async function runTaskTool(
       task,
       approvalTier: "allow",
       liveModel,
-      maxTurns: 5,
+      maxTurns: INTERACTIVE_AGENT_MAX_TURNS,
+      childTimeoutMs: INTERACTIVE_AGENT_TIMEOUT_MS,
       onStarted: (line: string) =>
         update({
           content: [{ type: "text", text: line }],
@@ -198,6 +205,12 @@ async function runTaskTool(
     childOutputStats: boundary.childOutputStats,
     resultArtifact: boundary.resultArtifact?.path,
   };
+  // Finished, unstored, and the answer still exists: report the storage failure — this is
+  // not a completed run — and hand the caller the answer anyway. Printing only the reason
+  // would destroy the last copy of work that was already paid for.
+  if (boundary.status === "storage-failed" && boundary.text !== undefined) {
+    return errorResult(`${boundary.reason}\n\nAnswer (not stored):\n${boundary.text}`, details);
+  }
   if (boundary.status !== "completed" || boundary.text === undefined) {
     return errorResult(boundary.reason, details);
   }

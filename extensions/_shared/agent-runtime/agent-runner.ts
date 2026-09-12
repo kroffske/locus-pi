@@ -12,7 +12,17 @@ import type { RuntimeArtifact } from "../runtime/artifacts.js";
 import { FileRuntimeArtifactStore, createRuntimeArtifactStore } from "../runtime/artifacts.js";
 import type { ReadOnlyAgentCustomTool, RepositoryCheckScripts } from "./agent-read-only-policy.js";
 
-export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled";
+/**
+ * Three separate notions, and this union keeps the third one visible.
+ *
+ * `completed` / `failed` / `cancelled` / `blocked` / `running` say how the EXECUTION
+ * ended. `storage-failed` says the execution ended — the child answered and the answer is
+ * in this result — but the run's own result envelope could not be stored. It used to be
+ * reported as `completed` with a diagnostic appended, so an operator was told the run had
+ * succeeded and would go looking for a record that does not exist. The execution outcome
+ * it replaces is preserved in `resultStorage.executionStatus`, so nothing is lost.
+ */
+export type AgentRunStatus = "blocked" | "running" | "completed" | "failed" | "cancelled" | "storage-failed";
 export type ApprovalTier = "allow" | "prompt" | "deny";
 export type AgentCapabilityMode = "tool-free" | "agent";
 
@@ -56,8 +66,19 @@ export interface AgentRunRequestBase {
   parentSessionId: string;
   projectRoot?: string;
   workingDirectory?: string;
-  maxTurns: number;
+  /**
+   * Explicit assistant-turn budget. There is no package default: absent means the
+   * axis is UNBOUNDED and every surface that prints it says `unbounded`. A caller
+   * that wants a stop names one at its own call site, where the person who owns
+   * that surface can see it.
+   */
+  maxTurns?: number;
   depth: number;
+  /**
+   * Direct-child nesting depth for THIS scheduler. It keeps one managed spawn tree
+   * accountable; it is not a sandbox and it is not protection against arbitrary
+   * subprocesses a child may start through its own tools.
+   */
   maxDepth: number;
   allowedTools: string[];
   approvalTier: ApprovalTier;
@@ -99,6 +120,13 @@ export type AgentRunRequestInput = Partial<Omit<AgentRunRequestBase, "task" | "p
  */
 export const EXECUTED_MODEL_UNAVAILABLE = "unavailable";
 
+/**
+ * What a budget axis reads as in session metadata, result envelopes and run
+ * headers when no caller declared one. A literal beats an omitted key: absence
+ * would be indistinguishable from an older record that never had the field.
+ */
+export const AGENT_BUDGET_UNBOUNDED = "unbounded" as const;
+
 export interface AgentRunResult {
   errorLogPath?: string;
   errorLogWarning?: string;
@@ -129,7 +157,23 @@ export interface AgentRunResult {
   childOutputStats?: AgentChildOutputStats;
   childTrace?: AgentChildTrace;
   resultArtifact?: RuntimeArtifact;
+  /**
+   * Present only when the result envelope could NOT be stored. The run still finished and
+   * `text` still carries whatever the child answered; what is missing is the durable
+   * record of it.
+   */
+  resultStorage?: AgentResultStorageFailure;
   worktreePath?: string;
+}
+
+/** Why a finished run has no stored result envelope, and what survived anyway. */
+export interface AgentResultStorageFailure {
+  /** The execution outcome the run actually reached, before storage was attempted. */
+  executionStatus: AgentRunStatus;
+  /** The store's own message, unmodified. */
+  reason: string;
+  /** Whether the child's answer text is still readable in this result. */
+  answerAvailable: boolean;
 }
 
 export interface AgentChildTrace {
@@ -260,10 +304,13 @@ export async function executeAgentRunBoundary(options: AgentRunBoundaryOptions):
 }
 
 export function validateRunPolicy(request: AgentRunRequest): string | undefined {
-  if (!Number.isSafeInteger(request.maxTurns) || request.maxTurns < 1)
-    return "maxTurns must be a positive safe integer.";
+  // Validated only when the caller declared one. An absent budget is an unbounded
+  // axis, not an invalid request.
+  if (request.maxTurns !== undefined && (!Number.isSafeInteger(request.maxTurns) || request.maxTurns < 1))
+    return "maxTurns must be a positive safe integer when declared.";
   if (request.depth < 0) return "depth must be non-negative.";
-  if (request.depth >= request.maxDepth) return "Agent run depth limit reached.";
+  if (request.depth >= request.maxDepth)
+    return "Direct child-agent nesting depth for this scheduler is reached; no deeper managed child is started.";
   if (request.executionMode === "named" && !isAllowedToolSubset(request.agent.allowedTools, request.allowedTools))
     return "Requested tools exceed the agent definition allow-list.";
   return undefined;
@@ -278,7 +325,6 @@ export function createAgentRunRequest(
     executionMode: "named",
     agent,
     task,
-    maxTurns: input.maxTurns ?? 5,
     depth: input.depth ?? 0,
     maxDepth: input.maxDepth ?? 1,
     allowedTools: input.allowedTools ?? agent.allowedTools,
@@ -295,7 +341,6 @@ export function createBareAgentRunRequest(
   const request: AgentRunRequestWithoutContext = {
     executionMode: "bare",
     task,
-    maxTurns: input.maxTurns ?? 5,
     depth: input.depth ?? 0,
     maxDepth: input.maxDepth ?? 1,
     allowedTools: input.allowedTools ?? ["*"],
@@ -308,6 +353,7 @@ export function createBareAgentRunRequest(
 function copyOptionalRunFields(request: AgentRunRequestWithoutContext, input: AgentRunRequestInput): void {
   // Both builders are allowlists. Keep every optional field in one place so a
   // named and a bare child cannot silently diverge in artifacts or host policy.
+  if (input.maxTurns !== undefined) request.maxTurns = input.maxTurns;
   if (input.metadata !== undefined) request.metadata = input.metadata;
   if (input.modelRoleResolution !== undefined) request.modelRoleResolution = input.modelRoleResolution;
   if (input.modelRoleFallback !== undefined) request.modelRoleFallback = input.modelRoleFallback;
@@ -335,7 +381,7 @@ function createAgentChildSession(store: MemorySessionStore, request: AgentRunReq
       source: "agent-runner",
       executionMode: request.executionMode,
       ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
-      maxTurns: request.maxTurns,
+      maxTurns: request.maxTurns ?? AGENT_BUDGET_UNBOUNDED,
       depth: request.depth,
       maxDepth: request.maxDepth,
       ...(request.modelRoleResolution === undefined
@@ -394,7 +440,7 @@ export function writeAgentRunResultArtifact(
     childSessionId: result.childSession?.id,
     projectRoot: request.projectRoot,
     workingDirectory: request.workingDirectory,
-    maxTurns: request.maxTurns,
+    maxTurns: request.maxTurns ?? AGENT_BUDGET_UNBOUNDED,
     depth: request.depth,
     maxDepth: request.maxDepth,
     allowedTools: request.allowedTools,
@@ -447,7 +493,24 @@ export function writeAgentRunResultArtifact(
     return { ...result, resultArtifact: artifact };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    return { ...result, diagnostics: [...result.diagnostics, `Agent run result artifact was not written: ${reason}`] };
+    // FINISHED, not stored. Returning the execution status here told the caller the run
+    // had succeeded, and the launcher printed `done` over a record that was never
+    // written. The status now says what actually happened to the storage, the execution
+    // outcome is kept beside it, and the answer itself travels on untouched — an
+    // unstorable result is still a received one.
+    const answerAvailable = typeof result.text === "string" && result.text !== "";
+    const summary =
+      `Agent run ${result.status} but its result envelope was not written: ${reason}. ` +
+      (answerAvailable
+        ? "The answer is in this result and in the child transcript; only the durable record is missing."
+        : "This run produced no answer text either.");
+    return {
+      ...result,
+      status: "storage-failed",
+      reason: summary,
+      resultStorage: { executionStatus: result.status, reason, answerAvailable },
+      diagnostics: [...result.diagnostics, summary],
+    };
   }
 }
 

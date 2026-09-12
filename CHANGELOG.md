@@ -6,6 +6,159 @@ User-visible changes to the public package.
 
 ### Changed
 
+- Structured workflow results are now carried only by same-session acceptance. The
+  text-parsed transport is deleted: the runtime no longer appends a shape block to
+  the prompt, parses the child's final message as JSON, or spawns a fresh child to
+  repair a format. `choice`, `handoffs`, `output` and `schema` all submit their value
+  through the `workflow_return` tool in the session that produced it, and `validate`
+  works there too. A host that cannot register that tool and read its active tool set
+  back now refuses a shaped call **before the child starts**, naming the missing
+  capability, instead of silently falling back to text. A model whose transport is
+  known not to host Pi tools at all — the Claude Code CLI adapter, which forwards no
+  tool allowlist — is refused at the same point, by capability rather than by vendor
+  name, so a shaped call on that route costs nothing. Plain text calls on it are
+  unaffected.
+- `returnVia` is no longer a decision: `returnVia: "tool"` is accepted for one release
+  and journaled as redundant and ignored; `returnVia: "text"` is refused by name.
+  Plain `agent(prompt)` still returns the child's exact full text, unchanged.
+- The runtime stopped rejecting answers for their size. `agent({ maxAnswerChars })`
+  and the `answerChars` budget axis are removed and refused by name, with the error
+  naming the consumer contract to declare instead (`output.maxLength`, or `maxLength`
+  / `maxItems` inside a `schema`). A `maxLength` now has no package default: declare
+  one only where a consumer really has a limit, and the child is told about it and can
+  correct the value in the same session.
+- Shaped declarations lost the invented ceilings they never needed: `choice` accepts
+  any number of options of any length (minimum 2), `handoffs` treats `maxItems` as an
+  optional consumer declaration and refuses `maxItemChars` by name, a `fusion` panel
+  keeps its 2-member minimum with no member/judge/prompt character caps, `attempts` is
+  any positive integer, a `validate` callback's error list is checked for type rather
+  than size, and workflow input and display titles are no longer length-limited. The
+  same went for the surrounding tool surfaces: the `/fusion` tool's question, context
+  and output fields and the `task` tool's instructions and inline parent context are
+  bounded only by being non-blank, and a continuation may carry as many complete
+  artifact refs as its origin run produced rather than the first eight.
+- Shaped calls state their correction budget instead of hiding it: the package default
+  is exactly one same-session clarification turn, `repair.maxAttempts` raises it with
+  no upper bound, and every shaped call journals the applied number and whether it came
+  from the package or the author.
+- The shaped return contract is versioned, and this release is v2. A replay record
+  written under v1 is reported as `return-contract-changed` — named as a release
+  boundary in the journal — and that call runs fresh, instead of being blamed on the
+  script as a key mismatch.
+- **Replay boundary for runs recorded before this release.** Removing the package
+  budget defaults changed what a request IS: `timeoutMs`, `toolCalls` and `turns`
+  are part of every call's canonical request key, and a call that inherited the old
+  `86400000` / `1000` / `1000` now carries `null` on those axes. So a run recorded
+  before this release re-runs from its FIRST agent call — plain text calls included,
+  not only shaped ones — unless it declared each of those budgets explicitly, in which
+  case its keys are unchanged and it replays as before. The miss is reported by name at
+  the call where it happens; no historical key is recomputed, no historical record is
+  rewritten, and a call recorded as failed is never turned into an accepted one.
+
+- Workflow text artifacts no longer carry a 2 MiB runtime ceiling: a text artifact
+  is written, read and consumed at whatever size it is, and a write that cannot be
+  stored reports the real storage error. Artifact names became display labels
+  (any non-path text) with `artifactId` as the storage identity.
+- `artifactRefs` in `result.json` stays a newest-20 display projection, but it no
+  longer decides what may be consumed. `consumeTextArtifact()` and operator
+  handoffs resolve any artifact of the source run through its full verified index,
+  so an artifact older than the newest twenty stays usable.
+- Operator handoffs no longer cap the number of questions, options or continuation
+  references, nor the length of a title, prompt or option label; `workflow_ask`
+  likewise dropped its 10-questions-per-call limit. Identity, types, uniqueness,
+  confinement and reference verification are unchanged, and questions are still
+  served one at a time.
+- Child agents no longer inherit an invented budget: the shared runner stopped
+  defaulting `maxTurns` to 5, and the SDK host stopped deriving a wall clock of
+  120 seconds per turn from it. A caller that wants a stop passes one; the
+  interactive `task`/`spawn_agent` and `/agent run` surfaces now declare the same
+  five turns and one ten-minute wall clock they always enforced, at their own call
+  site.
+  Requests without a declared turn budget record it as `unbounded`.
+- Execution budgets became explicit-only. `totalAgents`, `runtimeMs`, `timeoutMs`,
+  `toolCalls` and `turns` have no package default any more: an axis nobody declared
+  is unbounded, so no timer is armed and no counter refuses a child. Every run opens
+  with one header line naming all six axes — an undeclared one reads `unbounded` —
+  and the journal, `result.json` and the run report print the same word, so a
+  headless launch cannot mistake absence for a number. Declare a budget on the
+  `workflow` tool, the command launcher or the individual `agent()` call.
+- Reaching an explicit budget is journaled as `stopped by budget <axis>` with every
+  answer already received kept and readable. A budget stop is never reported as a
+  wrong or invalid answer, and the axis is checked before the next spend, so the
+  child that would exceed it never starts.
+- `/workflows status` and the run detail block print the applied budget of a finished
+  run. The `budget` envelope has been written to `result.json` all along, but nothing
+  read it back, so the "budget applied" line never appeared; it now names every axis,
+  an undeclared one as `unbounded`, and a malformed envelope is reported as malformed
+  instead of rendered as half a budget.
+- Replayed calls no longer consume `totalAgents`. A `--resume` projects recorded
+  answers without calling a model, so it can no longer die on a cap its original run
+  satisfied; the run report counts fresh and replayed attempts separately
+  (`N fresh + M replayed (not charged)`).
+- One concurrency width instead of two. `parallel()`/`pipeline()` groups take the
+  run's effective `concurrency` (package value 4) rather than a separate hidden
+  width of the same size, so narrowing the visible number now narrows group fan-out
+  too. A local width still applies when the author passes one explicitly.
+- A child gets ONE deadline. The declared `timeoutMs` reaches the SDK host unchanged
+  instead of being divided by the turn count, widened by a per-turn margin and
+  multiplied back — arithmetic that produced a deadline nobody wrote and, with the
+  former defaults, a product larger than Node's maximum timer delay, which
+  `setTimeout` answers by firing after one millisecond. `ask: true` no longer adds a
+  hidden 24-hour allowance: the deadline is wall clock and includes the operator's
+  wait, and the wait is recorded in the call's diagnostics.
+- A long explicit timeout is honoured rather than refused. Deadlines above Node's
+  maximum timer delay run as a chain of representable waits, so a 48-hour timeout is
+  a 48-hour timeout; the `WORKFLOW_MAX_TIMEOUT_MS` policy ceiling is gone and
+  representability is checked only when a timeout was actually chosen.
+- Unknown cost is reported as unknown. `costTotal` is omitted rather than reported as
+  `0`, and run evidence prints `cost=unavailable` instead of `$0.0000`. Observed
+  token usage is unchanged and still recorded.
+- A child granted `tools: ["*"]` now records the tools that remain excluded
+  (`spawn_agent`, and the stock `ask` for workflow children) in its run receipt,
+  so "all tools" is never an unqualified claim.
+- Opt-in agent context extras (`LOCUS_AGENT_CONTEXT_EXTRAS`) pass the selected
+  memory and skill files whole instead of clipping them to 200 lines and 16 KiB.
+  A large selection adds a visible size note instead of a silent cut.
+
+- A tool-free Fusion panel can now carry a shaped judge. Tool-free means the child
+  cannot act — no host tools, no extensions, no skills — and the `workflow_return`
+  receipt is not an action, so it stays registered and nothing else does. Before, it
+  was cleared with everything else, and a panel with a `schema` ran every member and
+  then failed its judge for a transport question that was answerable at the start.
+- Explicit `toolCalls` and `turns` budgets are now checked before the next action
+  instead of after it. The tool call that would exceed the budget is refused before it
+  executes and the generation past the last declared turn is never started; the run
+  still ends with the same named budget stop and keeps everything already produced. On
+  a host that does not expose the admission seam the previous behaviour remains.
+- A finished agent run whose result envelope could not be stored is reported as a
+  storage failure instead of `done`. The three notions stay apart: the execution
+  outcome is kept beside the storage error, and the answer the child produced travels
+  with the failure — `/agent run` shows it on the row, and `spawn_agent` returns it
+  under the failure — instead of being lost with the record.
+- Artifact display names are readable by every reader. `name` is the author's label and
+  `artifactId` is the storage id, so a published `Design review.md` now passes the
+  `result.json` reader and the `workflow` tool's continuation parameter, which still
+  demanded the storage alphabet and 128 characters. Path separators, control characters
+  and blank names are still refused.
+- Parent context reaches the child whole. `task`/`spawn_agent` no longer clamps the
+  selected context to 16 KiB with a truncation marker — that is the child's input, not a
+  display projection — and a large one adds a size note to the run receipt instead.
+- `agent({ schemaMaxLength })` is refused by name at the DSL boundary. It was dropped
+  while the return contract was assembled, so the call ran and the author kept believing
+  a ceiling applied; the error names the consumer contract to declare instead.
+- The curated `consilium` reference workflow stopped measuring its own question, and
+  aggregate character caps on paths are gone: `outputDir`, `scriptPath` and `script` are
+  bounded by confinement and by the filesystem's own limits rather than by 400
+  characters.
+- A `fusion()` panel served entirely from the replay record no longer reserves or spends
+  `totalAgents`. A resume can replay a three-member panel under `totalAgents: 1`, and a
+  panel that runs fresh reserves its worst case exactly as before.
+- The Claude Code adapter keeps the text a run had already streamed when a timeout or an
+  abort cuts it short. The message stays a failure with no content, and the fragment is
+  carried in the run diagnostics as `partialResult` with `completeness: "streamed"` and
+  the code that interrupted it, beside the existing `complete` case for an answer whose
+  storage failed.
+
 - Clarify full-tool defaults across external workflow transports: reviewer roles retain shell/git and report writing, and technical tool failures are repaired before another review attempt.
 
 - Agent and workflow failures now have a bounded project error index with exact evidence pointers. Failure cards and workflow receipts retain the actor, cause and diagnostics even after a handled failure or successful retry; workflow skills share a short diagnosis and repair route.

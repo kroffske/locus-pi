@@ -6,9 +6,9 @@ Graph: discovery `agent({ handoffs })` → visible parallel/pipeline workers →
 
 Cost: 1 + K×W + 1 calls for K discovered units and W stages per unit; logical depth W + 2. Local group width and the shared physical-agent budget both apply.
 
-Handoff: exact units go to workers; complete worker text goes to aggregation. The design derives a domain maximum, for example `MAX_DAGS_IN_SCOPE`; runtime maxItems is 1..100, transport safety for one structured response, not a default business limit. Caller `dsl.items()` is a separate exact-list contract with no Locus items count or character policy.
+Handoff: exact units go to workers; complete worker text goes to aggregation. `maxItems` is optional and states the consumer's capacity, for example `MAX_DAGS_IN_SCOPE` when a fixed number of workers exist; omit it when the aggregator takes any number. There is no per-item character bound and no runtime ceiling on the count. Caller `dsl.items()` is a separate exact-list contract with no Locus items count or character policy.
 
-Failure: malformed handoffs receive one repair in the legacy shaped-output path, then fail closed. Worker failure rejects its barrier. Do not silently filter failures out of the final catalog.
+Failure: a malformed handoff list is corrected inside the same child session (one clarification turn by default; `repair.maxAttempts` raises it), then fails closed. Worker failure rejects its barrier. Do not silently filter failures out of the final catalog.
 
 Primitives: handoffs, parallel or pipeline, exact-text aggregation. Labels are literal callsite identities, not interpolated item numbers. Author-known literal records may use named properties/flat destructuring; model-produced handoffs remain opaque strings.
 

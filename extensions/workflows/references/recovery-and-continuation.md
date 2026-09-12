@@ -66,6 +66,38 @@ path deletes partial work, fabricates a terminal record, edits historical replay
 skips required checks or retries an unconfirmed external effect blindly. Runtime
 does not perform the domain reconciliation or guarantee exactly-once effects.
 
+## Replay across this release boundary
+
+Two independent things changed what a recorded call's key contains, and an operator
+resuming an older run meets whichever comes first.
+
+**Explicit budgets, and this is the one that reaches plain text too.** `timeoutMs`,
+`toolCalls` and `turns` are part of every call's canonical request, and the package
+defaults that used to fill them — `86400000`, `1000`, `1000` — are gone. A call that
+inherited them now sends `null` on those axes, so its key differs from the recorded one
+whatever kind of call it is. **A run recorded before this release therefore re-runs from
+its first agent call, plain text included**, reported as `key-mismatch` at that call. The
+exception is a run that declared each of those budgets explicitly: nothing was inherited,
+the keys are unchanged, and it replays exactly as before.
+
+**The shaped return contract carries a version, and this release is v2.** The ceilings
+the runtime used to add to every shaped call are gone, so the contract text a shaped call
+sends is not the text an older record was written under. Resuming such a run does not
+silently reuse the record and does not blame the script for a key mismatch it did not
+cause: the call reports `return-contract-changed`, the journal names the release
+boundary, and that call runs fresh. In a mixed run this is the miss an operator sees only
+when the budgets were explicit — otherwise the budget boundary above has already ended
+reuse earlier.
+
+What is not done to old runs. No historical journal, result or replay record is
+rewritten, no historical key is recomputed, and a call recorded as failed never becomes
+an accepted one by being read under the new contract. An old record stays inspectable as evidence of
+what that run actually did; it simply stops being a substitute for executing the call
+again. Treat the boundary the way any other fresh suffix is treated: the replayed prefix
+must still have left the workspace and project tree in the state the fresh calls expect.
+See [output acceptance](output-acceptance.md#the-principle) for what changed in the
+contract itself.
+
 ## Human continuation
 
 `awaitOperator({ reason, operatorHandoff? })` declares a terminal disposition and does not pause the JavaScript stack. Return immediately. A resumable handoff places references under `operatorHandoff.continuationArtifactRefs`, not a top-level `artifactRefs` property. The handoff service validates claims, target/workspace identity and artifact digests, then starts a new run with the real operator answer. It does not synthesize approval.

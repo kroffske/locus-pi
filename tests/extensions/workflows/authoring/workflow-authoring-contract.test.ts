@@ -538,7 +538,9 @@ ${authoring[1] ?? ""}
     expect(authoring).toContain("Markdown/table/report renderers");
     expect(authoring).toContain("raw `schema`");
     expect(manual).toContain("dsl.items()");
-    expect(manual).toContain("10,000 physical attempts/run");
+    // The manual owns the axis list, and it owns the fact that five of the six carry
+    // no package value at all.
+    expect(manual).toContain("none — unbounded");
     expect(manual).toContain("output-acceptance.md");
     expect(manual).toContain("execution-controls.md");
     expect(manual).toContain("recovery-and-continuation.md");
@@ -574,16 +576,35 @@ ${authoring[1] ?? ""}
     expect(human).toContain("Do not label that example standard");
   });
 
-  it("keeps current defaults and legacy handoff limits in the runtime owner, not the router", () => {
+  it("keeps the surviving runtime defaults in the runtime owner, not the router", () => {
     const manual = source("extensions/workflows/REFERENCE.md");
     expect(manual).toContain("MAX_DAGS_IN_SCOPE");
-    expect(manual).toMatch(/1\.\.100|1–100/u);
-    expect(manual).toMatch(/1,000 (?:tool )?calls/u);
-    expect(manual).toMatch(/24-hour/u);
-    expect(manual).toMatch(/1,000 turns/u);
-    expect(manual).toMatch(/500,000\s+(?:answer\s+)?characters/u);
-    expect(manual).toMatch(/SDK timeout.*later transport backstop/isu);
+    // The execution-budget numbers are no longer among the surviving defaults: the
+    // manual must say the axes are unbounded rather than reprint a value the code
+    // does not apply. `concurrency` is the single exception and keeps its number.
+    expect(manual).toMatch(/\| `concurrency` \| 4 attempts at once/u);
+    expect(manual).toMatch(/an axis nobody declared is UNBOUNDED/iu);
+    expect(manual).not.toMatch(/24-hour (?:emergency|new-child)/u);
+    expect(manual).not.toMatch(/1,000 turns per child attempt/u);
+    // One deadline reaches the host, so there is no second SDK-side backstop to describe.
+    expect(manual).toMatch(/reaches the SDK host unchanged/u);
     expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain("10,000");
+  });
+
+  it("states the deleted size limits as deleted, so no reader re-derives them from the manual", () => {
+    // The runtime stopped guessing how long an answer, a handoff item or a routing list
+    // may be. A manual that still printed those numbers would be the last place an author
+    // could learn a rule the code no longer has.
+    const manual = source("extensions/workflows/REFERENCE.md");
+    expect(manual).not.toMatch(/maxAnswerChars|SCHEMA_MAX_ATTEMPTS/u);
+    expect(manual).not.toMatch(/500,000\s+(?:answer\s+)?characters/u);
+    // `maxItemChars` may still appear, but only as a name the runtime refuses — never as
+    // an option with a default an author could copy.
+    for (const mention of manual.match(/.{0,60}maxItemChars.{0,40}/gu) ?? []) {
+      expect(mention).toContain("refused by name");
+    }
+    expect(manual).toMatch(/six axes/u);
+    expect(manual).toContain("`maxItems` may be omitted entirely");
   });
 
   it("keeps ordered stages separate from the caller-item inline mini-workflow pattern", () => {
@@ -1644,7 +1665,11 @@ ${authoring[1] ?? ""}
     const example = source("extensions/workflows/references/examples/refinement.workflow.mjs");
     expect(card).toContain("3R");
     expect(card).toContain("cap/no-progress");
-    expect(card).toContain("returnVia");
+    // The card used to teach `returnVia: "tool"` as the cheaper transport. There is no
+    // other transport now, so what it must still teach is the COST: a format correction
+    // stays inside the child that already did the work.
+    expect(card).not.toContain("returnVia");
+    expect(card).toContain("never adds a physical child");
     expect(example).toContain('summary: "round_cap"');
     expect(example).toContain('summary: "no_progress"');
     expect(example.indexOf('label: "worker"')).toBeLessThan(example.indexOf('label: "reviewer"'));

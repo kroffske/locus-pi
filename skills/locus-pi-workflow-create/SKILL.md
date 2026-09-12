@@ -52,33 +52,27 @@ A stage refusal uses an explicit `choice` identity and `{ ok: false, status }`. 
 Do not use an empty queue or a success fallback to conceal missing work.
 For substantive review, use an arbiter that evaluates findings and may accept or reject them with evidence, request correction, retry review or disclose a limitation. Reviewer output is input to judgment, not an automatic veto. Preserve the complete inventory of completed, failed, missing and skipped checks. Do not claim a check ran when it did not.
 
-Use `agent(prompt, { result: "report" })` for plain-text calls whose eligible terminal failure must reach that arbiter. Forward the entire host-rendered report. It includes actual answer or failure facts; it is not task acceptance. It cannot combine with shaped output or `returnVia`. Ordinary calls and fatal execution failures still throw; see [report mode](../../extensions/workflows/REFERENCE.md#agent-execution-reports). Use bounded correction and fresh review after every change; allow residual findings to return to the author while progress/resources permit. On exhaustion preserve the latest reviewed artifact, unmet criteria, reason and next action. An incomplete required outcome stays non-successful; a real user question includes options and consequences. `throw` is for execution errors, not a routine review decision.
+Use `agent(prompt, { result: "report" })` for plain-text calls whose eligible terminal failure must reach that arbiter. Forward the entire host-rendered report. It includes actual answer or failure facts; it is not task acceptance. It cannot combine with shaped output. Ordinary calls and fatal execution failures still throw; see [report mode](../../extensions/workflows/REFERENCE.md#agent-execution-reports). Use bounded correction and fresh review after every change; allow residual findings to return to the author while progress/resources permit. On exhaustion preserve the latest reviewed artifact, unmet criteria, reason and next action. An incomplete required outcome stays non-successful; a real user question includes options and consequences. `throw` is for execution errors, not a routine review decision.
 
-Add an output bound or per-call budget only for an explicit user requirement,
-an actual consumer contract or a measured failure at that boundary. Name that
-reason; do not guess a number, copy one from an example or keep raising it after
-an otherwise valid report is rejected. Runtime safety limits still apply.
+The runtime has no answer-size policy: it never rejects or truncates an answer for its length, and no size option has a package default. Declare `minItems`/`maxItems` only for a consumer that counts (a fixed number of downstream slots, a queue that must not be empty); `maxLength`/`singleLine` only for a named downstream limit (a status line, a filename, a field in someone else's record), and say which in the design. Never write a prompt line such as "keep it under N characters" or "at most N items": that is the same policy in English. Never emit `maxItemChars`, `maxAnswerChars`, `schemaMaxLength` or `returnVia`; the runtime refuses the first three by name and `returnVia: "tool"` is redundant.
 
-`maxTurns` counts SDK model cycles within a child, including normal tool use;
-it is not a workflow retry or output-repair count. Keep routine stages on the
-runtime default. For a confirmed turn-budget stop, follow
-[Repair + Continue](references/repair-and-continue.md#turn-budget-failures).
+Budgets (`timeoutMs`, `maxTurns`, `maxToolCalls` on a call; `totalAgents`, `runtimeMs` at launch) stop spending, not answers. None has a package default: an undeclared axis is `unbounded` and the run header prints that word. Declare one only with a one-line reason recorded in the design; do not copy a number from an example or raise one after a valid answer was refused. `maxTurns` counts SDK model cycles inside one child, including tool use; it is not a retry or repair count. A capability option (`workspaceMode`, `ask`, `maxToolCalls` as a runaway fuse) is justified by what the stage must or must not be able to do, never as a size stand-in; legacy `tools`/`readOnly` fields are ignored. For a confirmed turn-budget stop, follow [Repair + Continue](references/repair-and-continue.md#turn-budget-failures).
 
 When repairing an output-contract failure, inspect the whole unfinished suffix
 for the same narrative-wrapper mistake. Preserve completed calls and genuine
 decision/fan-out contracts; see [Repair + Continue](references/repair-and-continue.md#repeated-output-contract-failures).
 
-When an agent executes a command or writes files before returning a `choice`,
-use `returnVia: "tool"`. This keeps format correction in the same child session;
-legacy text choices can rerun the whole child on a mismatch. Put the actual
+When an agent executes a command or writes files before returning a `choice`, the
+format correction already stays in that child's own session — every shaped call is
+carried by `workflow_return`, so a mismatch never reruns the command. Put the actual
 success condition in the prompt, such as a confirmed command exit code.
 Never use a success fallback to conceal an unconfirmed result. An existing file
 does not prove the current command succeeded.
 
 Before any decision handoff, read [structured results](references/structured-results.md): the arbiter owns the decision; a translator copies it without new criteria or owner approval. A path or summary is not the full arbitration.
-That reference also covers transport rules and schema-echo repair. Plain narrative agents
+That reference also covers same-session correction and schema-echo repair. Plain narrative agents
 need no output contract. For a stopped run, inspect the command transcript as
-well as the final answer: work may have finished before answer validation failed.
+well as the final answer: work may have finished before shape acceptance failed; answer size is never the cause.
 
 ## Source and evidence boundary
 
@@ -86,7 +80,7 @@ Workflow source is orchestration only: explicit prompts, visible DSL edges and w
 
 Give every agent a concise human `title` describing its current work. In a
 `.map()`/`parallel()` list, derive it from the item and question so siblings are
-distinguishable, for example ``title: `${item.key} · ${field.key}```. Keep it within 240 characters. Verify a two-item example reaches
+distinguishable, for example ``title: `${item.key} · ${field.key}```. A title has no length ceiling; the renderer clips what it cannot draw. Verify a two-item example reaches
 the displayed rows; distinct labels alone do not prove readable titles.
 
 Every callsite needs its own literal `label`. A dynamic `title` is display text, not identity. Same-session output clarification is not a semantic round; semantic continuation creates a fresh worker. Recovery is a separate runtime capability.

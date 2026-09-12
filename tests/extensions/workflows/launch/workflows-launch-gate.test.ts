@@ -331,16 +331,17 @@ describe("/workflows run launch gate", () => {
     }
   });
 
-  it("rejects oversized effective command input before creating a workflow run", async () => {
+  it("starts a run for a long effective command input instead of rejecting it", async () => {
+    // The removed 16 000-character launch gate. The input IS the operator's task; a
+    // launch check bounds what a run may SPEND, never how long the request may be.
     const h = registerHarness();
     const spy = vi.spyOn(runner, "runWorkflowScript");
     try {
       await h.commands.get("workflows")!.handler(`run live-smoke   ${"x".repeat(16_001)}   `, h.ctx);
 
-      expect(spy).not.toHaveBeenCalled();
+      expect(spy).toHaveBeenCalledTimes(1);
       const widget = h.widgets.get("workflows") ?? "";
-      expect(widget).toContain("exceeds the 16000-character limit");
-      expect(widget).toContain("No workflow execution was started");
+      expect(widget).not.toContain("character limit");
     } finally {
       spy.mockRestore();
     }

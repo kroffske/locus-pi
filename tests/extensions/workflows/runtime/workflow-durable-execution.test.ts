@@ -1187,10 +1187,12 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
     },
   );
 
-  it("rejects an overlong component-valid outputDir before an agent starts", async () => {
+  it("accepts a long component-valid outputDir instead of refusing it on a character count", async () => {
+    // The 400-character gate was an aggregate bound on the whole string, not a filesystem
+    // limit: each component was already inside the safe alphabet and the path already
+    // confined. What actually bounds a path is the filesystem, and it says so itself.
     const root = project();
     writeWorkflow(root, "empty", `export default () => "ok";\n`);
-    let calls = 0;
     const harness = createHarness(root);
     const result = await runWorkflowScript({
       pi: harness.pi,
@@ -1198,15 +1200,10 @@ export default () => readFileSync(${JSON.stringify(styleFile)}, "utf8");
       signal: new AbortController().signal,
       name: "empty",
       outputDir: `${"a".repeat(200)}/${"b".repeat(200)}`,
-      createExecutor: executor(() => {
-        calls += 1;
-        return "unused";
-      }),
+      createExecutor: executor(() => "unused"),
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("outputDir exceeds 400 characters");
-    expect(calls).toBe(0);
+    expect(result.ok).toBe(true);
   });
 
   it.each([null, true, 1, [], { path: "outputs/task" }])(

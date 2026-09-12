@@ -41,6 +41,9 @@ function completed(request: WorkflowAgentRequest, text: string): WorkflowAgentRe
     diagnostics: [],
     agent: request.agent,
     ...(request.label === undefined ? {} : { label: request.label }),
+    ...(request.returnContract === undefined
+      ? {}
+      : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
   };
 }
 
@@ -88,7 +91,7 @@ function stageAnswers(verdict: "accept" | "reject", reason: string) {
     if (label === "frame the question") return "## Question\nOwn plugin API or separate executables?";
     if (label in ADVICE) return ADVICE[label]!;
     if (label === "synthesize the document") return SYNTHESIS;
-    if (label === "verify the synthesis") return `\`\`\`json\n${JSON.stringify({ verdict, reason })}\n\`\`\``;
+    if (label === "verify the synthesis") return JSON.stringify({ verdict, reason });
     throw new Error(`unexpected stage label: ${label}`);
   };
 }
@@ -196,7 +199,6 @@ describe("consilium reference workflow", () => {
     expect(record?.kind).toBe("published");
     const text = artifactStore.read(result.consiliumRef as never).toString("utf8");
     expect(text.trim()).not.toBe("");
-    expect(text.length).toBeLessThanOrEqual(12_000);
     expect(text).toContain("## Where they disagree");
   });
 
@@ -223,43 +225,41 @@ describe("consilium reference workflow", () => {
     expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(false);
   });
 
-  it("bounds the verifier too, so a valid verdict cannot arrive inside an unbounded reply", async () => {
-    // `schema` extracts a value; it does not bound the reply the value arrived in. So a
-    // verifier answering with a valid JSON block wrapped in a megabyte of prose used to
-    // succeed, and that megabyte became this stage's persisted answer artifact — while the
-    // source comment claimed every stage was bounded. The bound is the only thing that
-    // makes that claim true, and it must be provable by BEHAVIOUR, not by reading the file.
-    const verdict = JSON.stringify({ verdict: "accept", reason: "Every claim traces to an advisor." });
-    const padded = `${"filler prose. ".repeat(400)}\n\n\`\`\`json\n${verdict}\n\`\`\``;
-    expect(padded.length).toBeGreaterThan(2_000);
-    const answer = stageAnswers("accept", "Every claim traces to an advisor.");
+  it("takes the verifier's declared verdict and nothing else, at any reply size", async () => {
+    // The old bound existed because `schema` used to EXTRACT a value out of a final text
+    // message, so a valid JSON block could arrive wrapped in a megabyte of prose that then
+    // became this stage's persisted artifact. With same-session acceptance the verdict IS
+    // the tool argument: there is no surrounding reply to bound, and no size to police.
+    const verdict = { verdict: "accept" as const, reason: "Every claim traces to an advisor." };
+    const answer = stageAnswers("accept", verdict.reason);
     const { dsl, artifactStore } = runtimeWith(async (request) =>
-      completed(request, request.label === "verify the synthesis" ? padded : answer(request)),
+      completed(request, request.label === "verify the synthesis" ? JSON.stringify(verdict) : answer(request)),
     );
 
-    await expect((await loadWorkflow())(dsl, FIXTURE_QUESTION)).rejects.toThrow(
-      /Agent answer is \d+ characters; the call allows 2000\./u,
+    await expect((await loadWorkflow())(dsl, FIXTURE_QUESTION)).resolves.toMatchObject({ ok: true });
+    expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(true);
+  });
+
+  it("still fails closed and publishes nothing when the verdict is off-shape", async () => {
+    const answer = stageAnswers("accept", "Every claim traces to an advisor.");
+    const { dsl, artifactStore } = runtimeWith(async (request) =>
+      completed(request, request.label === "verify the synthesis" ? '{"verdict":"maybe"}' : answer(request)),
     );
-    // Fails closed: an over-long verdict publishes nothing, exactly like a reject.
+
+    await expect((await loadWorkflow())(dsl, FIXTURE_QUESTION)).rejects.toThrow(/schema mismatch/u);
     expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(false);
   });
 
-  it("publishes exactly the validated synthesis at the fencepost, and refuses one character past it", async () => {
-    // The bound is 12,000, and the terminal document used to be `synthesis + "\n"` whenever
-    // the answer lacked a trailing newline — so the one length that mattered, exactly
-    // 12,000, shipped a 12,001-character document through a gate that had just approved
-    // 12,000. A test with a short fixture asserting `<= 12_000` passes either way, which is
-    // why all three lengths are driven here.
+  it("publishes exactly the validated synthesis, byte for byte, at any length", async () => {
+    // The terminal document used to be `synthesis + "\n"` whenever the answer lacked a
+    // trailing newline, which silently moved the bound it had just passed. The bound is
+    // gone; the byte-for-byte rule is the part that mattered and still holds.
     const build = (length: number): string => {
       const head = ["## Answer", "x", "", "## What is settled", "y", "", "## Where they disagree", ""].join("\n");
       return head + "z".repeat(length - head.length);
     };
 
-    for (const [length, published] of [
-      [11_999, true],
-      [12_000, true],
-      [12_001, false],
-    ] as const) {
+    for (const length of [11_999, 12_000, 12_001, 400_000]) {
       const exact = build(length);
       expect(exact.length).toBe(length);
       // No trailing newline: this is precisely the answer the old code lengthened.
@@ -268,20 +268,43 @@ describe("consilium reference workflow", () => {
       const { dsl, artifactStore } = runtimeWith(async (request) =>
         completed(request, request.label === "synthesize the document" ? exact : answer(request)),
       );
-      const run = (await loadWorkflow())(dsl, FIXTURE_QUESTION);
 
-      if (!published) {
-        await expect(run).rejects.toThrow(`Agent answer is ${String(length)} characters; the call allows 12000.`);
-        expect(artifactStore.list().some(({ name }) => name === "consilium.md")).toBe(false);
-        continue;
-      }
-      const result = (await run) as { consiliumRef: { artifactId: string; name: string } };
+      const result = (await (
+        await loadWorkflow()
+      )(dsl, FIXTURE_QUESTION)) as {
+        consiliumRef: { artifactId: string; name: string };
+      };
       const text = artifactStore.read(result.consiliumRef as never).toString("utf8");
-      // Byte-for-byte the validated answer: not one character was added after the gate.
       expect(text).toBe(exact);
       expect(text.length).toBe(length);
-      expect(text.length).toBeLessThanOrEqual(12_000);
     }
+  });
+
+  it("frames a long question instead of measuring it", async () => {
+    // The curated reference is where an author first reads what "the runtime owns no size
+    // policy" means, so it must model the principle on its own input too. A 40 000-character
+    // brief is more to frame, not a malformed request, and the whole of it reaches the framer.
+    const longQuestion = `${FIXTURE_QUESTION}\n\n${"Дополнительный контекст. ".repeat(1_600)}`;
+    expect(longQuestion.length).toBeGreaterThan(40_000);
+    const calls: WorkflowAgentRequest[] = [];
+    const answer = stageAnswers("accept", "Every claim traces to an advisor.");
+    const { dsl } = runtimeWith(async (request) => {
+      calls.push(request);
+      return completed(request, answer(request));
+    });
+
+    await expect((await loadWorkflow())(dsl, longQuestion)).resolves.toBeDefined();
+
+    expect(calls.map((call) => call.label)).toEqual([
+      "frame the question",
+      "evidence advisor",
+      "risk advisor",
+      "alternative advisor",
+      "synthesize the document",
+      "verify the synthesis",
+    ]);
+    // Whole, not summarized and not trimmed.
+    expect(calls[0]!.prompt).toContain(longQuestion.trim());
   });
 
   it("refuses a run with no question before any child starts", async () => {
@@ -315,8 +338,9 @@ describe("consilium reference workflow", () => {
   it("keeps the shipped skeleton bounded and the reference docs on the executed-model contract", () => {
     const patterns = readFileSync(patternsPath, "utf8");
     const consilium = patterns.slice(patterns.indexOf("## Consilium"));
-    expect(consilium).toContain("maxAnswerChars: 12_000");
-    expect(consilium).toContain("maxAnswerChars: 2_000");
+    // The stage bounds are gone: the runtime owns no answer-size policy, so the pattern
+    // must not teach one. Stages are shaped by their prompts and by the verdict `schema`.
+    expect(consilium).not.toContain("maxAnswerChars");
 
     const readme = readFileSync(readmePath, "utf8");
     expect(readme).toContain('modelRole: "smol"');

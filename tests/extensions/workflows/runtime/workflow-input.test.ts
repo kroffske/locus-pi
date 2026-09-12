@@ -224,8 +224,11 @@ describe("string-only workflow input", () => {
       }),
     ).toBe(true);
     expect(Value.Check(schema, { name: "demo", outputDir: ".tasks/T-144-2026-09-08-workflow/artifacts" })).toBe(true);
+    // No aggregate character cap on the whole path: each component is still checked
+    // against the safe alphabet and the path must stay confined, and the real length
+    // limits belong to the filesystem, which reports them in its own words.
     expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(199)}/${"b".repeat(200)}` })).toBe(true);
-    expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(200)}/${"b".repeat(200)}` })).toBe(false);
+    expect(Value.Check(schema, { name: "demo", outputDir: `${"a".repeat(200)}/${"b".repeat(200)}` })).toBe(true);
     for (const outputDir of ["/tmp/demo", "./demo", "../demo", "outputs/../demo"]) {
       expect(Value.Check(schema, { name: "demo", outputDir })).toBe(true);
     }
@@ -388,26 +391,17 @@ describe("string-only workflow input", () => {
     }
   });
 
-  it("refuses an over-budget string before any run is created", async () => {
-    const { harness, tool } = registerTool();
-    const spy = vi.spyOn(runner, "runWorkflowScript");
-    try {
-      const oversized = "x".repeat(20_000);
-      const result = await tool.execute(
-        "tool-1",
-        { name: "live-smoke", input: oversized },
-        new AbortController().signal,
-        () => void 0,
-        harness.ctx,
-      );
+  it("starts a run for a long semantic request instead of refusing it", async () => {
+    // The removed 16 000-character input ceiling. The input IS the operator's task, and
+    // refusing to start because the task is long is a size policy over work.
+    const root = temporaryProject();
+    writeWorkflow(root, "echo-input", ECHO_INPUT_WORKFLOW);
+    const oversized = "x".repeat(20_000);
 
-      const firstContent = result.content?.[0];
-      expect(result.isError).toBe(true);
-      expect(firstContent?.type === "text" ? firstContent.text : "").toContain("input");
-      expect(spy).not.toHaveBeenCalled();
-    } finally {
-      spy.mockRestore();
-    }
+    const outcome = await runEcho(root, oversized);
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toMatchObject({ received: oversized });
   });
 
   it("keeps the exact supplied text instead of trimming or parsing it", async () => {

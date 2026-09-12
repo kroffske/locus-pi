@@ -1,83 +1,79 @@
 /**
- * workflow-budget.ts — ONE package-level answer to "how much is a workflow run
- * allowed to spend", on every axis the host can actually enforce.
+ * workflow-budget.ts — ONE place that says what a workflow run is allowed to
+ * spend, on every axis the host can actually enforce.
  *
- * Before this module the two defaults that existed lived 580 lines apart in
- * `workflow-runtime.ts` with no cross-reference, and the axes that mattered most
- * (global concurrency, run wall clock) had no default at all. A contract a reader
- * cannot see in one place is not a contract, so every axis is one field of one
- * frozen object here and every other module reads it from here.
+ * The module used to carry a package DEFAULT for each axis. It no longer does, and
+ * that is the whole point of this revision: a number nobody chose is not a policy,
+ * it is a guess that ends someone's run. A budget stops SPEND, so the party that
+ * pays — the author in the workflow, the operator on the launch — is the only party
+ * that may set one. An axis nobody declared is UNBOUNDED, printed as the literal
+ * `unbounded` in the run header, the journal and the run report, so the absence is
+ * something an operator reads rather than something they have to infer.
+ *
+ * `concurrency` is the one axis that keeps a package value (4). It is not a stop:
+ * exceeding it makes a child WAIT, never fail, so it bounds simultaneous
+ * processes and memory rather than what a run may finish. One effective width, no
+ * second hidden one (the former `SCHEDULER_WIDTH` in `workflow-runtime.ts`).
  *
  * Pure data and pure functions. No fs / process / network; no import of the
  * runtime, so the runtime can import this without a cycle.
  *
- * What this module is NOT: an enforcement point. It declares the numbers and the
+ * What this module is NOT: an enforcement point. It declares the axes and the
  * override arithmetic; `workflow-runner.ts` applies them to a run and
- * `workflow-runtime.ts` enforces them per call.
+ * `workflow-runtime.ts` enforces them before each spend.
  */
 
+import { NODE_TIMER_MAX_DELAY_MS, assertRepresentableDelayMs } from "../../_shared/runtime/long-timer.js";
+
+export { NODE_TIMER_MAX_DELAY_MS };
+
 /**
- * The seven axes a workflow run is bounded on.
+ * The six axes a workflow run is bounded on.
  *
- * Three are run-level (`concurrency`, `totalAgents`, `runtimeMs`) and four are
- * per-call (`timeoutMs`, `toolCalls`, `turns`, `answerChars`). Tokens and cost are
- * deliberately absent: `costTotal` is a hardcoded `0`
- * (`workflow-agent-bridge.ts`), and a limit over a stub is a gate that reports
- * "under budget" forever. They are reported, not enforced.
+ * One is a queueing width (`concurrency`), two more are run-level (`totalAgents`,
+ * `runtimeMs`) and three are per-call (`timeoutMs`, `toolCalls`, `turns`). Every
+ * one of them bounds SPEND — time, work, fan-out — and none of them judges an
+ * answer.
+ *
+ * Five of the six are optional, and `undefined` means UNBOUNDED, not "use a
+ * default": no timer is armed, no counter refuses a child, and the axis prints as
+ * `unbounded` wherever the applied budget is shown.
+ *
+ * `answerChars` was the seventh and is deliberately gone: it refused a completed
+ * child's answer for its length, which is a size policy over a result already paid
+ * for rather than a budget over what a run may spend. A consumer that genuinely
+ * needs a bounded value declares it as a contract (`output.maxLength`, a schema
+ * `maxLength`/`maxItems`), where the child is told and can correct it in-session.
+ *
+ * Tokens and cost are absent for a different reason: the host reports no price, so
+ * a limit over them would be a gate that reports "under budget" forever. Observed
+ * token usage is recorded; cost is reported as unknown rather than as zero.
  */
 export interface WorkflowBudget {
-  /** Global simultaneous leaf-agent executions across the whole run. */
+  /** Global simultaneous leaf-agent executions across the whole run. Queues, never refuses. */
   concurrency: number;
-  /** Total `agent()` invocations one run may make, counting nested and retried ones. */
-  totalAgents: number;
-  /** Wall clock over the agent chain, in milliseconds. Checked when a child starts. */
-  runtimeMs: number;
+  /** Total FRESH `agent()` invocations one run may make, or unbounded when unset. */
+  totalAgents?: number;
+  /** Wall clock over the agent chain, in milliseconds. Checked before a child starts. */
+  runtimeMs?: number;
   /** Wall-clock fuse for ONE child attempt, in milliseconds. */
-  timeoutMs: number;
+  timeoutMs?: number;
   /** Tool calls one child attempt may start. */
-  toolCalls: number;
+  toolCalls?: number;
   /** Assistant turns one child attempt may take. */
-  turns: number;
-  /** Characters one child answer may return. */
-  answerChars: number;
+  turns?: number;
 }
 
 /**
- * The package defaults. Every number is a spend policy with a named failure mode,
- * not a guess; the one-line rationale on each field is the whole point of the
- * module, because the next reader has to be able to move one of them knowingly.
+ * The one package value left, and the reason it survived the removal of the rest:
+ * it queues work instead of stopping it. Too low only makes a run slower, so the
+ * failure mode of a wrong guess here is not somebody's lost run. It is also the
+ * ONLY concurrency width in the runtime — `parallel()`/`pipeline()` narrow it only
+ * when their author passes an explicit one.
  */
-export const DEFAULT_WORKFLOW_BUDGET: Readonly<WorkflowBudget> = Object.freeze({
-  // Equal to today's per-call SCHEDULER_WIDTH, so every existing shape behaves
-  // identically and only NESTED fan-out is newly bounded. There is no correctness
-  // failure on this axis — too low only makes a run slow — which is why it can be tight.
-  concurrency: 4,
-  // A runaway loop is the failure this axis exists for. Fine-grained decomposition
-  // can legitimately reach 10 scripts x 10 questions x 2 stages before discovery,
-  // review, or retries, so 200 is ordinary-workload territory. 10,000 leaves that
-  // work unconstrained while retaining a named finite stop for a genuine loop.
-  totalAgents: 10_000,
-  // Emergency host fuse, not an authoring deadline. Progressing weak-model and
-  // fine-grained runs must not inherit the former two-hour ordinary stop.
-  runtimeMs: 86_400_000,
-  // Emergency per-child host fuse. Explicit tighter operator/call limits remain
-  // supported and journaled; ordinary work gets a full day before time is a stop.
-  timeoutMs: 86_400_000,
-  // Unchanged from DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS. A different value would
-  // invalidate every replay record for no observed benefit: no stage approaches it,
-  // and stages that need less already narrow to 40 or 0.
-  toolCalls: 1_000,
-  // Emergency allowance for long tool-using work, not a target or a retry count.
-  // Explicit per-call limits remain available; completed replay prefixes keep
-  // the effective limit recorded by their original requests.
-  turns: 1_000,
-  // Above the largest curated per-stage bound (256_000) or the shipped examples
-  // would break on their first run. This is a fuse against a pathological answer,
-  // not a work target; per-stage narrowing stays the script's job.
-  answerChars: 500_000,
-});
+export const DEFAULT_WORKFLOW_CONCURRENCY = 4;
 
-/** Every axis name, in the order the journal and the run report print them. */
+/** Every axis name, in the order the header, the journal and the run report print them. */
 export const WORKFLOW_BUDGET_AXES: readonly (keyof WorkflowBudget)[] = Object.freeze([
   "concurrency",
   "totalAgents",
@@ -85,61 +81,38 @@ export const WORKFLOW_BUDGET_AXES: readonly (keyof WorkflowBudget)[] = Object.fr
   "timeoutMs",
   "toolCalls",
   "turns",
-  "answerChars",
 ] as const);
 
-/**
- * The SDK host kills a child at `turnTimeoutMs * maxTurns`
- * (`agent-sdk-host.ts`), independently of the bridge's own fuse. Two deadlines at
- * the same instant make the failure an operator reads nondeterministic, so the
- * declared `timeoutMs` is the authority and the SDK budget is DERIVED from it —
- * strictly above it, by this margin per turn, so the workflow-level named failure
- * always wins and the SDK budget stays a backstop that cannot fire first.
- */
-export const WORKFLOW_SDK_BACKSTOP_MARGIN_MS = 5_000;
-
-/** Node's timer implementation clamps a larger delay to 1 ms. */
-export const NODE_TIMER_MAX_DELAY_MS = 2_147_483_647;
+/** The literal an undeclared axis prints as. One word, everywhere, so an operator
+ *  scanning a headless log cannot mistake absence for a number they did not read. */
+export const WORKFLOW_BUDGET_UNBOUNDED = "unbounded";
 
 /** Representable assistant-turn counts; wall-clock timers have their own bounds. */
 export const WORKFLOW_AGENT_MAX_TURNS = Number.MAX_SAFE_INTEGER;
 
 /**
- * Retain the previously accepted timeout range, derived for 20 turns. Larger
- * explicit turn counts additionally validate their actual timeout/turn pair.
+ * Refuse a deadline no clock could honour, before the child it would bound starts.
  *
- * `n * ceil(timeoutMs / n)` can exceed `timeoutMs` by at most `n - 1`; the SDK
- * then adds `n * WORKFLOW_SDK_BACKSTOP_MARGIN_MS`. Reserving both terms at
- * `n = 20` kept the workflow timer and the multiplied SDK timer at or below
- * Node's maximum delay. Without this cap Node warns and schedules the supposed
- * long timeout after roughly one millisecond.
+ * There is no policy ceiling here any more. A span longer than Node's maximum
+ * delay is run as a CHAIN of representable waits (`scheduleLongTimeout`), so an
+ * operator who asks for 48 hours gets 48 hours instead of the former refusal — and
+ * never the one-millisecond clamp that refusal existed to prevent.
  */
-export const WORKFLOW_MAX_TIMEOUT_MS = NODE_TIMER_MAX_DELAY_MS - 20 * WORKFLOW_SDK_BACKSTOP_MARGIN_MS - 19;
-
-/**
- * The SDK per-turn timeout derived from one call's declared fuse.
- *
- * `turnBudgetMs = workflowSdkTurnTimeoutMs(t, n) * n >= t + n * MARGIN > t` for
- * every `n >= 1`, so the workflow fuse is always the first deadline to expire.
- * With the package defaults this is a host backstop strictly later than the
- * workflow's 24-hour emergency fuse.
- */
-export function workflowSdkTurnTimeoutMs(timeoutMs: number, maxTurns: number): number {
-  assertWorkflowBudgetValue("timeoutMs", timeoutMs);
-  assertWorkflowBudgetValue("turns", maxTurns);
-  const turnTimeoutMs = Math.ceil(timeoutMs / maxTurns) + WORKFLOW_SDK_BACKSTOP_MARGIN_MS;
-  const sdkBudgetMs = turnTimeoutMs * maxTurns;
-  if (!Number.isSafeInteger(sdkBudgetMs) || sdkBudgetMs > NODE_TIMER_MAX_DELAY_MS) {
-    throw new Error("workflow timeoutMs/maxTurns pair cannot be represented by Node timers with the SDK backstop");
+export function assertRepresentableTimeoutMs(timeoutMs: number, field = "timeoutMs"): void {
+  // A fuse of zero is not a tight budget, it is a bug that aborts before the child
+  // starts; one message covers both that and an uncountable value.
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    throw new Error(`${field} must be a positive safe integer`);
   }
-  return turnTimeoutMs;
+  assertRepresentableDelayMs(timeoutMs, field);
 }
 
 /** One axis a caller asked to raise above the value that would otherwise apply. */
 export interface WorkflowBudgetRaise {
   axis: keyof WorkflowBudget;
-  /** The value that would have applied — the package default for a run-level
-   *  override, the run's applied default for a per-call one. */
+  /** The value that would have applied — only an axis with a package or run-level
+   *  value can be raised; an unbounded axis cannot, because narrowing is all an
+   *  explicit value on it can do. */
   applied: number;
   /** What the caller asked for. */
   requested: number;
@@ -152,21 +125,23 @@ export interface ResolvedWorkflowBudget {
 }
 
 /**
- * Apply a partial override to the package contract.
+ * Build the budget one run applies from what its launch declared.
  *
- * Narrowing is free and silent. Raising is allowed — a down-only rule would make
- * a legitimately long workflow unauthorable and the operator would answer by
- * raising the package default for everyone, which is the worse outcome — but it
- * is never silent: every raise comes back as a record the caller journals.
+ * Only `concurrency` has a value to start from; every other axis exists in the
+ * result only if the caller named it. That is the difference an operator has to be
+ * able to see: an axis absent here arms nothing at all, rather than quietly
+ * applying somebody's idea of a safe maximum.
  *
- * `undefined` on an axis means "unstated", which is not the same as "default":
- * an explicit value equal to the default is still not a raise, and an explicit
- * invalid value is refused rather than ignored. The same rule reaches the key
- * set: the object is closed over the axes, so a typo or a removed option is
- * named rather than quietly replaced by the package default.
+ * Raising the one defaulted axis is allowed — a wider run is a legitimate ask —
+ * but it is never silent: the raise comes back as a record the caller journals.
+ *
+ * `undefined` on an axis means "unstated", which is not the same as a value: an
+ * explicit invalid value is refused rather than ignored. The same rule reaches the
+ * key set: the object is closed over the axes, so a typo or a removed option is
+ * named rather than quietly dropped.
  */
 export function resolveWorkflowBudget(override?: Partial<WorkflowBudget>): ResolvedWorkflowBudget {
-  const budget: WorkflowBudget = { ...DEFAULT_WORKFLOW_BUDGET };
+  const budget: WorkflowBudget = { concurrency: DEFAULT_WORKFLOW_CONCURRENCY };
   const raises: WorkflowBudgetRaise[] = [];
   if (override === undefined) return { budget, raises };
   assertClosedWorkflowBudgetKeys(override);
@@ -174,8 +149,8 @@ export function resolveWorkflowBudget(override?: Partial<WorkflowBudget>): Resol
     const requested = override[axis];
     if (requested === undefined) continue;
     assertWorkflowBudgetValue(axis, requested);
-    const applied = DEFAULT_WORKFLOW_BUDGET[axis];
-    if (requested > applied) raises.push({ axis, applied, requested });
+    const applied = budget[axis];
+    if (applied !== undefined && requested > applied) raises.push({ axis, applied, requested });
     budget[axis] = requested;
   }
   return { budget, raises };
@@ -187,34 +162,54 @@ export function resolveWorkflowBudget(override?: Partial<WorkflowBudget>): Resol
  * `RunWorkflowScriptOptions.maxTotalAgentInvocations` became `budget.totalAgents`.
  * TypeScript catches the old spelling on an object literal, but an embedder in
  * plain JS — or one whose value passed through a widened variable — would have
- * had its explicit bound dropped on the floor and silently replaced by the
- * package default. A removed option that still reads as configuration is worse
- * than a missing one, so it is named at the boundary instead.
+ * had its explicit bound dropped on the floor. A removed option that still reads
+ * as configuration is worse than a missing one, so it is named at the boundary.
  */
-const REMOVED_WORKFLOW_BUDGET_KEYS: Readonly<Record<string, keyof WorkflowBudget>> = Object.freeze({
+const REMOVED_WORKFLOW_BUDGET_KEYS: Readonly<Record<string, keyof WorkflowBudget | null>> = Object.freeze({
   maxTotalAgentInvocations: "totalAgents",
+  // Removed outright rather than renamed: there is no replacement AXIS, because the
+  // runtime no longer refuses an answer for its size. Named here so an override that
+  // still sets it hears why instead of having it silently dropped.
+  answerChars: null,
 });
 
 /**
- * The override is a CLOSED seven-key object. An unrecognised key with a real
+ * The override is a CLOSED six-key object. An unrecognised key with a real
  * value is a bound its author believed was applied; ignoring it is the silent
  * fallback `resolveWorkflowBudget` exists to refuse, and it would be invisible
- * in the journal because a raise that was never read cannot be reported.
+ * in the journal because a bound that was never read cannot be reported.
  *
  * An unknown key whose value is `undefined` asks for nothing, so it is allowed —
- * the same "unstated is not default" rule the axes themselves follow, and it
+ * the same "unstated is not a value" rule the axes themselves follow, and it
  * keeps a spread-built override from failing over a key nobody set.
  */
+/**
+ * The named sentence a REMOVED budget key earns, or `undefined` when the key was
+ * never an axis of this budget at all.
+ *
+ * Exported because the schema in front of the `workflow` tool is a second door
+ * into the same object, and a closed-property schema answers `answerChars` with
+ * "unexpected property" — a shape complaint that tells its reader nothing about
+ * why the option is gone or what to declare instead. The tool consults this table
+ * before validating so both doors give the same answer.
+ */
+export function removedWorkflowBudgetKeyMessage(key: string): string | undefined {
+  if (!Object.hasOwn(REMOVED_WORKFLOW_BUDGET_KEYS, key)) return undefined;
+  const replacement = REMOVED_WORKFLOW_BUDGET_KEYS[key];
+  return replacement === null
+    ? `workflow budget axis ${key} was removed: a workflow run no longer bounds the SIZE of an answer. ` +
+        "Declare a consumer contract on the call instead (output.maxLength, or maxLength/maxItems inside a schema)"
+    : `workflow budget option ${key} was removed; use budget.${replacement} instead`;
+}
+
 function assertClosedWorkflowBudgetKeys(override: Partial<WorkflowBudget>): void {
   const axes = new Set<string>(WORKFLOW_BUDGET_AXES);
   for (const [key, value] of Object.entries(override)) {
     if (axes.has(key) || value === undefined) continue;
-    const replacement = REMOVED_WORKFLOW_BUDGET_KEYS[key];
-    throw new Error(
-      replacement === undefined
-        ? `workflow budget has no axis ${key}; the axes are ${WORKFLOW_BUDGET_AXES.join(", ")}`
-        : `workflow budget option ${key} was removed; use budget.${replacement} instead`,
-    );
+    const removed = removedWorkflowBudgetKeyMessage(key);
+    if (removed === undefined)
+      throw new Error(`workflow budget has no axis ${key}; the axes are ${WORKFLOW_BUDGET_AXES.join(", ")}`);
+    throw new Error(removed);
   }
 }
 
@@ -222,25 +217,32 @@ function assertClosedWorkflowBudgetKeys(override: Partial<WorkflowBudget>): void
  * Fail closed on a value that could never bound a real run. A zero or negative
  * axis is not a tight budget, it is a bug that would refuse the first child; a
  * fractional one would compare unpredictably against integer counters.
+ *
+ * Length is no longer a reason to refuse a timeout: an explicit long deadline is
+ * run as a chain of representable waits rather than clamped or rejected.
  */
 export function assertWorkflowBudgetValue(axis: keyof WorkflowBudget, value: number): void {
   if (!Number.isSafeInteger(value) || value < 1) {
     throw new Error(`workflow budget ${axis} must be a positive safe integer`);
   }
-  if (axis === "timeoutMs" && value > WORKFLOW_MAX_TIMEOUT_MS) {
-    throw new Error(
-      `workflow budget timeoutMs must not exceed ${WORKFLOW_MAX_TIMEOUT_MS}; larger values cannot be represented by Node timers with the SDK backstop`,
-    );
-  }
+}
+
+/** One axis as an operator reads it: the declared value, or the word that says
+ *  nothing was declared and nothing will stop this run on that axis. */
+export function formatWorkflowBudgetAxis(budget: WorkflowBudget, axis: keyof WorkflowBudget): string {
+  const value = budget[axis];
+  return value === undefined ? WORKFLOW_BUDGET_UNBOUNDED : String(value);
 }
 
 /**
- * The one prelude line a run emits before any workflow code runs. It is a `log`
- * line rather than a new journal kind on purpose: a new kind would touch every
- * journal reader for a string.
+ * The one header line a run emits before any workflow code runs. It lists ALL six
+ * axes, including the ones nobody declared, because that line is the only place a
+ * headless launch says out loud that five of its six stops do not exist. It is a
+ * `log` line rather than a new journal kind on purpose: a new kind would touch
+ * every journal reader for a string.
  */
 export function formatWorkflowBudgetPrelude(budget: WorkflowBudget): string {
-  const fields = WORKFLOW_BUDGET_AXES.map((axis) => `${axis}=${String(budget[axis])}`).join(" ");
+  const fields = WORKFLOW_BUDGET_AXES.map((axis) => `${axis}=${formatWorkflowBudgetAxis(budget, axis)}`).join(" ");
   return `[workflow:budget] applied ${fields}`;
 }
 
@@ -251,4 +253,34 @@ export function formatWorkflowBudgetRaise(raise: WorkflowBudgetRaise, scope: "ru
     `[workflow:budget] ${scope} raised ${raise.axis} above the applied default: ` +
     `default=${String(raise.applied)} requested=${String(raise.requested)}`
   );
+}
+
+/**
+ * The applied budget as a machine envelope: every axis present, an undeclared one
+ * carrying the same word an operator reads in the header.
+ *
+ * `result.json` is what a later reader (a resume, a report, another tool) uses to
+ * learn what this run was allowed to spend. Omitting the unbounded axes there would
+ * make "nobody declared it" indistinguishable from "this envelope predates the
+ * field", which is exactly the ambiguity the printed word removes.
+ */
+export function workflowBudgetEnvelope(
+  budget: WorkflowBudget,
+): Record<keyof WorkflowBudget, number | typeof WORKFLOW_BUDGET_UNBOUNDED> {
+  const envelope = {} as Record<keyof WorkflowBudget, number | typeof WORKFLOW_BUDGET_UNBOUNDED>;
+  for (const axis of WORKFLOW_BUDGET_AXES) envelope[axis] = budget[axis] ?? WORKFLOW_BUDGET_UNBOUNDED;
+  return envelope;
+}
+
+/**
+ * The line an explicit budget emits when it actually stops a run.
+ *
+ * The wording is the decision, not decoration. A budget stop means the operator's
+ * own limit was reached; it says nothing about whether the work so far was any
+ * good, and every answer already received stays stored and readable. Calling it a
+ * failed or invalid answer would destroy that distinction, so the journal never
+ * does.
+ */
+export function formatWorkflowBudgetStop(axis: keyof WorkflowBudget, detail: string): string {
+  return `[workflow:budget] stopped by budget ${axis}: ${detail}. Data received so far is kept.`;
 }

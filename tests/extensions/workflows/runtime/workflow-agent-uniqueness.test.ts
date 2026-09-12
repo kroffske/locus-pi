@@ -10,9 +10,10 @@ import {
  * keywords that moved repeated ids, repeated dependencies, colliding option
  * labels and whitespace-only strings out of hand-written script checks. Each of
  * those checks could only `throw` after validation returned, ending the run on
- * an answer the child could have corrected. Declared here they join the schema
- * retry, so the test that matters is that the child is told and gets a second
- * attempt, with the exact message it needs to act on.
+ * an answer the child could have corrected. Declared here they are enforced by the
+ * acceptance tool inside the child's own session, so what matters is that the exact
+ * message reaches the boundary verbatim — it is the text the child is shown and the
+ * text an operator reads when the contract is finally not met.
  */
 
 function scriptedRuntime(runId: string, answers: string[]) {
@@ -22,7 +23,17 @@ function scriptedRuntime(runId: string, answers: string[]) {
     agentRunner: async (request): Promise<WorkflowAgentResult> => {
       requests.push(request);
       const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return { ok: true, status: "completed", summary: "done", text, diagnostics: [], agent: request.agent };
+      return {
+        ok: true,
+        status: "completed",
+        summary: "done",
+        text,
+        diagnostics: [],
+        agent: request.agent,
+        ...(request.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
+      };
     },
   });
   return { ...runtime, requests };
@@ -106,21 +117,20 @@ describe("agent({ schema }) uniqueness and blankness keywords", () => {
       { prompt: "Which base?" },
     ],
   ])(
-    "re-asks the child on a %s violation and accepts the repaired answer",
+    "names a %s violation verbatim, and accepts the value the contract declares",
     async (keyword, schema, broken, repaired, message, expected) => {
-      const { dsl, requests, getJournal } = scriptedRuntime(`agent-schema-${keyword}`, [broken, repaired]);
+      const rejected = scriptedRuntime(`agent-schema-${keyword}-broken`, [broken]);
+      await expect(rejected.dsl.agent("Plan the work.", { schema: { ...schema } })).rejects.toThrow(message);
+      // ONE physical child. The correction happens inside its session, against the
+      // evidence it already has, instead of in a fresh child that remembers nothing.
+      expect(rejected.requests).toHaveLength(1);
+      expect(
+        rejected.getJournal().flatMap((line) => (line.kind === "agent_end" ? [line.schemaValidation] : [])),
+      ).toEqual([{ status: "mismatch", attempts: 1, errors: [message] }]);
 
-      const value = await dsl.agent("Plan the work.", { schema: { ...schema } });
-
-      expect(value).toEqual(expected);
-      expect(requests).toHaveLength(2);
-      // Verbatim, because this string is what the child has to act on — and it is
-      // spliced into the retry prompt, so it also enters the replay key.
-      expect(requests[1]?.prompt).toContain(message);
-      expect(getJournal().flatMap((line) => (line.kind === "agent_end" ? [line.schemaValidation] : []))).toEqual([
-        { status: "mismatch", attempts: 1, errors: [message] },
-        { status: "valid", attempts: 2, errors: [] },
-      ]);
+      const accepted = scriptedRuntime(`agent-schema-${keyword}-ok`, [repaired]);
+      await expect(accepted.dsl.agent("Plan the work.", { schema: { ...schema } })).resolves.toEqual(expected);
+      expect(accepted.requests).toHaveLength(1);
     },
   );
 
@@ -146,25 +156,31 @@ describe("agent({ schema }) uniqueness and blankness keywords", () => {
     // function of the value.
     const { dsl, requests } = scriptedRuntime("agent-schema-unique-typed", ['{"dependsOn":[1,1]}']);
 
-    await expect(dsl.agent("List them.", { schema: { ...DEPENDS_ON_SCHEMA } })).rejects.toThrow(
-      /expected string, got number/u,
-    );
-    const retry = requests[1]?.prompt ?? "";
-    expect(retry).toContain("dependsOn[0]: expected string, got number");
-    expect(retry).toContain("dependsOn[1]: expected string, got number");
-    expect(retry).not.toContain("duplicates item");
+    const failure = await dsl
+      .agent("List them.", { schema: { ...DEPENDS_ON_SCHEMA } })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    const reported = (failure as Error).message;
+    expect(reported).toContain("dependsOn[0]: expected string, got number");
+    expect(reported).toContain("dependsOn[1]: expected string, got number");
+    expect(reported).not.toContain("duplicates item");
+    expect(requests).toHaveLength(1);
   });
 
   it("reports every later duplicate against the first occurrence", async () => {
     const { dsl, requests } = scriptedRuntime("agent-schema-unique-first", ['{"dependsOn":["F1","F1","F1"]}']);
 
-    await expect(dsl.agent("List them.", { schema: { ...DEPENDS_ON_SCHEMA } })).rejects.toThrow(/duplicates item 0/u);
-    const retry = requests[1]?.prompt ?? "";
-    expect(retry).toContain('dependsOn[1]: value "F1" duplicates item 0');
-    expect(retry).toContain('dependsOn[2]: value "F1" duplicates item 0');
+    const failure = await dsl
+      .agent("List them.", { schema: { ...DEPENDS_ON_SCHEMA } })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    const reported = (failure as Error).message;
+    expect(reported).toContain('dependsOn[1]: value "F1" duplicates item 0');
+    expect(reported).toContain('dependsOn[2]: value "F1" duplicates item 0');
     // Never "duplicates item 1": naming the first occurrence is what tells the
     // child which of the two elements to edit.
-    expect(retry).not.toContain("duplicates item 1");
+    expect(reported).not.toContain("duplicates item 1");
+    expect(requests).toHaveLength(1);
   });
 
   it.each([

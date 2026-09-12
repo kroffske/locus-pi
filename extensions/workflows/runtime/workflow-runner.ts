@@ -36,6 +36,7 @@ import {
   formatWorkflowBudgetPrelude,
   formatWorkflowBudgetRaise,
   resolveWorkflowBudget,
+  workflowBudgetEnvelope,
   type WorkflowBudget,
 } from "./workflow-budget.js";
 import {
@@ -303,9 +304,11 @@ export interface RunWorkflowScriptOptions {
   /** Explicit conservative hard-crash admission; absent terminal result, identical serial source, no in-flight effects. */
   recoverInterrupted?: boolean;
   /**
-   * Per-run narrowing or raising of the package budget contract, axis by axis.
-   * Unstated axes take `DEFAULT_WORKFLOW_BUDGET`. Narrowing is silent; a raise is
-   * journalled, never quiet.
+   * Per-run declaration of what this run may spend, axis by axis.
+   *
+   * An unstated axis is UNBOUNDED, not defaulted: nothing is armed and the run
+   * header prints the word. Only `concurrency` carries a package value (it queues
+   * work rather than stopping it), and raising that one is journalled, never quiet.
    *
    * The workflow tool and command launcher pass explicit operator-approved overrides.
    * Workflow source cannot raise this shared execution-tree budget itself; four
@@ -327,7 +330,7 @@ export interface RunWorkflowScriptOptions {
     model?: unknown;
     live?: import("../../_shared/agent-runtime/agent-sdk-host.js").AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
-    turnTimeoutMs?: number;
+    childTimeoutMs?: number;
     reportsDir?: string;
   }) => AgentExecutor; // pass-through to the bridge (tests)
   resolveModel?: import("../../_shared/model/workflow-model-resolve.js").WorkflowModelResolver; // pass-through to the bridge (tests)
@@ -918,7 +921,14 @@ class SavedChildExecutionOwner {
     input: import("./workflow-runtime.js").WorkflowSavedChildInvocation,
   ): ValidatedSavedChildInvocation {
     if (this.options.coordination.depth >= 1) {
-      throw new Error("saved child workflows may not invoke another saved workflow");
+      // Not a size or budget policy, and not a claim that deeper nesting is wrong:
+      // one shared scheduler, journal and budget ledger for nested saved runs is an
+      // open decision, and until it exists a second level would run outside the
+      // accounting this level is held to. The guard stays until that ledger lands.
+      throw new Error(
+        "saved child workflows may not invoke another saved workflow yet: nested saved runs stay closed " +
+          "until one shared scheduler, journal and explicit budget ledger covers them (pending decision)",
+      );
     }
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new Error("invokeWorkflow requires one closed invocation object");
@@ -1231,6 +1241,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const finishRun = (fields: RunResultFields): RunWorkflowScriptResult => {
     let primaryOutputPath: string | undefined;
     const finalizationErrors: WorkflowFinalizationError[] = [];
+    // Complete published/primary identity set for this run; the operator handoff is
+    // admitted from this, never from the display projection below.
+    let allOutputRefs: WorkflowArtifactRef[] = [];
     let enrichedFields: RunResultFields = {
       ...fields,
       ...(resourceLoader === undefined ? {} : { resourceEvidence: resourceLoader.evidence() }),
@@ -1265,12 +1278,19 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         const outputRecords = artifactStore
           .list()
           .filter((record) => record.kind === "published" || record.kind === "primary");
-        const artifactRefs = outputRecords.slice(-MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS).map((record) => ({
+        // The COMPLETE verified output set. It is what the operator handoff is built
+        // from, so a run that published more than the display projection shows can
+        // still hand every one of its artifacts to a continuation.
+        allOutputRefs = outputRecords.map((record) => ({
           runId: record.runId,
           artifactId: record.artifactId,
           name: record.name,
           sha256: record.sha256,
         }));
+        // Display projection only: the newest few, with `artifactRefsOmitted` saying
+        // how many the summary did not print. It admits nothing and gates nothing —
+        // `consumeText` resolves any artifact through the source run's full index.
+        const artifactRefs = allOutputRefs.slice(-MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS);
         enrichedFields = {
           ...enrichedFields,
           ...(artifactRefs.length > 0 ? { artifactRefs } : {}),
@@ -1299,7 +1319,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
             runId,
             target: enrichedFields.target,
             scriptIdentity: enrichedFields.scriptIdentity,
-            terminalArtifactRefs: enrichedFields.artifactRefs ?? [],
+            terminalArtifactRefs: allOutputRefs,
           }),
         };
       } catch (error) {
@@ -1475,6 +1495,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
       runId,
       ...persistedFields,
       ...finalizationProjection,
+      // Every axis, undeclared ones included, so a later reader of this envelope
+      // learns what the run was allowed to spend without inferring it from silence.
+      budget: workflowBudgetEnvelope(budget),
       resultPersistence: intendedPersistence,
     });
     if (resultPersistence.ok) {
@@ -2078,10 +2101,13 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         rootRunId: runId,
         storageRootRunId,
         depth: 0,
+        // Only the axes this run actually declared are passed on. An axis omitted
+        // here is unbounded in the shared state — no counter, no clock — which is
+        // the same thing the run header prints as `unbounded`.
         sharedExecution: createWorkflowSharedExecutionState({
           maxConcurrentAgents: budget.concurrency,
-          maxTotalAgentInvocations: budget.totalAgents,
-          runtimeMs: budget.runtimeMs,
+          ...(budget.totalAgents === undefined ? {} : { maxTotalAgentInvocations: budget.totalAgents }),
+          ...(budget.runtimeMs === undefined ? {} : { runtimeMs: budget.runtimeMs }),
         }),
         lease: rootLease,
         output: stableOutput,
@@ -2336,10 +2362,9 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     items,
     // The execution-tree axes live in sharedExecution above. Only per-call
     // defaults belong on each runtime instance.
-    defaultTimeoutMs: budget.timeoutMs,
-    defaultMaxToolCalls: budget.toolCalls,
-    defaultMaxTurns: budget.turns,
-    defaultMaxAnswerChars: budget.answerChars,
+    ...(budget.timeoutMs === undefined ? {} : { defaultTimeoutMs: budget.timeoutMs }),
+    ...(budget.toolCalls === undefined ? {} : { defaultMaxToolCalls: budget.toolCalls }),
+    ...(budget.turns === undefined ? {} : { defaultMaxTurns: budget.turns }),
     ...(opts.onEvent !== undefined ? { onEvent: opts.onEvent } : {}),
     ...(noOperator === undefined ? {} : { operatorInputForbidden: true }),
     onAwaitOperator: (declaration) => {
