@@ -61,3 +61,19 @@ ceiling = 830
 owner = "package boundary contract"
 reason = "Package-wide inventory test; each T-218 owner extraction adds a two-line reason next to the packed-file count."
 trigger = "Above 830 lines, move the packed-file reason log out of the test body."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-journal-format.ts"
+rule = "code-lines"
+ceiling = 960
+owner = "workflow journal event contract"
+reason = "T-218 W4 (2026-09-12): the journal line type, the per-kind field matrix and the strict codec are one versioned contract; splitting types from codec would recreate the two-file read the slice removed."
+trigger = "Growth above 960 lines means a new event kind or a second concern; review the event contract before adding code."
+
+[[exceptions]]
+path = "scripts/check-extension-layers.ts"
+rule = "code-lines"
+ceiling = 1000
+owner = "architecture ledger"
+reason = "AGENTS.md requires one ledger entry per new internal owner, so this file grows by a few lines per T-218 slice by design; the rule engine itself does not grow."
+trigger = "Above 1000 lines, move the ledger data (module lists) out of the rule engine into a data file."
