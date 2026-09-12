@@ -57,3 +57,30 @@ export function executor(
     },
   });
 }
+
+/** A saved child that writes one item and publishes the primary file for it. */
+export const CHILD = `export const meta = { name: "child", profile: "standard" };
+export default async function run(dsl, input) {
+  await dsl.agent("write:" + input, { label: "write item" });
+  return dsl.publishPrimaryFile(dsl.items()[0] + ".md");
+}
+`;
+
+/** A root that fans its items out to `CHILD`, one saved child per item. */
+export const PARENT = `export const meta = { name: "parent", profile: "standard" };
+export default async function run(dsl, input) {
+  const items = dsl.items();
+  const results = [];
+  for (const item of items) {
+    results.push(await dsl.invokeWorkflow({
+      name: "child",
+      key: item,
+      keys: items,
+      input: input + ":" + item,
+      items: [item],
+      outputDir: dsl.outputDir(),
+    }));
+  }
+  return results;
+}
+`;

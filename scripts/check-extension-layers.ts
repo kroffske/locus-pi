@@ -164,6 +164,20 @@ const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
       "this module decides whether the bytes a run actually executed are still provable (ready/legacy/missing/unreadable/invalid/tampered), so verifying a snapshot outside the feature reads a run around the facade.",
   },
   {
+    module: "extensions/workflows/runtime/workflow-run-resume.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module reads a stopped run's persisted authority — result envelope, launch binding, retained snapshot, replay log — and decides whether it may be continued, so resuming a run from outside the feature would judge that evidence around the facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-run-admission.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "the ordered admission reads the same persisted authority to decide which workspace a launch may write and then WRITES the launch binding a later resume trusts, so admitting a run from outside the feature would mint that authority around the facade.",
+  },
+  {
     module: "extensions/workflows/runtime/workflow-live.ts",
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,

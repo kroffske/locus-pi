@@ -21,7 +21,7 @@ import {
 import {
   readWorkflowResumeWorkspaceIdentity,
   type WorkflowHandoffWorkspaceReuseBinding,
-} from "../runtime/workflow-runner.js";
+} from "../runtime/workflow-run-resume.js";
 import { resolveWorkflowTarget } from "../runtime/workflow-discovery.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { safeToolText } from "../../_shared/host/safe-output.js";

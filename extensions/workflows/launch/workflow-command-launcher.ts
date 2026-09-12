@@ -9,8 +9,8 @@ import {
   runWorkflowScript,
   type RunWorkflowScriptOptions,
   type RunWorkflowScriptResult,
-  type WorkflowHandoffWorkspaceReuseBinding,
 } from "../runtime/workflow-runner.js";
+import type { WorkflowHandoffWorkspaceReuseBinding } from "../runtime/workflow-run-resume.js";
 import type { ResolvedWorkflowTarget } from "../runtime/workflow-discovery.js";
 import {
   workflowBackgroundRunRegistry,
