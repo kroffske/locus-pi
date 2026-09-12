@@ -161,10 +161,10 @@ trigger = "Growth above 760 lines: extract the envelope parser into a result-for
 [[exceptions]]
 path = "tests/extensions/workflows/runtime/workflow-saved-child.test.ts"
 rule = "code-lines"
-ceiling = 1500
+ceiling = 810
 owner = "workflow saved-child tests"
-reason = "T-218 W12 (2026-09-12): the 47 saved-child cases moved out of the 2692-line durable suite unchanged; total test lines fell."
-trigger = "W13 moves the ~20 resume/workspace-identity binding cases to the resume-authority suite; do not grow this file before that."
+reason = "T-218 W12/W13 (2026-09-12): saved-child lifecycle/checkpoint/cycle cases (15) after the resume-identity cases moved to the resume suite."
+trigger = "Growth above 810 lines: split checkpoint reuse from lifecycle/cycle refusal."
 
 [[exceptions]]
 path = "extensions/workflows/runtime/workflow-agent-contract.ts"
@@ -173,3 +173,19 @@ ceiling = 680
 owner = "workflow agent contract"
 reason = "T-218 W8 (2026-09-12): request/result wire contract plus the callsite options family, ~95% moved declarations; bridge, call and attempt import it instead of the composition root."
 trigger = "Growth above 680 lines: split callsite options (choice/handoffs/schema/report) from the request/result wire contract."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-run-admission.ts"
+rule = "code-lines"
+ceiling = 600
+owner = "workflow run admission"
+reason = "T-218 W13 (2026-09-12): the ordered pre-execution admission (target → source snapshot → workspace identity → launch binding), cut verbatim from the runner; the resume-source binding block is the only movable seam and would just shift lines to the resume owner."
+trigger = "Growth above 600 lines: move the resume-source binding block to the resume authority."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-run-resume.test.ts"
+rule = "code-lines"
+ceiling = 980
+owner = "workflow resume authority tests"
+reason = "T-218 W13: 23 resume identity/prefix/safety/recovery cases moved unchanged out of the replay and saved-child suites."
+trigger = "Above 980 lines, split replay-plan cases from workspace-identity cases."
