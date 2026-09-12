@@ -143,6 +143,13 @@ const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
       "the journal owns run layout and append/write operations; outside consumers receive only the read operations exposed by the workflow facade.",
   },
   {
+    module: "extensions/workflows/runtime/workflow-journal-format.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "the strict line codec decides what counts as readable run evidence, so validating a persisted line outside the feature reads a run around the facade; the line TYPES stay reachable through workflow-runtime.ts, which re-exports them.",
+  },
+  {
     module: "extensions/workflows/runtime/workflow-live.ts",
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,
@@ -170,7 +177,14 @@ const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
   "node:process",
 ]);
 
-/** Modules whose purity claim is load-bearing, and the reason it is. */
+/**
+ * Modules whose purity claim is load-bearing, and the reason it is.
+ *
+ * `workflow-journal-format.ts` is deliberately absent: its codec checks run ids and artifact
+ * names against `workflow-run-layout.ts`, which reaches `node:fs`, exactly as
+ * `workflow-artifact-format.ts` does. Every specifier the DSL core imports from it is
+ * type-only, so the `workflow-runtime.ts` entry below still proves the core's value closure.
+ */
 const PURE_MODULES: readonly PureModuleEntry[] = [
   {
     module: "extensions/workflows/runtime/workflow-runtime.ts",

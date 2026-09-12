@@ -362,7 +362,10 @@ describe("npm public package boundary", () => {
     // parsers — now ships as its own module beside the mutable store that writes it.
     // T-218 W6 splits the workflow output surface into its workspace-identity and
     // fenced-workspace-state owners, packing two modules where one shipped before.
-    expect(dryRun.files).toHaveLength(272);
+    // T-218 W4 does the same for the journal: the persisted event contract — line
+    // shape, payload types and strict codec — ships beside the storage half that
+    // appends and reads it.
+    expect(dryRun.files).toHaveLength(273);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

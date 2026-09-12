@@ -33,7 +33,7 @@ import {
   formatWorkflowBudgetStop,
   type WorkflowBudget,
 } from "./workflow-budget.js";
-import type { WorkflowRunSummary } from "./workflow-journal.js";
+import type { WorkflowRunSummary } from "./workflow-journal-format.js";
 import type { WorkflowReplayController } from "./workflow-replay.js";
 import type { WorkflowResourceLoader } from "./workflow-resources.js";
 import type { WorkflowWorkspaceManager } from "./workflow-worktree.js";
@@ -63,15 +63,41 @@ import { classifyWorkflowReturnedFailure, prepareWorkflowResult } from "./workfl
 // and `workflow-outcome.ts`, the two fs-free contract modules, never from their durable
 // counterparts `workflow-handoff.ts` and `workflow-result.ts`; rule 7 of
 // `scripts/check-extension-layers.ts` proves the whole value closure stays free of `node:fs`.
-import { AGENT_FAILURE_CAUSES, type AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
+import { AGENT_FAILURE_CAUSES } from "../../_shared/agent-runtime/agent-failure-cause.js";
 export type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 
-/**
- * Workspace intent for one agent call. Declared here rather than shared with the host because
- * the DSL is its only author and the bridge below is its only reader: the host request carries
- * the resolved mode as journal metadata, never as a typed field.
- */
-export type WorkspaceMode = "project" | "worktree" | "temporary-worktree";
+// The journal EVENT CONTRACT — the line shape, every payload type it carries, and the
+// strict codec that reads one back — is owned by `workflow-journal-format.ts`, the same
+// lower-half split `workflow-artifact-format.ts` makes for the artifact index. This core
+// writes lines against those types, so the edge is type-only in both directions: the
+// format module never imports this one, and nothing it reaches enters this module's value
+// closure, which rule 7 of `scripts/check-extension-layers.ts` still holds to `node:fs`-free.
+// The names are re-exported one by one under the identifiers callers have always imported
+// from here, so the move is invisible to every importer.
+import type {
+  WorkflowAgentChildTrace,
+  WorkflowAgentFailureCause,
+  WorkflowChoiceDecision,
+  WorkflowFusionMode,
+  WorkflowJournalLine,
+  WorkflowJournalSink,
+  WorkflowSchemaValidation,
+  WorkflowUsage,
+  WorkspaceMode,
+} from "./workflow-journal-format.js";
+export type {
+  WorkflowAgentChildTrace,
+  WorkflowAgentFailureCause,
+  WorkflowChoiceCoercion,
+  WorkflowChoiceDecision,
+  WorkflowFusionMode,
+  WorkflowJournalLine,
+  WorkflowJournalSink,
+  WorkflowSchemaValidation,
+  WorkflowUsage,
+  WorkspaceMode,
+} from "./workflow-journal-format.js";
+
 export type {
   WorkflowAwaitOperatorDeclaration,
   WorkflowOperatorHandoffDeclaration,
@@ -120,10 +146,6 @@ interface WorkflowAgentSlotDescriptor {
   readonly key: string;
   readonly rowOccurrence?: WorkflowAgentRowOccurrence;
 }
-
-/** The machine-readable cause carried from the host through the bridge. Re-exported so a
- *  workflow-side caller never has to reach into the agent envelope for the same closed list. */
-export type WorkflowAgentFailureCause = AgentFailureCause;
 
 /** The ONLY causes `attempts` re-asks: the child never got to answer, or lost the channel
  *  while answering. It is an allowlist, not "everything the never-retry list forgot" — an
@@ -202,7 +224,6 @@ export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
  * truncating member answers to fit one would discard work already paid for.
  */
 export const WORKFLOW_FUSION_MIN_MEMBERS = 2;
-export type WorkflowFusionMode = "tool-free" | "agent";
 
 /** One explicit model selection. Fusion never inherits the parent model silently. */
 export type WorkflowFusionModelSelector = { model: string; modelRole?: never } | { model?: never; modelRole: string };
@@ -398,51 +419,6 @@ export interface WorkflowAgentResult {
   readOnly?: boolean;
   /** Exact pre-prompt host readback. Absent on replay and unavailable live hosts. */
   activeToolNames?: string[];
-}
-
-export interface WorkflowAgentChildTrace {
-  path: string;
-  format: "pi-session-jsonl";
-  childSessionId: string;
-  htmlPath?: string;
-}
-
-export interface WorkflowSchemaValidation {
-  status: "valid" | "mismatch";
-  /** 1-based loop position of the attempt this verdict describes. A replayed attempt
-   *  occupies an ordinal and increments it, and contributes no `usage`. */
-  attempts: number;
-  /** Final validator/parser errors on mismatch; empty after a valid attempt. */
-  errors: string[];
-  /** Which authority rejected the answer. Present only on a mismatch, and only on a
-   *  call that declared `validate` — a schema-only call has one possible authority,
-   *  so naming it would change every existing journal line for no added information. */
-  source?: "schema" | "script";
-  /** HISTORICAL. How an exact-choice answer was read when it was not the quoted JSON string
-   *  the text transport asked for: `bare-text` meant the child answered with the member itself,
-   *  `wrapper-object` that it echoed the schema. Nothing writes this any more — a tool argument
-   *  IS the value, so there is no dialect to read — and the field stays declared only so journals
-   *  recorded before the text transport was deleted keep parsing under the current types. */
-  coercion?: WorkflowChoiceCoercion;
-}
-
-export type WorkflowChoiceCoercion = "bare-text" | "wrapper-object";
-
-/**
- * Token + cost projection for one model-backed child run, summed per run.
- *
- * `costTotal` is OPTIONAL and absent means UNKNOWN, not zero. The host reports
- * tokens but no price, and the field used to be a hardcoded `0` — a number that
- * reads as "this run was free" and would make any cost budget built on it report
- * "under budget" forever. Observed tokens are real and stay recorded; the price is
- * reported as unavailable until something can actually compute it.
- */
-export interface WorkflowUsage {
-  input: number;
-  output: number;
-  totalTokens: number;
-  /** Absent when the host reports no price. Never synthesized as zero. */
-  costTotal?: number;
 }
 
 export interface WorkflowDsl {
@@ -885,138 +861,6 @@ class CapturedWorkflowBranchFailure<T = unknown> extends Error {
     super(failure.message);
     this.name = "CapturedWorkflowBranchFailure";
   }
-}
-
-export interface WorkflowJournalSink {
-  write(line: WorkflowJournalLine): void; // sync append; never throws into the DSL
-}
-
-export interface WorkflowChoiceDecision {
-  value: string;
-  source: "validated" | "fallback";
-  returnVia: "text" | "tool";
-  attempts?: number;
-  reason?: "output-contract-exhausted";
-}
-
-export interface WorkflowJournalLine {
-  /** Optional project error-index projection, supplied by the journal sink. */
-  errorLogPath?: string;
-  errorLogWarning?: string;
-  journalWarning?: string;
-  errorId?: string;
-  outputAcceptance?: AgentOutputAcceptance;
-  choiceDecision?: WorkflowChoiceDecision;
-  ts: string;
-  runId: string;
-  kind: "phase" | "log" | "group_start" | "group_end" | "agent_queued" | "agent_start" | "agent_end" | "error";
-  /** Provenance for log lines. Absent means legacy/unknown and must not be inferred. */
-  source?: "script" | "runtime";
-  phase?: string;
-  message?: string;
-  groupId?: string;
-  groupKind?: "parallel" | "pipeline";
-  groupLabel?: string;
-  parentGroupId?: string;
-  groupKeys?: readonly string[];
-  groupTotal?: number;
-  groupCompleted?: number;
-  groupFailed?: number;
-  /** Explicit child identity. Absent only on legacy journals where `agent` implied named. */
-  executionMode?: "bare" | "named";
-  agent?: string;
-  /** Session-scoped petname captured for fresh agent_end evidence. */
-  displayName?: string;
-  /** Host-enforced read-only capability boundary for this child. */
-  readOnly?: boolean;
-  label?: string;
-  title?: string;
-  itemPath?: readonly string[];
-  /** Runtime-owned stable identity for this concrete child attempt. */
-  callId?: string;
-  answerArtifact?: WorkflowArtifactRef;
-  transcriptArtifact?: WorkflowArtifactRef;
-  resultEnvelopeArtifact?: WorkflowArtifactRef;
-  /** Opaque effective slot key on agent lines; readers compare the whole value and never parse it; absent = no rounds (REQ-009). */
-  slotKey?: string;
-  /** Loop round (≥1) on agent_end lines (REQ-009); the drill reads past rounds by (slotKey,round). */
-  round?: number;
-  status?: string;
-  /** Machine-readable cause on a non-completed `agent_end`. Absent on old journals and on
-   *  every completed call; a reader treats absence as `unclassified`. */
-  failureCause?: WorkflowAgentFailureCause;
-  /** 1-based PHYSICAL transport attempt within one logical agent() call. Present only on a
-   *  call that declared `attempts > 1`, so every journal written before the option is
-   *  byte-identical and absence still means "one attempt". */
-  attempt?: number;
-  /** The declared transport-attempt bound this attempt belongs to. */
-  attempts?: number;
-  /** Stable identity of the ONE logical `agent()` call this physical attempt belongs to.
-   *  Travels with `attempt`/`attempts` and is the only field a reader may group attempts by:
-   *  `callId` is per-attempt, and `parallel()` can run two calls that agree on agent, label,
-   *  phase and group. */
-  logicalCallId?: string;
-  evidence?: EvidenceEvaluation;
-  evidenceWarnings?: string[];
-  /** Runtime-owned child session identity; never parsed from agent text. */
-  childSessionId?: string;
-  /** Persisted child transcript evidence; never exposed as the DSL return value. */
-  childTrace?: WorkflowAgentChildTrace;
-  /** Persisted child result artifact path; never exposed as the DSL return value. */
-  resultArtifact?: string;
-  schemaValidation?: WorkflowSchemaValidation;
-  durationMs?: number;
-  worktreePath?: string;
-  workspaceHandle?: string;
-  /** Resolved permission intent for agent_start/agent_end lines. Not a security boundary. */
-  permissionMode?: PermissionMode;
-  /** Resolved workspace intent for agent_start/agent_end lines. Not a security boundary. */
-  workspaceMode?: WorkspaceMode;
-  /** Token/cost usage for agent_end lines (present when the child reported usage). */
-  usage?: WorkflowUsage;
-  /**
-   * Resolved model selector for agent live-row display. On `agent_start` this is
-   * still an intent — the line is emitted before the bridge resolves anything — so
-   * read `requestedModel` there for the honest name and `executedModel` on
-   * `agent_end` for what actually ran.
-   */
-  model?: string;
-  /**
-   * The selector the call ASKED for, on `agent_start`. Named for what it is: this
-   * line is written before any resolution happens, so it structurally cannot know
-   * what executed and must not be read as if it did.
-   */
-  requestedModel?: string;
-  /** The tier the call declared, on `agent_start`. A role name, never a provider selector. */
-  modelRole?: string;
-  /** The call refuses an unassigned declared role instead of inheriting the session model. */
-  requireModelRole?: true;
-  /**
-   * What the child session reported it ran on, read back from the host.
-   * `"unavailable"` when the peer exposes no model. Absent on journals written before
-   * this field existed — absence is never evidence that a model ran.
-   *
-   * Carried by `agent_end`, and by the `error` lines emitted AFTER a child returned (a
-   * script `validate` that threw, an artifact writer that failed). Never by a line
-   * written before dispatch: `agent_start` structurally cannot know it, and a failure
-   * that never reached a child has nothing to report.
-   */
-  executedModel?: string;
-  /** With `executedModel`: a declared tier had no assignment and the child inherited the session model. */
-  modelRoleFallback?: string;
-  /** Resolved thinking/reasoning level for agent live-row display. */
-  thinking?: string;
-  /** True on agent lines served from a recorded run instead of a fresh child.
-   *  False on current terminal agent evidence means fresh execution. On terminal
-   *  capability evidence, absence is legacy/unknown and never proves a child ran. */
-  replayed?: boolean;
-  /** Declared Fusion capability contract. Absent for ordinary agent calls. */
-  capabilityMode?: WorkflowFusionMode;
-  /** Exact pre-prompt host readback. Never synthesized for replayed calls. */
-  activeToolNames?: string[];
-  resumeFromRunId?: string;
-  resumeSourceRunSummary?: WorkflowRunSummary | null;
-  continuation?: WorkflowContinuationJournal;
 }
 
 export interface WorkflowRuntimeOptions {
