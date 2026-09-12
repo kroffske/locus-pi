@@ -4,9 +4,10 @@
  * It owns everything that reads a workflow's declared `meta` without importing
  * or executing the module: the bounded prefix read, the tolerant literal parse,
  * and the description/profile/phases interpretation behind catalog rows,
- * generated public catalogs and repository source checks. It imports nothing
- * from the workflows feature, so a script that only needs a description does
- * not pull in the catalog's presentation, the run journal or the runtime.
+ * generated public catalogs and repository source checks. Its only workflows
+ * import is the shared lexical layer in `source/workflow-source-literals.ts`,
+ * so a script that only needs a description does not pull in the catalog's
+ * presentation, the run journal or the runtime.
  *
  * It is deliberately NOT the strict authoring grammar. What a standard
  * published workflow source may contain is decided by
@@ -16,6 +17,7 @@
 import { closeSync, openSync, readSync } from "node:fs";
 import { Lang, parse } from "@ast-grep/napi";
 import type { SgNode } from "@ast-grep/napi";
+import { exportedMetaObject, staticObjectKey, staticStringValue } from "../source/workflow-source-literals.js";
 
 const WORKFLOW_METADATA_SCAN_BYTES = 64 * 1024;
 const DESCRIPTION_MAX_CHARS = 96;
@@ -201,46 +203,6 @@ function readBoundedSource(file: string): string {
   } finally {
     closeSync(descriptor);
   }
-}
-
-function exportedMetaObject(statement: SgNode): SgNode | undefined {
-  const declaration = statement.children().find((child) => child.kind() === "lexical_declaration");
-  const variable = declaration
-    ?.children()
-    .find((child) => child.kind() === "variable_declarator" && child.field("name")?.text() === "meta");
-  const value = variable?.field("value");
-  return value?.kind() === "object" ? value : undefined;
-}
-
-function staticStringValue(node: SgNode | null | undefined): string | undefined {
-  if (node == null || (node.kind() !== "string" && node.kind() !== "template_string")) return undefined;
-  let value = "";
-  for (const child of node.children()) {
-    if (child.kind() === "string_fragment") value += child.text();
-    else if (child.kind() === "escape_sequence") value += decodeEscapeSequence(child.text());
-    else if (child.kind() === "template_substitution") return undefined;
-  }
-  return value;
-}
-
-function staticObjectKey(node: SgNode | null | undefined): string | undefined {
-  if (node == null || node.kind() === "computed_property_name") return undefined;
-  if (node.kind() === "string") return staticStringValue(node);
-  return node.text();
-}
-
-function decodeEscapeSequence(value: string): string {
-  const body = value.slice(1);
-  const fixed: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", 0: "\0" };
-  if (fixed[body] !== undefined) return fixed[body];
-  const unicodeCodePoint = /^u\{([0-9a-f]+)\}$/iu.exec(body)?.[1];
-  if (unicodeCodePoint !== undefined) return String.fromCodePoint(Number.parseInt(unicodeCodePoint, 16));
-  const unicode = /^u([0-9a-f]{4})$/iu.exec(body)?.[1];
-  if (unicode !== undefined) return String.fromCharCode(Number.parseInt(unicode, 16));
-  const hex = /^x([0-9a-f]{2})$/iu.exec(body)?.[1];
-  if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
-  if (body === "\n" || body === "\r\n") return "";
-  return body;
 }
 
 function compactCatalogText(value: string): string {

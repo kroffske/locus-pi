@@ -3,6 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Lang, parse, type SgNode } from "@ast-grep/napi";
 import {
+  exportedMetaObject,
+  staticObjectKey,
+  staticStringValue,
+  unwrapParentheses,
+} from "../source/workflow-source-literals.js";
+import {
   chmodWorkflowRunFile,
   ensureWorkflowDirectoryNoSymlink,
   readWorkflowRunFile,
@@ -418,60 +424,10 @@ function recordStaticDependency(
   unboundDependencies.add(`${kind}:${boundedLabel(specifier ?? "<non-literal>")}`);
 }
 
-function unwrapParentheses(node: SgNode | undefined): SgNode | undefined {
-  let current = node;
-  while (current?.kind() === "parenthesized_expression") {
-    current = current
-      .children()
-      .find((child) => child.kind() !== "(" && child.kind() !== ")" && child.kind() !== "comment");
-  }
-  return current;
-}
-
 function callArgumentLabel(call: SgNode): string {
   const args = call.children().find((child) => child.kind() === "arguments");
   const literal = staticStringValue(args?.children().find((child) => child.kind() === "string"));
   return boundedLabel(literal ?? "<dynamic>");
-}
-
-function exportedMetaObject(statement: SgNode): SgNode | undefined {
-  const declaration = statement.children().find((child) => child.kind() === "lexical_declaration");
-  const variable = declaration
-    ?.children()
-    .find((child) => child.kind() === "variable_declarator" && child.field("name")?.text() === "meta");
-  const value = variable?.field("value");
-  return value?.kind() === "object" ? value : undefined;
-}
-
-function staticObjectKey(node: SgNode | null | undefined): string | undefined {
-  if (node == null || node.kind() === "computed_property_name") return undefined;
-  if (node.kind() === "string") return staticStringValue(node);
-  return node.text();
-}
-
-function staticStringValue(node: SgNode | null | undefined): string | undefined {
-  if (node == null || (node.kind() !== "string" && node.kind() !== "template_string")) return undefined;
-  let value = "";
-  for (const child of node.children()) {
-    if (child.kind() === "string_fragment") value += child.text();
-    else if (child.kind() === "escape_sequence") value += decodeEscapeSequence(child.text());
-    else if (child.kind() === "template_substitution") return undefined;
-  }
-  return value;
-}
-
-function decodeEscapeSequence(value: string): string {
-  const body = value.slice(1);
-  const fixed: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", v: "\v", 0: "\0" };
-  if (fixed[body] !== undefined) return fixed[body];
-  const unicodeCodePoint = /^u\{([0-9a-f]+)\}$/iu.exec(body)?.[1];
-  if (unicodeCodePoint !== undefined) return String.fromCodePoint(Number.parseInt(unicodeCodePoint, 16));
-  const unicode = /^u([0-9a-f]{4})$/iu.exec(body)?.[1];
-  if (unicode !== undefined) return String.fromCharCode(Number.parseInt(unicode, 16));
-  const hex = /^x([0-9a-f]{2})$/iu.exec(body)?.[1];
-  if (hex !== undefined) return String.fromCharCode(Number.parseInt(hex, 16));
-  if (body === "\n" || body === "\r\n") return "";
-  return body;
 }
 
 function boundedLabel(value: string): string {

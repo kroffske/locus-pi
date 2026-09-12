@@ -356,7 +356,9 @@ describe("npm public package boundary", () => {
     // as a chain of representable waits instead of being refused by a policy ceiling.
     // One more shared module answers "can this transport host session tools", so a
     // shaped call on a route that cannot is refused before the child starts.
-    expect(dryRun.files).toHaveLength(268);
+    // One more module owns the lexical reading of a workflow source, so the meta
+    // scanner, identity assessment and source checker stop restating it.
+    expect(dryRun.files).toHaveLength(269);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
