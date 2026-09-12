@@ -21,10 +21,10 @@ import {
 import { prepareValidatedParams, validateParams } from "../../_shared/host/validation.js";
 import { formatWorkflowFailureDiagnosticLines } from "../runtime/workflow-failure.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "../runtime/workflow-live.js";
-import { readWorkflowResumeWorkspaceIdentity, runWorkflowScript } from "../runtime/workflow-runner.js";
+import { runWorkflowScript, type RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
+import { readWorkflowResumeWorkspaceIdentity } from "../runtime/workflow-run-resume.js";
 import { resolveWorkflowTarget, type ResolvedWorkflowTarget } from "../runtime/workflow-discovery.js";
 import { WORKFLOW_SAVED_NAME_MAX_CHARS, WORKFLOW_SAVED_NAME_PATTERN } from "../runtime/workflow-saved-name.js";
-import type { RunWorkflowScriptResult } from "../runtime/workflow-runner.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 import {
   WORKFLOW_RUN_NAME_MAX_CHARS,

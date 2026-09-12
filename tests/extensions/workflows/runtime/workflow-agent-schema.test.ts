@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   SchemaValidationError,
   createWorkflowRuntime,
-  type WorkflowAgentRequest,
   type WorkflowAgentOptions,
   type WorkflowAgentSchemaOptions,
-  type WorkflowAgentResult,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import { scriptedRuntime } from "../../../fixtures/scripted-agent-runtime.js";
 
 const VERDICT_SCHEMA = {
   type: "object",
@@ -14,30 +13,6 @@ const VERDICT_SCHEMA = {
   required: ["answer"],
   properties: { answer: { type: "string", enum: ["yes", "no"] } },
 } as const;
-
-/** Build a runtime whose child answers come from a scripted list; records every request. */
-function scriptedRuntime(runId: string, answers: string[]) {
-  const requests: WorkflowAgentRequest[] = [];
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner: async (request): Promise<WorkflowAgentResult> => {
-      requests.push(request);
-      const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return {
-        ok: true,
-        status: "completed",
-        summary: "done",
-        text,
-        diagnostics: [],
-        agent: request.agent,
-        ...(request.returnContract === undefined
-          ? {}
-          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
-      };
-    },
-  });
-  return { ...runtime, requests };
-}
 
 describe("agent({ schema }) structured output", () => {
   it("returns the validated value and records a valid shape check on agent_end", async () => {

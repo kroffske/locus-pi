@@ -143,6 +143,41 @@ const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
       "the journal owns run layout and append/write operations; outside consumers receive only the read operations exposed by the workflow facade.",
   },
   {
+    module: "extensions/workflows/runtime/workflow-journal-format.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "the strict line codec decides what counts as readable run evidence, so validating a persisted line outside the feature reads a run around the facade; the line TYPES stay reachable through workflow-runtime.ts, which re-exports them.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-result.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module both writes the persisted result envelope and decides, on readback, which stored fields still count as readable run evidence; the run-local result PATH stays reachable through the workflow facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-run-snapshot.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module decides whether the bytes a run actually executed are still provable (ready/legacy/missing/unreadable/invalid/tampered), so verifying a snapshot outside the feature reads a run around the facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-run-resume.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module reads a stopped run's persisted authority — result envelope, launch binding, retained snapshot, replay log — and decides whether it may be continued, so resuming a run from outside the feature would judge that evidence around the facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-run-admission.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "the ordered admission reads the same persisted authority to decide which workspace a launch may write and then WRITES the launch binding a later resume trusts, so admitting a run from outside the feature would mint that authority around the facade.",
+  },
+  {
     module: "extensions/workflows/runtime/workflow-live.ts",
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,
@@ -170,7 +205,43 @@ const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
   "node:process",
 ]);
 
-/** Modules whose purity claim is load-bearing, and the reason it is. */
+/**
+ * Modules whose purity claim is load-bearing, and the reason it is.
+ *
+ * `workflow-journal-format.ts` is deliberately absent: its codec checks run ids and artifact
+ * names against `workflow-run-layout.ts`, which reaches `node:fs`, exactly as
+ * `workflow-artifact-format.ts` does. Every specifier the DSL core imports from it is
+ * type-only, so the `workflow-runtime.ts` entry below still proves the core's value closure.
+ *
+ * `workflow-execution-state.ts` (the run's one counter, leaf gate and deadline) and
+ * `workflow-groups.ts` (`parallel()`/`pipeline()`) are likewise absent and need no entry of
+ * their own: the core value-imports both, and rule 7 walks the closure transitively, so the
+ * `workflow-runtime.ts` entry already holds them to the same `node:fs`-free proof.
+ *
+ * The four owners of ONE agent call are in that same closure for the same reason:
+ * `workflow-agent-contract.ts` (the shared request/result/options vocabulary and the typed
+ * refusals), `workflow-agent-call.ts` (the logical call — ordinal, slot claim, canonical
+ * key, replay envelope, transport retry), `workflow-agent-attempt.ts` (ONE physical
+ * child — invocation charge, `callId`, leaf permit, journal pair, evidence adoption) and
+ * `workflow-agent-output.ts` (the shaped half — `choice`/`handoffs`/`schema`/`output`/
+ * `validate` dispatch, acceptance from the confirmed `workflow_return` receipt, the choice
+ * decision projection). The core value-imports the call, the attempt and the output owner;
+ * all three value-import the contract, and the output owner reaches `workflow-return.ts`
+ * and `workflow-schema.ts`, both of which are already fs-free. `workflow-agent-bridge.ts`
+ * reads the contract directly rather than the core — so the host side of a call never
+ * pulls the DSL composition root in behind it.
+ *
+ * `workflow-fusion.ts` is in that same closure and needs no entry of its own for the same
+ * reason: the core value-imports it, and rule 7 walks the closure transitively. A Fusion
+ * panel is a COMPOSITION of ordinary `agent()` calls — it value-imports the contract, the
+ * shaped-output owner and `workflow-execution-state.ts`, all already proven fs-free here,
+ * and it reaches the artifact store, the replay controller and the group scheduler only as
+ * types or as injected ports, so nothing durable enters behind it. The host `/fusion`
+ * surface is the other direction: `fusion/config.ts` and `fusion/runner.ts` read the Fusion
+ * vocabulary from that module and the run machinery from their own fs-bound imports, so the
+ * DSL owner never pulls a host module in behind it. Nothing outside `extensions/workflows/`
+ * reaches it, so no cross-feature facade rule applies.
+ */
 const PURE_MODULES: readonly PureModuleEntry[] = [
   {
     module: "extensions/workflows/runtime/workflow-runtime.ts",
@@ -181,6 +252,11 @@ const PURE_MODULES: readonly PureModuleEntry[] = [
     module: "extensions/workflows/runtime/workflow-handoff-contract.ts",
     reason:
       "operator handoff declarations are normalized inside that core, so the declaration half stays separable from the durable envelope and claim sidecar in workflow-handoff.ts.",
+  },
+  {
+    module: "extensions/workflows/operator/progress-render.ts",
+    reason:
+      "the read-only half of the progress surface — layout, rail, stage frontier, roster clamping — is decided from plain inputs, so it stays separable from the subscriptions, timers and viewport reservation in progress-widget.ts.",
   },
   {
     module: "extensions/workflows/runtime/workflow-outcome.ts",

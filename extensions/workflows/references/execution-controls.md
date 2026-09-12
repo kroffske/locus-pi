@@ -1,6 +1,6 @@
 # Execution controls and mapping identity
 
-Audience: workflow authors and launcher/UI integrators. Runtime owners: `workflow-runtime.ts`, `workflow-budget.ts`, `workflow-journal.ts`; the [existing runtime manual](../REFERENCE.md) owns the unchanged APIs and the run-budget axes.
+Audience: workflow authors and launcher/UI integrators. Runtime owners: `workflow-budget.ts` (declaration and arithmetic), `workflow-execution-state.ts` (enforcement: the shared leaf gate, counters and deadline), `workflow-runtime.ts` (DSL assembly), `workflow-journal-format.ts` and `workflow-journal.ts` (the budget evidence lines and their storage); the [existing runtime manual](../REFERENCE.md) owns the unchanged APIs and the run-budget axes.
 
 ## Existing parallel with explicit options
 

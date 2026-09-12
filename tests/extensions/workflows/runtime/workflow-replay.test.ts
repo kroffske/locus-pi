@@ -39,15 +39,21 @@ import workflowsExt from "../../../../extensions/workflows/index.js";
 import type { WorkflowTextComponent } from "../../../../extensions/workflows/operator/progress-widget.js";
 import { createWorkflowTranscript } from "../../../../extensions/workflows/transcript/workflow-transcript.js";
 import { createHarness } from "../../../test-harness.js";
-import { acceptWorkflowReturn } from "../../../fixtures/workflow-return-acceptance.js";
-import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../../model-roles-fixture.js";
+import {
+  cleanupReplayProjects,
+  registerReplayProject,
+  runWorkflow,
+  temporaryProject,
+  workflowPrompt,
+  writeWorkflow,
+  THREE_STAGE_WORKFLOW,
+  type RunOutcome,
+} from "../../../fixtures/workflow-replay-project.js";
 
 /**
  * T-109 — `--resume` may report success only from an identical recorded call;
  * otherwise the call runs again.
  */
-
-const roots: string[] = [];
 
 const REPLAY_REFUSAL_REASONS: Record<WorkflowReplayRefusalReason, true> = {
   "source-run-unusable": true,
@@ -58,41 +64,8 @@ const REPLAY_REFUSAL_REASONS: Record<WorkflowReplayRefusalReason, true> = {
 };
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  restoreGlobalModelRolesHome();
+  cleanupReplayProjects();
 });
-
-function temporaryProject(): string {
-  const root = mkdtempSync(path.join(tmpdir(), "workflow-replay-"));
-  roots.push(root);
-  const agents = path.join(root, ".agents", "agents");
-  mkdirSync(agents, { recursive: true });
-  writeFileSync(
-    path.join(agents, "default.md"),
-    "---\nname: default\ndescription: Replay test agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
-    "utf8",
-  );
-  return root;
-}
-
-function writeWorkflow(root: string, name: string, body: string): void {
-  const dir = path.join(root, ".locus-pi", "workflows");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path.join(dir, `${name}.workflow.mjs`), body, "utf8");
-}
-
-interface RunOutcome {
-  runId: string;
-  runDir: string;
-  ok: boolean;
-  result: unknown;
-  error?: string;
-  replay: NonNullable<Awaited<ReturnType<typeof runWorkflowScript>>["replay"]>;
-  /** Prompts that reached a real child. A replayed call never appears here. */
-  executedPrompts: string[];
-  journal: WorkflowJournalLine[];
-  raw: Awaited<ReturnType<typeof runWorkflowScript>>;
-}
 
 /** Render the bounded lifecycle digest for one finished run from its own journal. */
 function digestFor(root: string, outcome: RunOutcome): string {
@@ -102,113 +75,6 @@ function digestFor(root: string, outcome: RunOutcome): string {
   for (const line of outcome.journal) transcript.event(line);
   return transcript.finish(outcome.raw).digest;
 }
-
-/** The workflow's own prompt, without the run working-directory note the bridge prepends. */
-function workflowPrompt(task: string): string {
-  const at = task.indexOf(WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR);
-  return at === -1 ? task : task.slice(at + WORKFLOW_RUN_WORKSPACE_PROMPT_SEPARATOR.length);
-}
-
-/**
- * Run one saved workflow with a scripted child. The child answer is a pure
- * function of the prompt, so a difference between two runs can only come from
- * the replay machinery, never from the fake model.
- */
-/** What a scripted child passes to `workflow_return` for a shaped call. */
-function scriptedSubmission(prompt: string, answer: string): string {
-  try {
-    JSON.parse(answer);
-    return answer;
-  } catch {
-    // not canonical JSON; fall through
-  }
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/u.exec(prompt)?.[1]?.trim();
-  if (fenced !== undefined) {
-    try {
-      JSON.parse(fenced);
-      return fenced;
-    } catch {
-      // not canonical JSON; fall through
-    }
-  }
-  return JSON.stringify(answer);
-}
-
-async function runWorkflow(
-  root: string,
-  name: string,
-  options: {
-    input?: string;
-    resumeFromRunId?: string;
-    outputDir?: string;
-    roles?: Record<string, string>;
-    /** Exact work units for `dsl.items()`, separate from semantic input. */
-    items?: readonly string[];
-    /** Override the scripted child's answer for a prompt; may throw to fail that child. */
-    answer?: (prompt: string) => string;
-  } = {},
-): Promise<RunOutcome> {
-  process.env.PI_MODEL_ROLES_HOME = path.join(root, ".pi-user");
-  const harness = createHarness(root, { sessionId: `replay-${name}` });
-  if (options.roles !== undefined) writeGlobalModelRoles(root, options.roles);
-  const executedPrompts: string[] = [];
-  const createExecutor = (): AgentExecutor => ({
-    async run(request: AgentRunRequest) {
-      // The bridge prepends this run's working-directory note, whose path carries
-      // the run id. The scripted child answers on the workflow's own prompt so a
-      // recorded answer stays comparable across runs.
-      const prompt = workflowPrompt(request.task);
-      executedPrompts.push(prompt);
-      const text = options.answer === undefined ? `answer(${prompt})` : options.answer(prompt);
-      // A shaped call is carried by a workflow_return receipt, never by parsed final
-      // text, so a scripted child SUBMITS through the real acceptance tool. The value it
-      // submits is the scripted answer when that is already canonical JSON, otherwise the
-      // JSON the prompt asked for, otherwise the answer as a JSON string — the same three
-      // intentions the fixtures expressed before, now stated as a tool argument.
-      const accepted = acceptWorkflowReturn(request, scriptedSubmission(prompt, text));
-      return {
-        status: "completed" as const,
-        agentName: request.agent?.name ?? "sub-agent",
-        reason: "answered",
-        ...(accepted === undefined ? { text } : accepted),
-        diagnostics: [],
-        lifecycleEntryIds: [],
-      };
-    },
-  });
-  const res = await runWorkflowScript({
-    pi: harness.pi,
-    ctx: harness.ctx,
-    signal: new AbortController().signal,
-    name,
-    createExecutor,
-    ...(options.input !== undefined ? { input: options.input } : {}),
-    ...(options.items !== undefined ? { items: options.items } : {}),
-    ...(options.outputDir !== undefined ? { outputDir: options.outputDir } : {}),
-    ...(options.resumeFromRunId !== undefined ? { resumeFromRunId: options.resumeFromRunId } : {}),
-  });
-  expect(res.replay, "every run that reached its script identity reports a replay envelope").toBeDefined();
-  return {
-    runId: res.runId,
-    runDir: res.runDir,
-    ok: res.ok,
-    result: res.result,
-    ...(res.error !== undefined ? { error: res.error } : {}),
-    replay: res.replay!,
-    executedPrompts,
-    journal: res.journal,
-    raw: res,
-  };
-}
-
-const THREE_STAGE_WORKFLOW = `export const meta = { name: "stages", description: "three sequential stages" };
-export default async function runWorkflow(dsl, input) {
-  const one = await dsl.agent("stage-1");
-  const two = await dsl.agent("stage-2 " + String(input ?? ""));
-  const three = await dsl.agent("stage-3");
-  return { summary: [one, two, three].join(" | ") };
-}
-`;
 
 /**
  * Three labeled stages, so a repair between two runs can name the node it
@@ -1046,252 +912,6 @@ export default async function runWorkflow(dsl) {
     expect(resumed.replay).toMatchObject({ replayedCalls: 1 });
   });
 
-  it("refuses to replay identical bytes when the persisted target changed", async () => {
-    const root = temporaryProject();
-    writeWorkflow(root, "alpha", THREE_STAGE_WORKFLOW);
-    writeWorkflow(root, "beta", THREE_STAGE_WORKFLOW);
-    const first = await runWorkflow(root, "alpha", { outputDir: "same-replay-workspace" });
-    const resumed = await runWorkflow(root, "beta", {
-      outputDir: "same-replay-workspace",
-      resumeFromRunId: first.runId,
-    });
-
-    expect(resumed.replay).toMatchObject({
-      replayed: false,
-      refusedReason: "target-changed",
-      replayedCalls: 0,
-      freshCalls: 3,
-    });
-    expect(resumed.executedPrompts).toEqual(["stage-1", "stage-2 ", "stage-3"]);
-  });
-
-  it("replays an owner workflow across equivalent and confined symlink target spellings", async () => {
-    const root = temporaryProject();
-    writeWorkflow(root, "post-code-review", THREE_STAGE_WORKFLOW);
-    symlinkSync(
-      path.join(root, ".locus-pi", "workflows", "post-code-review.workflow.mjs"),
-      path.join(root, "post-code-review-alias.workflow.mjs"),
-    );
-    const firstHarness = createHarness(root, { sessionId: "replay-owner-alias-first" });
-    const first = await runWorkflowScript({
-      pi: firstHarness.pi,
-      ctx: firstHarness.ctx,
-      signal: new AbortController().signal,
-      scriptPath: "post-code-review-alias.workflow.mjs",
-      outputDir: "post-code-review-alias",
-      createExecutor: () => ({
-        async run(request: AgentRunRequest) {
-          return {
-            status: "completed" as const,
-            agentName: request.agent?.name ?? "sub-agent",
-            reason: "answered",
-            text: `answer(${workflowPrompt(request.task)})`,
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
-    });
-    expect(first.ok).toBe(true);
-
-    const secondHarness = createHarness(root, { sessionId: "replay-owner-alias-second" });
-    const resumed = await runWorkflowScript({
-      pi: secondHarness.pi,
-      ctx: secondHarness.ctx,
-      signal: new AbortController().signal,
-      scriptPath: ".locus-pi/workflows/post-code-review.workflow.mjs",
-      outputDir: "post-code-review-alias",
-      resumeFromRunId: first.runId,
-      createExecutor: () => ({
-        async run() {
-          throw new Error("owner replay should not execute fresh children");
-        },
-      }),
-    });
-    expect(resumed.ok).toBe(true);
-    expect(resumed.replay).toMatchObject({ replayed: true, replayedCalls: 3, freshCalls: 0 });
-  });
-
-  it.each(["mismatch", "absent", "malformed"] as const)(
-    "fails post-code-review exact resume before child execution when source target is %s",
-    async (mode) => {
-      const root = temporaryProject();
-      writeWorkflow(root, "other", THREE_STAGE_WORKFLOW);
-      writeWorkflow(root, "post-code-review", THREE_STAGE_WORKFLOW);
-      const first = await runWorkflow(root, "other", { outputDir: "post-code-review-resume" });
-      if (mode !== "mismatch") {
-        const result = JSON.parse(readFileSync(workflowResultFile(first.runDir), "utf8")) as Record<string, unknown>;
-        if (mode === "absent") delete result.target;
-        else result.target = { kind: "name", ref: "nested/run/extra", source: "project" };
-        writeFileSync(workflowResultFile(first.runDir), `${JSON.stringify(result)}\n`, "utf8");
-      }
-
-      const harness = createHarness(root, { sessionId: `exact-resume-${mode}` });
-      const executedPrompts: string[] = [];
-      const resumed = await runWorkflowScript({
-        pi: harness.pi,
-        ctx: harness.ctx,
-        signal: new AbortController().signal,
-        name: "post-code-review",
-        outputDir: "post-code-review-resume",
-        resumeFromRunId: first.runId,
-        createExecutor: () => ({
-          async run(request: AgentRunRequest) {
-            executedPrompts.push(workflowPrompt(request.task));
-            return {
-              status: "completed" as const,
-              agentName: request.agent?.name ?? "sub-agent",
-              reason: "must not run",
-              text: "unexpected child execution",
-              diagnostics: [],
-              lifecycleEntryIds: [],
-            };
-          },
-        }),
-      });
-
-      expect(resumed.ok).toBe(false);
-      expect(resumed.replay).toBeUndefined();
-      expect(executedPrompts).toEqual([]);
-      expect(resumed.error).toContain(mode === "mismatch" ? "post-code-review" : "malformed persisted metadata");
-      expect(resumed.error).toContain(
-        mode === "mismatch"
-          ? // Ordinary roots now write a launch binding too, so a non-owner source is
-            // refused by its recorded ownership rather than by a missing binding.
-            "ownership differs"
-          : mode === "absent"
-            ? "script identity is malformed"
-            : "target is malformed",
-      );
-    },
-  );
-
-  it("fails the reverse post-code-review owner transition before execution", async () => {
-    const root = temporaryProject();
-    writeWorkflow(root, "post-code-review", THREE_STAGE_WORKFLOW);
-    writeWorkflow(root, "other", THREE_STAGE_WORKFLOW);
-    const first = await runWorkflow(root, "post-code-review", { outputDir: "post-code-review-reverse" });
-    const harness = createHarness(root, { sessionId: "exact-resume-reverse" });
-    const resumed = await runWorkflowScript({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      name: "other",
-      outputDir: "post-code-review-reverse",
-      resumeFromRunId: first.runId,
-      createExecutor: () => ({
-        async run() {
-          throw new Error("child must not run");
-        },
-      }),
-    });
-
-    expect(resumed.ok).toBe(false);
-    expect(resumed.replay).toBeUndefined();
-    expect(resumed.error).toContain("ownership differs");
-  });
-
-  it("refuses to record or replay a script that reads the clock directly", async () => {
-    const root = temporaryProject();
-    writeWorkflow(
-      root,
-      "unsafe",
-      `export const meta = { name: "unsafe", description: "reads the clock directly" };
-export default async function runWorkflow(dsl) {
-  const started = Date.now();
-  const answer = await dsl.agent("stage-1");
-  return { summary: answer, elapsed: typeof started };
-}
-`,
-    );
-
-    const first = await runWorkflow(root, "unsafe");
-    expect(first.ok).toBe(true);
-    expect(first.replay).toMatchObject({ recorded: false, notRecordedReason: "replay-unsafe-script" });
-    expect(existsSync(workflowReplayFile(first.runDir))).toBe(false);
-
-    const resumed = await runWorkflow(root, "unsafe", { resumeFromRunId: first.runId });
-    expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "replay-unsafe-script" });
-    expect(resumed.executedPrompts).toEqual(["stage-1"]);
-  });
-
-  // Replay refusal reasons remain a fresh-run contract only when source identity
-  // is readable. A source result without workspace identity cannot be resumed:
-  // the runtime must fail before it can safely choose a workspace.
-  it("fails when the recorded run lost its persisted workspace identity", async () => {
-    const root = temporaryProject();
-    writeWorkflow(root, "stages", THREE_STAGE_WORKFLOW);
-    const first = await runWorkflow(root, "stages", { input: "alpha" });
-
-    // The run id still resolves (journal.ndjson survives), so this is reached
-    // rather than the hard "source run not found" error raised earlier.
-    rmSync(workflowResultFile(first.runDir));
-    const resumedHarness = createHarness(root, { sessionId: "replay-missing-workspace" });
-    const resumed = await runWorkflowScript({
-      pi: resumedHarness.pi,
-      ctx: resumedHarness.ctx,
-      signal: new AbortController().signal,
-      name: "stages",
-      input: "alpha",
-      resumeFromRunId: first.runId,
-      createExecutor: () => ({
-        async run() {
-          throw new Error("child must not run");
-        },
-      }),
-    });
-
-    expect(resumed.ok).toBe(false);
-    expect(resumed.replay).toBeUndefined();
-    expect(resumed.error).toContain("has no persisted workspace identity");
-  });
-
-  it("refuses with identity-coverage-unproven for an entry-only script, and records nothing", async () => {
-    const root = temporaryProject();
-    writeWorkflow(
-      root,
-      "modular",
-      `export const meta = { name: "modular", description: "declares entry-only coverage", identityCoverage: "entry-only" };
-export default async function runWorkflow(dsl) {
-  return { summary: await dsl.agent("stage-1") };
-}
-`,
-    );
-
-    // Imported bytes are outside the entry hash, so a matching scriptSha256
-    // would not prove the call sequence is the same. Fail closed at record time.
-    const first = await runWorkflow(root, "modular");
-    expect(first.ok).toBe(true);
-    expect(first.replay).toMatchObject({ recorded: false, notRecordedReason: "identity-coverage-unproven" });
-    expect(existsSync(workflowReplayFile(first.runDir))).toBe(false);
-
-    const resumed = await runWorkflow(root, "modular", { resumeFromRunId: first.runId });
-    expect(resumed.ok).toBe(true);
-    expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "identity-coverage-unproven" });
-    expect(resumed.executedPrompts).toEqual(["stage-1"]);
-  });
-
-  it("refuses with no-recorded-calls when a replay-safe run had nothing to record", async () => {
-    const root = temporaryProject();
-    writeWorkflow(
-      root,
-      "inert",
-      `export const meta = { name: "inert", description: "replay-safe with no calls" };
-export default async function runWorkflow(dsl, input) {
-  return { summary: "no agents here: " + String(input ?? "") };
-}
-`,
-    );
-
-    const first = await runWorkflow(root, "inert");
-    expect(first.ok).toBe(true);
-
-    const resumed = await runWorkflow(root, "inert", { resumeFromRunId: first.runId });
-    expect(resumed.ok).toBe(true);
-    expect(resumed.replay).toMatchObject({ replayed: false, refusedReason: "no-recorded-calls", replayedCalls: 0 });
-    expect(resumed.executedPrompts).toEqual([]);
-  });
-
   it("claims a fresh run id when an immediate resume mints a colliding id in the same second", async () => {
     // Regression: a run id is a second-resolution timestamp plus a 16-bit random
     // suffix, so a resume starting in the same second as the run it resumes can
@@ -1843,7 +1463,7 @@ export default async function runWorkflow(dsl) {
 describe("the default timeoutMs invalidates records written before it", () => {
   function recordDir(): string {
     const root = mkdtempSync(path.join(tmpdir(), "workflow-replay-timeout-"));
-    roots.push(root);
+    registerReplayProject(root);
     return ensureWorkflowRunDir(root, "20260812-010101-b001");
   }
 
@@ -1931,7 +1551,7 @@ describe("the default timeoutMs invalidates records written before it", () => {
 describe("the shaped return contract v1 -> v2 boundary", () => {
   function replayRoot(prefix: string, runId: string): string {
     const root = mkdtempSync(path.join(tmpdir(), prefix));
-    roots.push(root);
+    registerReplayProject(root);
     return ensureWorkflowRunDir(root, runId);
   }
 
@@ -2054,7 +1674,7 @@ describe("the shaped return contract v1 -> v2 boundary", () => {
 describe("maxTurns is part of the replay key", () => {
   function recordDir(): string {
     const root = mkdtempSync(path.join(tmpdir(), "workflow-replay-turns-"));
-    roots.push(root);
+    registerReplayProject(root);
     return ensureWorkflowRunDir(root, "20260812-010101-b002");
   }
 
@@ -2200,7 +1820,7 @@ describe("replay across the removed budget defaults", () => {
 
   function fixtureRunDir(prefix: string, runId: string): { runDir: string; projectRoot: string } {
     const projectRoot = mkdtempSync(path.join(tmpdir(), prefix));
-    roots.push(projectRoot);
+    registerReplayProject(projectRoot);
     return { runDir: ensureWorkflowRunDir(projectRoot, runId), projectRoot };
   }
 

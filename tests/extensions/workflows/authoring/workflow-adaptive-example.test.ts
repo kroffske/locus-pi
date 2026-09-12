@@ -1,8 +1,10 @@
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { completed, tempRun, temporary, temporaryValue } from "../../../fixtures/scripted-agent-runtime.js";
 import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { isWorkflowResultExplicitFailure } from "../../../../extensions/workflows/runtime/workflow-outcome.js";
 import { createWorkflowArtifactStore } from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
@@ -200,4 +202,104 @@ describe("actual adaptive references with real runtime and scripted children", (
     expect(h.counts["design-correct"]).toBe(2);
     expect(h.counts["design-review"]).toBe(3);
   });
+});
+
+/** Load one reference example's exported graph, to run against a runtime built here. */
+async function exampleWorkflow(
+  name: string,
+): Promise<(dsl: ReturnType<typeof createWorkflowRuntime>["dsl"], input: string) => Promise<unknown>> {
+  const url = pathToFileURL(path.resolve(`extensions/workflows/references/examples/${name}.workflow.mjs`));
+  return (await import(url.href)).default;
+}
+
+async function refinement(routes: string[]) {
+  return temporaryValue(async (root) => {
+    const id = "refinement";
+    const requests: WorkflowAgentRequest[] = [];
+    let decisions = 0;
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: tempRun(root, id) });
+    const runtime = createWorkflowRuntime({
+      runId: id,
+      artifactPorts: store,
+      agentRunner: async (req) => {
+        requests.push(req);
+        if (req.label === "decision") {
+          assert.ok(req.returnContract);
+          return {
+            ...completed(req, JSON.stringify(routes[decisions++])),
+            outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+          };
+        }
+        return completed(
+          req,
+          req.label === "worker"
+            ? `work-${decisions + 1}: evidence and remainder`
+            : `review-${decisions + 1}: exact feedback\nremaining criterion R2`,
+        );
+      },
+    });
+    const result = await (await exampleWorkflow("refinement"))(runtime.dsl, "Goal G1; do not change scope");
+    return {
+      result,
+      requests,
+      journal: runtime.getJournal(),
+      artifacts: store.list().map((record) => ({
+        ...record,
+        text: store
+          .read({ runId: record.runId, artifactId: record.artifactId, name: record.name, sha256: record.sha256 })
+          .toString(),
+      })),
+    };
+  });
+}
+
+/**
+ * The refinement and fixed references, run the same way: the actual example source against
+ * the real runtime and the persisted artifact store, with scripted decisions.
+ */
+describe("the refinement and fixed references", () => {
+  it("refinement complete on first round has no second worker and one primary", async () => {
+    const got = await refinement(["complete"]);
+    assert.equal(got.requests.length, 3);
+    assert.equal(got.artifacts.filter((record) => record.kind === "primary").length, 1);
+  });
+  it("continue launches a new worker with exact goal, work and reviewer handoff, then completes", async () => {
+    const got = await refinement(["continue_progress", "complete"]);
+    assert.equal(got.requests.length, 6);
+    const second = got.requests.filter((req) => req.label === "worker")[1]!;
+    assert.match(second.prompt, /Goal G1; do not change scope/u);
+    assert.match(second.prompt, /work-1: evidence and remainder/u);
+    assert.match(second.prompt, /review-1: exact feedback\nremaining criterion R2/u);
+    assert.ok(got.artifacts.some((record) => /Decision: continue_progress/u.test(record.text)));
+    assert.equal(got.journal.filter((line) => line.choiceDecision).length, 2);
+  });
+  it("round cap and repeated no-progress are blocked, never a primary success", async () => {
+    const cap = await refinement(["continue_progress", "continue_progress", "continue_progress"]);
+    assert.equal(cap.requests.length, 9);
+    assert.equal((cap.result as { summary: string }).summary, "round_cap");
+    assert.equal((cap.result as { ok: boolean }).ok, false);
+    assert.equal(cap.artifacts.filter((record) => record.kind === "primary").length, 0);
+    const stalled = await refinement(["continue_stalled", "continue_stalled"]);
+    assert.equal(stalled.requests.length, 6);
+    assert.equal((stalled.result as { summary: string }).summary, "no_progress");
+  });
+  it("fixed graph still performs exactly one worker and no reviewer", async () =>
+    temporary(async (root) => {
+      const id = "fixed";
+      const requests: WorkflowAgentRequest[] = [];
+      const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: tempRun(root, id) });
+      const runtime = createWorkflowRuntime({
+        runId: id,
+        artifactPorts: store,
+        agentRunner: async (req) => {
+          requests.push(req);
+          return completed(req, "fixed output");
+        },
+      });
+      await (
+        await exampleWorkflow("fixed")
+      )(runtime.dsl, "fixed goal");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0]?.returnContract, undefined);
+    }));
 });

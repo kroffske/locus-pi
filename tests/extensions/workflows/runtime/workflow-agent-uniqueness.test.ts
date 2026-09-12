@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  createWorkflowRuntime,
-  type WorkflowAgentRequest,
-  type WorkflowAgentResult,
-} from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import { createWorkflowRuntime } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import { scriptedRuntime } from "../../../fixtures/scripted-agent-runtime.js";
 
 /**
  * `uniqueItems`, `uniqueTrimmedItems`, `uniqueBy` and `nonBlank` — the four
@@ -15,29 +12,6 @@ import {
  * message reaches the boundary verbatim — it is the text the child is shown and the
  * text an operator reads when the contract is finally not met.
  */
-
-function scriptedRuntime(runId: string, answers: string[]) {
-  const requests: WorkflowAgentRequest[] = [];
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner: async (request): Promise<WorkflowAgentResult> => {
-      requests.push(request);
-      const text = answers[requests.length - 1] ?? answers.at(-1) ?? "";
-      return {
-        ok: true,
-        status: "completed",
-        summary: "done",
-        text,
-        diagnostics: [],
-        agent: request.agent,
-        ...(request.returnContract === undefined
-          ? {}
-          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
-      };
-    },
-  });
-  return { ...runtime, requests };
-}
 
 const DEPENDS_ON_SCHEMA = {
   type: "object",

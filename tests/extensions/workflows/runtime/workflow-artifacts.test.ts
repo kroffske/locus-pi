@@ -649,41 +649,6 @@ describe("workflow run artifact store", () => {
     assert.throws(() => current.consumeText(sourceRef), /no valid persisted runId/u);
   });
 
-  it("refuses malformed optional metadata and unknown persisted fields", () => {
-    const corruptions: Array<[string, (record: Record<string, unknown>) => void]> = [
-      ["callId type", (record) => (record.callId = 42)],
-      ["callId value", (record) => (record.callId = "../escape")],
-      ["stage", (record) => (record.stage = { name: "prepare" })],
-      ["childSessionId", (record) => (record.childSessionId = null)],
-      ["source", (record) => (record.source = { runId: "source" })],
-      ["replaySourceRunId", (record) => (record.replaySourceRunId = [])],
-      ["unknown", (record) => (record.untrusted = true)],
-    ];
-
-    for (const [name, corrupt] of corruptions) {
-      const root = project();
-      const id = `invalid-${name.replaceAll(/[^a-z]+/gu, "-")}`;
-      const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
-      store.publishText("record.md", "bytes");
-      const indexPath = path.join(store.artifactsDir, "index.json");
-      const index = JSON.parse(readFileSync(indexPath, "utf8")) as { artifacts: Array<Record<string, unknown>> };
-      corrupt(index.artifacts[0]!);
-      writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
-
-      const read = readWorkflowArtifactIndex(root, id);
-      assert.equal(read.status, "invalid", name);
-    }
-
-    const root = project();
-    const id = "invalid-index-envelope";
-    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
-    const indexPath = path.join(store.artifactsDir, "index.json");
-    const index = JSON.parse(readFileSync(indexPath, "utf8")) as Record<string, unknown>;
-    index.untrusted = true;
-    writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
-    assert.equal(readWorkflowArtifactIndex(root, id).status, "invalid");
-  });
-
   it("keeps missing source indexes side-effect free and rejects missing source target identity", () => {
     const root = project();
     const currentId = "lineage-reader";

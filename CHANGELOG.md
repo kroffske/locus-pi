@@ -6,6 +6,11 @@ User-visible changes to the public package.
 
 ### Changed
 
+- Workflow runtime responsibilities now live in named modules for execution state,
+  agent calls and attempts, shaped returns, model routing, and run lifecycle. Existing
+  module export paths remain available. `check:push` now checks size growth against
+  the base branch, with owned exceptions and revisit triggers recorded in the
+  topology configuration.
 - Structured workflow results are now carried only by same-session acceptance. The
   text-parsed transport is deleted: the runtime no longer appends a shape block to
   the prompt, parses the child's final message as JSON, or spawns a fresh child to

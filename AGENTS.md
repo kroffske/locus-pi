@@ -17,13 +17,15 @@ npm run check:push
 
 Use Node.js `>=22.19.0`. Pi supports `>=0.83.0`; development and CI use the exact version pinned in the four `@earendil-works/pi-*` development dependencies. Use `npm run sync:pi-host` to update that baseline.
 
-`npm run check` is the canonical deterministic gate. CI runs the same command, then adds the network dependency audit, Pi peer check, and npm pack candidate.
+`npm run check` is the canonical deterministic gate. CI runs the same command, then adds the network dependency audit, Pi peer check, and npm pack candidate. `npm run check:push` adds the size ratchet (`check:topology`, needs the local Locus CLI; skipped with a notice when it is absent) and the pack dry run.
 
 ## Ownership
 
 - Shared code lives in the named layers under `extensions/_shared/`. Read `scripts/check-extension-layers.ts` before moving it.
 - A shared module may not import a feature directory. Cross-feature imports use an explicitly owned facade.
 - Versioned `globalThis` registries have one owning module.
+- A change that creates a new internal owner (a module extracted out of an existing one) registers it in the same pull request: the ledger entry in `scripts/check-extension-layers.ts` (feature-internal, pure-root, or facade rule that protected the old owner) plus a negative import test. Otherwise the new module is an unguarded side entrance.
+- File size is a growth ratchet, not a ceiling: `npm run check:topology` (`locus topology check`, physical lines, warn threshold 500) fails on growth since the base ref. Shrink elsewhere or record a narrow exception in `.locus-topology.toml` with an owner and a revisit trigger. Do not raise an existing exception to fit new code.
 
 ## Public package
 

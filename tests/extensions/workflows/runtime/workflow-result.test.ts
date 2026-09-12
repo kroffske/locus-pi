@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   WORKFLOW_RESULT_ENVELOPE_NOT_JSON_SAFE,
   WORKFLOW_FINALIZATION_ERROR_MAX_CHARS,
@@ -14,6 +14,8 @@ import {
   isWorkflowResultExplicitFailure,
   prepareWorkflowResult,
   projectWorkflowDisposition,
+  readWorkflowRunResult,
+  readWorkflowRunResultText,
   workflowDispositionForCompletion,
   workflowFinalizationError,
   workflowResultFile,
@@ -23,6 +25,15 @@ import {
   ensureWorkflowRunDir,
   workflowRunRuntimeDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import { readWorkflowRunSummary } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { createPersistedRunFixtures } from "../../../fixtures/workflow-persisted-run.js";
+
+const fixtures = createPersistedRunFixtures("workflow-result-readback-");
+const { temporaryRoot, workflowRunDirectory, writeResult, writeSnapshotRun } = fixtures;
+
+afterEach(() => {
+  fixtures.cleanup();
+});
 
 describe("workflow result JSON boundary", () => {
   it("bounds typed finalization errors without changing their stage", () => {
@@ -205,5 +216,191 @@ describe("workflow result JSON boundary", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * Readback of the SAME two files the writer above produced, as untrusted input:
+ * legacy envelopes, hand-edited fields, a copied result, a workspace that is no
+ * longer there. Each case asserts what the reader reports; whether such a run
+ * may be RESUMED is admission, decided by its own owner, not here.
+ */
+describe("persisted workflow result readback", () => {
+  it.each([
+    { schemaVersion: 3 },
+    { schemaVersion: 2, futureField: true },
+    { schemaVersion: 2, builtinImports: "node:fs" },
+  ])("projects present malformed script identity %j as invalid metadata", (change) => {
+    const fixture = writeSnapshotRun("20260713-010102-invalid-script-identity", "invalid script identity\n");
+    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
+    result.scriptIdentity = { ...(result.scriptIdentity as Record<string, unknown>), ...change };
+    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      scriptIdentityInvalid: expect.any(String),
+    });
+    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("script identity is malformed"),
+    });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
+  });
+
+  it("preserves malformed workspace and semantic metadata as explicit read-side invalid markers", () => {
+    const fixture = writeSnapshotRun("20260713-010102-malformed-metadata", "malformed metadata\n");
+    writeFileSync(
+      workflowResultFile(fixture.runDir),
+      JSON.stringify({
+        runId: fixture.runId,
+        ok: true,
+        target: { kind: "name", ref: "alpha", source: "project" },
+        workspaceDirExplicit: "true",
+        semanticInputPresent: true,
+        semanticInputSha256: "not-a-sha",
+      }),
+    );
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      workspaceDirExplicitInvalid: expect.any(String),
+      semanticInputInvalid: expect.any(String),
+    });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
+  });
+
+  it("rejects workspace explicitness without its complete workspace mapping", () => {
+    const fixture = writeSnapshotRun("20260713-010102-explicit-without-workspace", "explicit without workspace\n");
+    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, { workspaceDirExplicit: true });
+
+    const result = readWorkflowRunResult(fixture.root, fixture.runId);
+    expect(result).toMatchObject({ workspaceDirExplicitInvalid: expect.stringContaining("requires workspaceDir") });
+    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({ status: "invalid" });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
+  });
+
+  it("rejects a persisted workspace path that is an existing regular file", () => {
+    const fixture = writeSnapshotRun("20260713-010102-workspace-file", "workspace file\n");
+    const workspaceDir = path.join(fixture.root, "tmp", "not-a-directory");
+    mkdirSync(path.dirname(workspaceDir), { recursive: true });
+    writeFileSync(workspaceDir, "not a workspace");
+    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, {
+      workspaceDir,
+      workspaceDirRelative: "tmp/not-a-directory",
+    });
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      workspaceDirInvalid: expect.stringContaining("must identify a directory"),
+    });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
+  });
+
+  it("keeps a removed persisted workspace readable with an explicit unavailable marker", () => {
+    const fixture = writeSnapshotRun("20260713-010102-workspace-removed-marker", "workspace removed marker\n");
+    const workspaceDir = path.join(fixture.root, "tmp", "removed-marker");
+    mkdirSync(workspaceDir, { recursive: true });
+    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, {
+      workspaceDir,
+      workspaceDirRelative: "tmp/removed-marker",
+      workspacePhysicalIdentity: "tmp/removed-marker",
+      workspacePhysicalIdentitySchemaVersion: 1,
+      result: "still readable",
+    });
+    rmSync(workspaceDir, { recursive: true, force: true });
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      workspaceDirUnavailable: expect.stringContaining("unavailable"),
+    });
+    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
+      status: "ready",
+      text: "still readable",
+    });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("completed");
+  });
+
+  it.each([
+    ["okInvalid", { ok: "true" }],
+    ["errorInvalid", { error: 7 }],
+    ["failureDiagnosticInvalid", { failureDiagnostic: {} }],
+    ["artifactRefsInvalid", { artifactRefs: {} }],
+    ["artifactRefsOmittedInvalid", { artifactRefsOmitted: 0 }],
+    ["resultPersistenceInvalid", { resultPersistence: { ok: true, path: "wrong-result.json" } }],
+  ] as const)("projects malformed present result field %s as invalid", (marker, metadata) => {
+    const fixture = writeSnapshotRun(`20260713-010102-malformed-${marker}`, "malformed result field\n");
+    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, metadata);
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({ [marker]: expect.any(String) });
+    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({ status: "invalid" });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
+  });
+
+  it.each([
+    { workspacePhysicalIdentity: "workspace" },
+    { workspacePhysicalIdentitySchemaVersion: 1 },
+    { workspacePhysicalIdentitySchemaVersion: 2 },
+    { workspacePhysicalIdentity: "../escape", workspacePhysicalIdentitySchemaVersion: 1 },
+  ])("projects malformed physical workspace metadata as invalid across result reads: %j", (metadata) => {
+    const fixture = writeSnapshotRun("20260713-010102-malformed-physical", "malformed physical metadata\n");
+    writeFileSync(
+      workflowResultFile(fixture.runDir),
+      JSON.stringify({
+        ok: true,
+        result: "ok",
+        disposition: { status: "completed" },
+        target: { kind: "name", ref: "post-code-review", source: "project" },
+        ...metadata,
+      }),
+    );
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      workspacePhysicalIdentityInvalid: expect.any(String),
+    });
+    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("workspace physical identity"),
+    });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
+  });
+
+  it("keeps legacy envelopes without optional metadata readable", () => {
+    const root = temporaryRoot();
+    const runId = "20260713-010102-legacy-metadata";
+    const runDir = workflowRunDirectory(root, runId);
+    mkdirSync(workflowRunRuntimeDir(runDir), { recursive: true });
+    writeFileSync(workflowResultFile(runDir), JSON.stringify({ ok: true, result: "legacy" }));
+
+    expect(readWorkflowRunResult(root, runId)).toEqual({
+      ok: true,
+      result: "legacy",
+      runUnbound: "persisted result envelope has no runId",
+    });
+    expect(readWorkflowRunSummary(root, runId).status).toBe("completed");
+  });
+
+  it("keeps a removed but lexically matching scriptPath source readable", () => {
+    const fixture = writeSnapshotRun("20260713-010102-removed-source", "removed source\n");
+    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
+    result.target = { kind: "scriptPath", ref: "alpha.workflow.mjs", source: "project" };
+    (result.scriptIdentity as Record<string, unknown>).sourcePath = path.join(fixture.root, "alpha.workflow.mjs");
+    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).not.toHaveProperty("scriptIdentityInvalid");
+  });
+
+  it.each([
+    { ok: true, disposition: { status: "failed" } },
+    { ok: true, disposition: { status: "future" } },
+    { ok: "true", disposition: { status: "completed" } },
+  ])("projects malformed persisted disposition %j as shared invalidity", (metadata) => {
+    const fixture = writeSnapshotRun("20260713-010102-invalid-disposition", "invalid disposition\n");
+    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
+    Object.assign(result, metadata);
+    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
+
+    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
+      dispositionInvalid: expect.any(String),
+    });
+    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
+      status: "invalid",
+      message: expect.stringContaining("disposition is malformed or inconsistent"),
+    });
+    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
   });
 });
