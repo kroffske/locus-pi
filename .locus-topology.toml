@@ -197,3 +197,11 @@ ceiling = 690
 owner = "workflow fusion composition"
 reason = "T-218 W10 (2026-09-12): Fusion declaration/preflight and member+judge execution moved verbatim out of the runtime as one pure composition owner behind injected agent/scheduler ports."
 trigger = "Growth above 690 lines: split the declaration/preflight half from the execution half."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-run-finalization.ts"
+rule = "code-lines"
+ceiling = 620
+owner = "workflow run finalization"
+reason = "T-218 W14 (2026-09-12): the terminal precedence sequence (abort → evidence → handoff → terminal text → lease → report → result.json) moved whole; splitting it would scatter the precedence across two files."
+trigger = "Growth above 620 lines: move the RunWorkflowScriptResult declaration to the contract side; never split the sequence."
