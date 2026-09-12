@@ -204,6 +204,14 @@ function normalizeArtifactRef(value: unknown): WorkflowArtifactRef {
     sha256: record.sha256,
   };
 }
+/**
+ * The same four-field identity as `workflowArtifactRef`/`sameWorkflowArtifactRef` in
+ * workflow-artifact-format.ts, and deliberately not imported from there: this module
+ * is a declared pure module (rule 7 of scripts/check-extension-layers.ts) and the
+ * format module reaches node:path and the run layout. Importing the shared helper
+ * puts node:path into the DSL core's value closure and the check fails. The type
+ * stays shared; only these two four-line projections are restated.
+ */
 export function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifactRef): boolean {
   return (
     left.runId === right.runId &&

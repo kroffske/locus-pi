@@ -11,6 +11,7 @@ import {
   type WorkflowOperatorHandoffEnvelope,
   type WorkflowOperatorQuestion,
 } from "../runtime/workflow-handoff.js";
+import { sameWorkflowArtifactRef } from "../runtime/workflow-artifact-format.js";
 import { readWorkflowArtifactRecord, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
 import {
   listWorkflowRuns,
@@ -248,7 +249,7 @@ function actionableQuestion(
   if (read.status !== "ready") {
     throw new Error(`Workflow handoff question detail is unavailable: ${read.message}`);
   }
-  if (!sameArtifactRef(read.record, ref)) {
+  if (!sameWorkflowArtifactRef(read.record, ref)) {
     throw new Error("Workflow handoff question detail does not match its artifact reference.");
   }
   if (!read.record.mediaType.startsWith("text/")) {
@@ -258,15 +259,6 @@ function actionableQuestion(
   const lines = safe.split(/\r?\n/u);
   const detailText = lines.length <= 12 ? safe : [...lines.slice(0, 12), `… more detail in ${ref.name}`].join("\n");
   return { ...question, detailText };
-}
-
-function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifactRef): boolean {
-  return (
-    left.runId === right.runId &&
-    left.artifactId === right.artifactId &&
-    left.name === right.name &&
-    left.sha256 === right.sha256
-  );
 }
 
 function contextIdleWaiter(ctx: ExtensionContext): (() => Promise<void>) | undefined {

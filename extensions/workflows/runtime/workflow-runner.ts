@@ -159,6 +159,7 @@ import {
   type WorkflowWorkspaceEvidence,
   type WorkflowWorkspaceManager,
 } from "./workflow-worktree.js";
+import { workflowArtifactRef } from "./workflow-artifact-format.js";
 import {
   assertWorkflowContinuation,
   consumeWorkflowContinuation,
@@ -1281,12 +1282,7 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
         // The COMPLETE verified output set. It is what the operator handoff is built
         // from, so a run that published more than the display projection shows can
         // still hand every one of its artifacts to a continuation.
-        allOutputRefs = outputRecords.map((record) => ({
-          runId: record.runId,
-          artifactId: record.artifactId,
-          name: record.name,
-          sha256: record.sha256,
-        }));
+        allOutputRefs = outputRecords.map((record) => workflowArtifactRef(record));
         // Display projection only: the newest few, with `artifactRefsOmitted` saying
         // how many the summary did not print. It admits nothing and gates nothing —
         // `consumeText` resolves any artifact through the source run's full index.

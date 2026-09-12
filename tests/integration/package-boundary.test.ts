@@ -358,7 +358,9 @@ describe("npm public package boundary", () => {
     // shaped call on a route that cannot is refused before the child starts.
     // One more module owns the lexical reading of a workflow source, so the meta
     // scanner, identity assessment and source checker stop restating it.
-    expect(dryRun.files).toHaveLength(269);
+    // The persisted artifact format — version, ref/record/index shapes, strict
+    // parsers — now ships as its own module beside the mutable store that writes it.
+    expect(dryRun.files).toHaveLength(270);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

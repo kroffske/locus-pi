@@ -5,6 +5,7 @@ import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.j
 import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
 import type { WorkflowAgentBridgeOptions } from "../runtime/workflow-agent-bridge.js";
 import { createWorkflowAgentPreflight, createWorkflowAgentRunner } from "../runtime/workflow-agent-bridge.js";
+import { workflowArtifactRef } from "../runtime/workflow-artifact-format.js";
 import { createWorkflowArtifactStore, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
 import { formatWorkflowBudgetPrelude, resolveWorkflowBudget } from "../runtime/workflow-budget.js";
 import { claimNewWorkflowRun } from "../runtime/workflow-journal.js";
@@ -209,12 +210,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     .list()
     .filter((record) => record.kind === "answer" || record.kind === "published" || record.kind === "primary")
     .slice(-20)
-    .map((record) => ({
-      runId: record.runId,
-      artifactId: record.artifactId,
-      name: record.name,
-      sha256: record.sha256,
-    }));
+    .map((record) => workflowArtifactRef(record));
   const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
   const resultPersistence = writeWorkflowResultJson(runDir, {
     runId,
