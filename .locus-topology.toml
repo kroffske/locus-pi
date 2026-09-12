@@ -165,3 +165,11 @@ ceiling = 1500
 owner = "workflow saved-child tests"
 reason = "T-218 W12 (2026-09-12): the 47 saved-child cases moved out of the 2692-line durable suite unchanged; total test lines fell."
 trigger = "W13 moves the ~20 resume/workspace-identity binding cases to the resume-authority suite; do not grow this file before that."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-agent-contract.ts"
+rule = "code-lines"
+ceiling = 680
+owner = "workflow agent contract"
+reason = "T-218 W8 (2026-09-12): request/result wire contract plus the callsite options family, ~95% moved declarations; bridge, call and attempt import it instead of the composition root."
+trigger = "Growth above 680 lines: split callsite options (choice/handoffs/schema/report) from the request/result wire contract."
