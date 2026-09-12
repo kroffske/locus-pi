@@ -8,6 +8,14 @@ import {
   createWorkflowWorkspaceManager,
 } from "../../../../extensions/workflows/runtime/workflow-worktree.js";
 import { ensureWorkflowRunDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
+import {
+  assertWorkflowOutputDirPath,
+  assertWorkflowPhysicalWorkspaceIdentity,
+  referenceWorkflowPrimaryFile,
+  resolveWorkflowOutputDirectory,
+  WORKFLOW_OUTPUT_DIR_PATTERN,
+} from "../../../../extensions/workflows/runtime/workflow-workspace.js";
+import { project } from "../../../fixtures/workflow-durable-project.js";
 
 function repository() {
   const root = mkdtempSync(path.join(tmpdir(), "locus-workflow-workspace-"));
@@ -168,6 +176,71 @@ describe("workflow runtime-owned workspace", () => {
     expect(readFileSync(sentinel, "utf8")).toBe("do-not-touch\n");
 
     rmSync(path.join(baseDir, "agent-1"), { force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
+});
+
+describe("workflow workspace identity and file proofs", () => {
+  it("keeps generated physical identity grammar separate from explicit outputDir grammar", () => {
+    expect(() => assertWorkflowOutputDirPath("packages/docs site/tmp/files")).toThrow();
+    expect(assertWorkflowOutputDirPath(".locus-pi/plans/20260819-120000-a1b2-task-draft")).toBe(
+      ".locus-pi/plans/20260819-120000-a1b2-task-draft",
+    );
+    expect(assertWorkflowOutputDirPath(".locus-pi/workspaces/20260819-120000-a1b2-task-draft")).toBe(
+      ".locus-pi/workspaces/20260819-120000-a1b2-task-draft",
+    );
+    expect(new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u").test(".locus-pi/plans/20260819-120000-a1b2-task-draft")).toBe(
+      true,
+    );
+    expect(
+      new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u").test(".locus-pi/workspaces/20260819-120000-a1b2-task-draft"),
+    ).toBe(true);
+    expect(() => assertWorkflowOutputDirPath(".locus-pi/plans/nested/task-draft")).toThrow();
+    expect(() => assertWorkflowOutputDirPath(".locus-pi/workspaces/nested/task-draft")).toThrow();
+    const grammar = new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u");
+    for (const accepted of [".tasks/T-144-2026-09-08-workflow/artifacts", ".tasks/a/b/c", ".tasks/T-144"]) {
+      expect(assertWorkflowOutputDirPath(accepted)).toBe(accepted);
+      expect(grammar.test(accepted)).toBe(true);
+    }
+    for (const rejected of [".tasks", ".tasks/", ".tasks/../x", ".tasks/.hidden/x", ".tasks//x", ".tasks/x/../y"]) {
+      expect(() => assertWorkflowOutputDirPath(rejected)).toThrow();
+      expect(grammar.test(rejected)).toBe(false);
+    }
+    expect(assertWorkflowPhysicalWorkspaceIdentity("packages/docs site/tmp/files")).toBe(
+      "packages/docs site/tmp/files",
+    );
+    expect(assertWorkflowPhysicalWorkspaceIdentity("p".repeat(401))).toHaveLength(401);
+    for (const invalid of ["", "/outside", "a\\b", "a\0b", ".", "..", "a/../b", "a//b", "a/./b"]) {
+      expect(() => assertWorkflowPhysicalWorkspaceIdentity(invalid)).toThrow();
+    }
+  });
+
+  it("opens only the .tasks root and keeps every other dot directory closed", () => {
+    const grammar = new RegExp(WORKFLOW_OUTPUT_DIR_PATTERN, "u");
+    for (const denied of [
+      ".git/objects",
+      ".ssh/x",
+      ".env/x",
+      ".locus-pi/workflow-state/v1/x",
+      ".locus-pi/runs/x",
+      ".locus-pi",
+      ".tasksextra/x",
+    ]) {
+      expect(() => assertWorkflowOutputDirPath(denied)).toThrow();
+      expect(grammar.test(denied)).toBe(false);
+    }
+  });
+
+  it("rejects a workspace ancestor replaced by an external symlink before primary open", () => {
+    const root = project();
+    const output = resolveWorkflowOutputDirectory(root, "outputs/primary-ancestor", "primary-ancestor", root);
+    const outside = mkdtempSync(path.join(tmpdir(), "workflow-primary-outside-"));
+    writeFileSync(path.join(outside, "plan.md"), "outside\n", "utf8");
+    rmSync(output.absolutePath, { recursive: true, force: true });
+    symlinkSync(outside, output.absolutePath, "dir");
+
+    expect(() => referenceWorkflowPrimaryFile(output, "plan.md")).toThrow(/physical outputDir|workspace changed/u);
+
     rmSync(outside, { recursive: true, force: true });
   });
 });

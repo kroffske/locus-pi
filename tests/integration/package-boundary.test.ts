@@ -360,7 +360,9 @@ describe("npm public package boundary", () => {
     // scanner, identity assessment and source checker stop restating it.
     // The persisted artifact format — version, ref/record/index shapes, strict
     // parsers — now ships as its own module beside the mutable store that writes it.
-    expect(dryRun.files).toHaveLength(270);
+    // T-218 W6 splits the workflow output surface into its workspace-identity and
+    // fenced-workspace-state owners, packing two modules where one shipped before.
+    expect(dryRun.files).toHaveLength(272);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
