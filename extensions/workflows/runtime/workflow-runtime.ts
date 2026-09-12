@@ -1,6 +1,9 @@
 /**
- * workflow-runtime.ts — DSL core (agent/parallel/pipeline/phase/log) + THE single
- * scheduler seam (runScheduled, width from the run's one effective concurrency) + journal mirror.
+ * workflow-runtime.ts — DSL core (agent/fusion/phase/log) + journal mirror. The two
+ * scheduling owners it composes sit beside it: the run's ONE execution budget — counter,
+ * leaf-agent gate, deadline — in `workflow-execution-state.ts`, and `parallel()`/`pipeline()`
+ * with their own per-group scheduler in `workflow-groups.ts`. Both moved out whole; every
+ * public name they took is re-exported below under the identifier it has always had.
  *
  * Pure host-agnostic core. Talks to agents ONLY through an injected WorkflowAgentRunner.
  * No fs / process / require / shell / network anywhere. Unit-testable in isolation.
@@ -24,11 +27,8 @@ import {
 } from "./workflow-return.js";
 import { assertSupportedAgentSchema, validateAgainstSchema } from "./workflow-schema.js";
 import type { AgentOutputAcceptance } from "../../_shared/agent-runtime/agent-runner.js";
-import { AsyncLocalStorage } from "node:async_hooks";
 import {
-  DEFAULT_WORKFLOW_CONCURRENCY,
   assertRepresentableTimeoutMs,
-  assertWorkflowBudgetValue,
   formatWorkflowBudgetRaise,
   formatWorkflowBudgetStop,
   type WorkflowBudget,
@@ -54,15 +54,15 @@ import {
 import type { EvidenceEvaluation } from "../../_shared/agent-runtime/agent-evidence-evaluator.js";
 import type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { WorkflowPrimaryFileReference } from "./workflow-output.js";
-import { classifyWorkflowReturnedFailure, prepareWorkflowResult } from "./workflow-outcome.js";
 // The closed cause list is owned by the agent envelope that carries it and DEFINED in
 // `agent-failure-cause.ts`, a module with no imports at all. Reading it as a value here keeps
 // this core host-agnostic — nothing that touches `node:fs` or `node:child_process` enters the
 // runtime — while still validating against one list rather than a second copy of it. For the
-// same reason the operator handoff and result values above come from `workflow-handoff-contract.ts`
-// and `workflow-outcome.ts`, the two fs-free contract modules, never from their durable
-// counterparts `workflow-handoff.ts` and `workflow-result.ts`; rule 7 of
-// `scripts/check-extension-layers.ts` proves the whole value closure stays free of `node:fs`.
+// same reason the operator handoff value above comes from `workflow-handoff-contract.ts`, and
+// the returned-outcome classification `workflow-groups.ts` performs comes from
+// `workflow-outcome.ts` — the two fs-free contract modules, never their durable counterparts
+// `workflow-handoff.ts` and `workflow-result.ts`. Rule 7 of `scripts/check-extension-layers.ts`
+// verifies transitively, so the two modules extracted below stay inside the same proof.
 import { AGENT_FAILURE_CAUSES } from "../../_shared/agent-runtime/agent-failure-cause.js";
 export type { PermissionMode } from "../../_shared/agent-runtime/agents.js";
 
@@ -104,6 +104,49 @@ export type {
   WorkflowOperatorQuestion,
 } from "./workflow-handoff-contract.js";
 
+// The RUN-level execution budget — the one fresh-invocation counter, the one leaf-agent
+// concurrency gate, the one deadline, and the two typed refusals those axes raise — is owned
+// by `workflow-execution-state.ts`. `workflow-runner.ts` creates exactly ONE of those objects
+// per root run and hands the same object to this core and to every saved-child runtime.
+import {
+  createWorkflowSharedExecutionState,
+  WorkflowInvocationCapError,
+  WorkflowRunDeadlineError,
+  type WorkflowInvocationReservation,
+  type WorkflowSharedExecutionState,
+} from "./workflow-execution-state.js";
+export {
+  createWorkflowSharedExecutionState,
+  WorkflowInvocationCapError,
+  WorkflowRunDeadlineError,
+} from "./workflow-execution-state.js";
+export type { WorkflowSharedExecutionState } from "./workflow-execution-state.js";
+
+// `parallel()` / `pipeline()` — branch identity, the PER-GROUP scheduler, the fail-closed
+// barrier and the typed partial result it raises — are owned by `workflow-groups.ts`. That
+// scheduler is NOT the leaf gate above: it bounds the width of one group operation, which is
+// exactly why a nested `dsl.agent()` inside a wrapper cannot deadlock against leaf slots.
+// This core keeps the DSL assembly and reads branch identity read-only when it builds a request.
+import {
+  assertWorkflowDisplayTitle,
+  createWorkflowGroupExecution,
+  runScheduled,
+  type WorkflowAgentRowOccurrence,
+  type WorkflowGroupExecution,
+  type WorkflowParallelOptions,
+  type WorkflowStage,
+} from "./workflow-groups.js";
+export { WORKFLOW_GROUP_FAILURE, WorkflowGroupFailureError, workflowGroupFailureEnvelope } from "./workflow-groups.js";
+export type {
+  WorkflowBranchFailure,
+  WorkflowGroupEnvelopeSlot,
+  WorkflowGroupFailureEnvelope,
+  WorkflowGroupKind,
+  WorkflowGroupSlot,
+  WorkflowParallelOptions,
+  WorkflowStage,
+} from "./workflow-groups.js";
+
 export class WorkflowRunWorkspaceRemovedError extends Error {
   readonly code = "WORKFLOW_RUN_WORKSPACE_REMOVED";
 
@@ -136,11 +179,6 @@ export interface WorkflowAgentPreflightRequest {
 }
 
 export type WorkflowAgentPreflight = (requests: readonly WorkflowAgentPreflightRequest[]) => Promise<void>;
-
-interface WorkflowAgentRowOccurrence {
-  readonly groupId: string;
-  readonly memberIndex: number;
-}
 
 interface WorkflowAgentSlotDescriptor {
   readonly key: string;
@@ -210,7 +248,6 @@ export const WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE = `${WORKFLOW_NO_OPERATOR_PRE
 export function workflowOperatorInputForbiddenError(reason: string): string {
   return `Operator input requested but forbidden for this run (no-operator mode): ${reason}`;
 }
-export const WORKFLOW_GROUP_FAILURE = "WORKFLOW_GROUP_FAILURE" as const;
 
 // ---------------------------------------------------------------------------
 // Fusion contract and pure packet policy
@@ -717,11 +754,6 @@ const WORKFLOW_RETURN_CONTRACT = Symbol("workflow-return-contract");
  *  a replay boundary. */
 const WORKFLOW_RETURN_VALIDATE = Symbol("workflow-return-validate");
 
-interface WorkflowInvocationReservation {
-  remaining: number;
-  active: boolean;
-}
-
 type WorkflowInternalAgentOptions = WorkflowAgentAnyOptions & {
   [WORKFLOW_RETURN_CONTRACT]?: WorkflowReturnContract;
   [WORKFLOW_RETURN_VALIDATE]?: WorkflowReturnValidate;
@@ -729,139 +761,6 @@ type WorkflowInternalAgentOptions = WorkflowAgentAnyOptions & {
   [FUSION_REPLAY_REQUIRED]?: true;
   [FUSION_CAPABILITY_MODE]?: WorkflowFusionMode;
 };
-
-export type WorkflowStage<T> = (item: T, index: number) => Promise<unknown>;
-
-export type WorkflowGroupKind = "parallel" | "pipeline";
-
-/** Bounds branch wrappers, never the global leaf-agent gate. Keys are declared before any branch starts. */
-export interface WorkflowParallelOptions {
-  concurrency?: number;
-  title?: string;
-  keys?: readonly string[];
-}
-
-interface WorkflowGroupContext {
-  readonly group: { id: string; kind: WorkflowGroupKind; label: string };
-  readonly member?: WorkflowAgentRowOccurrence;
-  /** Branch-local phase changes never leak into sibling branches or their parent. */
-  phase: string | undefined;
-  readonly memberPath: readonly string[];
-  readonly hasBusinessKeys: boolean;
-}
-
-export interface WorkflowBranchFailure {
-  index: number;
-  kind: "thrown" | "returned-failure";
-  message: string;
-  stageIndex?: number;
-  status?: string;
-}
-
-export type WorkflowGroupSlot<T> =
-  | { index: number; status: "completed"; value: T }
-  | { index: number; status: "failed"; failure: WorkflowBranchFailure; value?: T };
-
-export type WorkflowGroupEnvelopeSlot =
-  { index: number; status: "completed" } | { index: number; status: "failed"; failure: WorkflowBranchFailure };
-
-/** JSON-safe run/result projection for an unhandled group failure. */
-export interface WorkflowGroupFailureEnvelope {
-  ok: false;
-  kind: "workflow_group_failure";
-  code: typeof WORKFLOW_GROUP_FAILURE;
-  groupKind: WorkflowGroupKind;
-  groupId: string;
-  total: number;
-  completed: number;
-  failed: number;
-  slots: WorkflowGroupEnvelopeSlot[];
-  failures: WorkflowBranchFailure[];
-}
-
-/**
- * Fail-closed barrier result for thrown or explicitly failed branches.
- *
- * Successful siblings finish. `slots` is the unambiguous in-memory truth;
- * `partialResults` is a convenience view where thrown positions are null while
- * returned failed values remain inspectable. A script must catch this stable
- * typed error explicitly to accept a deliberate partial outcome.
- */
-export class WorkflowGroupFailureError<T = unknown> extends Error {
-  readonly code = WORKFLOW_GROUP_FAILURE;
-  readonly groupKind: WorkflowGroupKind;
-  readonly groupId: string;
-  readonly slots: Array<WorkflowGroupSlot<T>>;
-  readonly partialResults: Array<T | null>;
-  readonly failures: WorkflowBranchFailure[];
-  readonly total: number;
-  readonly completed: number;
-  readonly failed: number;
-
-  constructor(groupKind: WorkflowGroupKind, groupId: string, slots: Array<WorkflowGroupSlot<T>>) {
-    const failures = slots
-      .filter((slot): slot is Extract<WorkflowGroupSlot<T>, { status: "failed" }> => slot.status === "failed")
-      .map((slot) => slot.failure);
-    const total = slots.length;
-    const failed = failures.length;
-    const preview = failures
-      .slice(0, 3)
-      .map(
-        (failure) =>
-          `branch ${failure.index}${failure.stageIndex === undefined ? "" : ` stage ${failure.stageIndex}`}: ${failure.message}`,
-      )
-      .join("; ");
-    const suffix = failures.length > 3 ? `; +${failures.length - 3} more` : "";
-    super(`${groupKind} failed in ${failed}/${total} branch(es): ${preview}${suffix}`);
-    this.name = "WorkflowGroupFailureError";
-    this.groupKind = groupKind;
-    this.groupId = groupId;
-    this.slots = slots.map((slot) =>
-      slot.status === "completed" ? { ...slot } : { ...slot, failure: { ...slot.failure } },
-    );
-    this.partialResults = this.slots.map((slot) => {
-      if (slot.status === "completed") return slot.value;
-      return Object.prototype.hasOwnProperty.call(slot, "value") ? (slot.value ?? null) : null;
-    });
-    this.failures = failures.map((failure) => ({ ...failure }));
-    this.total = total;
-    this.completed = Math.max(0, total - failed);
-    this.failed = failed;
-  }
-
-  toEnvelope(): WorkflowGroupFailureEnvelope {
-    return {
-      ok: false,
-      kind: "workflow_group_failure",
-      code: this.code,
-      groupKind: this.groupKind,
-      groupId: this.groupId,
-      total: this.total,
-      completed: this.completed,
-      failed: this.failed,
-      slots: this.slots.map((slot) =>
-        slot.status === "completed"
-          ? { index: slot.index, status: "completed" }
-          : { index: slot.index, status: "failed", failure: { ...slot.failure } },
-      ),
-      failures: this.failures.map((failure) => ({ ...failure })),
-    };
-  }
-}
-
-export function workflowGroupFailureEnvelope(value: unknown): WorkflowGroupFailureEnvelope | undefined {
-  return value instanceof WorkflowGroupFailureError ? value.toEnvelope() : undefined;
-}
-
-class CapturedWorkflowBranchFailure<T = unknown> extends Error {
-  constructor(
-    readonly value: T,
-    readonly failure: WorkflowBranchFailure,
-  ) {
-    super(failure.message);
-    this.name = "CapturedWorkflowBranchFailure";
-  }
-}
 
 export interface WorkflowRuntimeOptions {
   runId: string;
@@ -938,36 +837,6 @@ export interface WorkflowRuntime {
   peakAgentConcurrency(): number;
 }
 
-/** Shared by every real saved child. Workflow source receives only the DSL. */
-export interface WorkflowSharedExecutionState {
-  /** The run's ONE effective leaf-agent width; also the default `parallel()` width. */
-  readonly concurrency: number;
-  /** Explicit fresh-child cap, or `undefined` for an unbounded axis. */
-  readonly maxTotalAgentInvocations: number | undefined;
-  readonly runtimeMs: number | undefined;
-  reserve(count: number): WorkflowInvocationReservation;
-  consumeReservation(reservation: WorkflowInvocationReservation): void;
-  releaseReservation(reservation: WorkflowInvocationReservation): void;
-  /** `undefined` when the axis is unbounded: nothing remains to run out. */
-  remainingAgentInvocations(): number | undefined;
-  /**
-   * Take the next physical attempt number, charging the `totalAgents` axis only
-   * for attempts that actually start a child.
-   *
-   * `kind` is the whole point: a replayed call projects a recorded answer and calls
-   * no model, so charging it would let a `--resume` of a finished run die on a cap
-   * the original run satisfied. The returned sequence number still counts every
-   * attempt, because it is this attempt's identity (`call-0007`), not its price.
-   */
-  spendInvocation(kind: "fresh" | "replayed"): number;
-  /** Fresh attempts charged so far, and replayed ones observed but not charged. */
-  invocationCounts(): { fresh: number; replayed: number };
-  assertDeadline(): void;
-  acquireAgent(): Promise<void>;
-  releaseAgent(): void;
-  peakAgentConcurrency(): number;
-}
-
 export function assertWorkflowInput(value: unknown, field = "workflow input"): asserts value is string | undefined {
   if (value !== undefined && typeof value !== "string") {
     throw new Error(`${field} must be a string when provided`);
@@ -984,246 +853,6 @@ export function snapshotWorkflowItems(value: unknown, field = "workflow items"):
     if (typeof item !== "string") throw new Error(`${field}[${index}] must be a string`);
   }
   return Object.freeze([...value]);
-}
-
-// ---------------------------------------------------------------------------
-// THE single concurrency seam
-// ---------------------------------------------------------------------------
-
-/**
- * THE single concurrency seam for the whole runtime. Every agent execution —
- * agent(), parallel(), pipeline() — funnels through here.
- *
- * Bounded per-call concurrency seam. Real concurrency with git-worktree
- * isolation for parallel writes can be dropped in HERE without touching any
- * workflow script.
- *
- * `width` is REQUIRED and has no local default. It used to have a private
- * `SCHEDULER_WIDTH = 4` that nobody could see, sitting beside a `budget.concurrency`
- * of 4 that meant the same thing: two constants, one meaning, and an operator who
- * narrowed the visible one still got groups of four. The run's single effective
- * concurrency is the only width now, and a local one exists only when a
- * `parallel()`/`pipeline()` author passes it explicitly.
- *
- * // TODO(concurrency): add git-worktree isolation. Keep this signature stable.
- */
-async function runScheduled<T>(thunks: Array<() => Promise<T>>, width: number): Promise<T[]> {
-  const out: T[] = new Array(thunks.length);
-  let next = 0;
-  const workerCount = Math.min(width, thunks.length);
-  // This bounds width PER runScheduled call, not globally.
-  // Nested orchestration wrappers create their OWN pool, so nested dsl.agent()
-  // inside a parallel() wrapper does NOT deadlock against leaf agent slots.
-  // Global leaf-agent concurrency is enforced separately by AgentConcurrencyGate.
-  async function worker() {
-    for (;;) {
-      const i = next++;
-      if (i >= thunks.length) return;
-      out[i] = await thunks[i]!();
-    }
-  }
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return out;
-}
-
-/**
- * A display name and a `parallel` key have to be a name: non-blank, and free of control
- * characters that would corrupt a journal line, a terminal row or a path component.
- *
- * The former 240-character ceiling is gone. A key is part of branch IDENTITY and enters the
- * replay key, so control characters are REFUSED rather than encoded — encoding them would
- * silently rewrite the identity of already-recorded branches — but length was never an
- * identity property, and a title long enough to be awkward is a display problem the renderer
- * already solves by clipping what it draws.
- */
-function assertWorkflowDisplayTitle(value: unknown, field: string): asserts value is string {
-  if (typeof value !== "string" || value.trim() === "" || /[\u0000-\u001f\u007f]/u.test(value)) {
-    throw new Error(`${field} must be non-blank text without control characters`);
-  }
-}
-
-function normalizeWorkflowParallelOptions(
-  value: WorkflowParallelOptions | undefined,
-  count: number,
-): WorkflowParallelOptions {
-  if (value === undefined) return {};
-  if (!isRecord(value) || Object.keys(value).some((key) => !["concurrency", "title", "keys"].includes(key))) {
-    throw new Error("parallel options accept only concurrency, title, and keys");
-  }
-  if (
-    value.concurrency !== undefined &&
-    (typeof value.concurrency !== "number" || !Number.isSafeInteger(value.concurrency) || value.concurrency < 1)
-  ) {
-    throw new Error("parallel concurrency must be a positive safe integer");
-  }
-  if (value.title !== undefined) assertWorkflowDisplayTitle(value.title, "parallel title");
-  if (value.keys !== undefined) {
-    if (!Array.isArray(value.keys) || value.keys.length !== count)
-      throw new Error("parallel keys must name every branch exactly once");
-    for (const key of value.keys) assertWorkflowDisplayTitle(key, "parallel key");
-    if (new Set(value.keys).size !== value.keys.length)
-      throw new Error("parallel keys must be unique within the group");
-  }
-  return { ...value, ...(value.keys === undefined ? {} : { keys: [...value.keys] }) };
-}
-
-interface AgentConcurrencyGate {
-  acquire(): Promise<void>;
-  release(): void;
-  /**
-   * High-water mark of simultaneously EXECUTING leaf agents.
-   *
-   * Gate-owned rather than derived from the journal, and that is the whole point:
-   * `agent_start` is emitted before `acquire()`, so counting overlapping
-   * start/end intervals counts children that are still queued. That number is
-   * demand, not concurrency, and printing it beside a concurrency limit would
-   * read as a limit breach that never happened.
-   */
-  peak(): number;
-}
-
-class CountingAgentConcurrencyGate implements AgentConcurrencyGate {
-  private inUse = 0;
-  private peakInUse = 0;
-  private readonly waiters: Array<() => void> = [];
-
-  constructor(private readonly maxConcurrentAgents: number) {}
-
-  acquire(): Promise<void> {
-    if (this.inUse < this.maxConcurrentAgents) {
-      this.enter();
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      this.waiters.push(() => {
-        this.enter();
-        resolve();
-      });
-    });
-  }
-
-  release(): void {
-    this.inUse -= 1;
-    const next = this.waiters.shift();
-    if (next !== undefined) next();
-  }
-
-  peak(): number {
-    return this.peakInUse;
-  }
-
-  private enter(): void {
-    this.inUse += 1;
-    if (this.inUse > this.peakInUse) this.peakInUse = this.inUse;
-  }
-}
-
-function createAgentConcurrencyGate(maxConcurrentAgents: number): AgentConcurrencyGate {
-  if (!Number.isInteger(maxConcurrentAgents) || maxConcurrentAgents < 1) {
-    throw new Error("maxConcurrentAgents must be a positive integer when provided");
-  }
-  return new CountingAgentConcurrencyGate(maxConcurrentAgents);
-}
-
-/**
- * Create the one physical execution budget shared by a root and every saved child.
- *
- * Two of the three axes here are OPTIONAL and unbounded when absent: an undeclared
- * `maxTotalAgentInvocations` refuses nobody and an undeclared `runtimeMs` arms no
- * clock. Only the concurrency width has a package value, because it queues rather
- * than stops.
- */
-export function createWorkflowSharedExecutionState(input: {
-  maxConcurrentAgents?: number;
-  maxTotalAgentInvocations?: number;
-  runtimeMs?: number;
-  nowMs?: () => number;
-}): WorkflowSharedExecutionState {
-  const concurrency = input.maxConcurrentAgents ?? DEFAULT_WORKFLOW_CONCURRENCY;
-  const gate = createAgentConcurrencyGate(concurrency);
-  const maxTotalAgentInvocations = resolveMaxTotalAgentInvocations(input.maxTotalAgentInvocations);
-  const nowMs = input.nowMs ?? (() => Date.now());
-  /** Physical attempts, replayed included: this is attempt IDENTITY, not spend. */
-  let sequence = 0;
-  /** Attempts that actually started a child. The only number `totalAgents` bounds. */
-  let charged = 0;
-  let replayedCount = 0;
-  let reserved = 0;
-  let started: number | undefined;
-  let deadline: number | undefined;
-  if (input.runtimeMs !== undefined) {
-    assertWorkflowBudgetValue("runtimeMs", input.runtimeMs);
-    started = nowMs();
-    deadline = started + input.runtimeMs;
-  }
-  const remaining = (): number | undefined =>
-    maxTotalAgentInvocations === undefined ? undefined : maxTotalAgentInvocations - charged - reserved;
-
-  return {
-    concurrency,
-    maxTotalAgentInvocations,
-    runtimeMs: input.runtimeMs,
-    reserve(count) {
-      const left = remaining();
-      if (left !== undefined && count > left) {
-        // A `totalAgents` refusal, not a Fusion configuration error: the panel is
-        // well-formed and the run simply has no room left for it. Typed so the journal
-        // names the axis and says the answers already received are kept.
-        throw new WorkflowInvocationCapError(
-          maxTotalAgentInvocations ?? 0,
-          `fusion needs up to ${count} agent invocation(s), but only ${left} remain in this run`,
-        );
-      }
-      reserved += count;
-      return { remaining: count, active: true };
-    },
-    consumeReservation(reservation) {
-      if (!reservation.active || reservation.remaining < 1) {
-        throw new WorkflowInvocationCapError(maxTotalAgentInvocations ?? 0);
-      }
-      reservation.remaining -= 1;
-      reserved -= 1;
-    },
-    releaseReservation(reservation) {
-      if (!reservation.active) return;
-      reserved -= reservation.remaining;
-      reservation.remaining = 0;
-      reservation.active = false;
-    },
-    remainingAgentInvocations: () => remaining(),
-    spendInvocation(kind) {
-      if (kind === "replayed") {
-        replayedCount += 1;
-        sequence += 1;
-        return sequence;
-      }
-      // Checked BEFORE the child starts, so the call that would breach the cap never
-      // runs and everything already received stays exactly as it was.
-      if (maxTotalAgentInvocations !== undefined && charged + reserved >= maxTotalAgentInvocations) {
-        throw new WorkflowInvocationCapError(maxTotalAgentInvocations);
-      }
-      charged += 1;
-      sequence += 1;
-      return sequence;
-    },
-    invocationCounts: () => ({ fresh: charged, replayed: replayedCount }),
-    assertDeadline() {
-      if (deadline === undefined || started === undefined) return;
-      const current = nowMs();
-      if (current > deadline) throw new WorkflowRunDeadlineError(input.runtimeMs!, current - started);
-    },
-    acquireAgent: () => gate.acquire(),
-    releaseAgent: () => gate.release(),
-    peakAgentConcurrency: () => gate.peak(),
-  };
-}
-
-function resolveMaxTotalAgentInvocations(maxTotalAgentInvocations: number | undefined): number | undefined {
-  if (maxTotalAgentInvocations === undefined) return undefined;
-  if (!Number.isInteger(maxTotalAgentInvocations) || maxTotalAgentInvocations < 1) {
-    throw new Error("maxTotalAgentInvocations must be a positive integer when provided");
-  }
-  return maxTotalAgentInvocations;
 }
 
 function normalizeMaxToolCalls(maxToolCalls: number, field: string): number {
@@ -1466,24 +1095,6 @@ function handoffsSchema(bounds: WorkflowAgentHandoffBounds): Record<string, unkn
   };
 }
 
-/** Thrown by agentDsl() when a run exceeds maxTotalAgentInvocations. Bubbles past
- *  grouped contexts (parallel/pipeline) so a cyclic/runaway workflow exits the run
- *  with a clear error instead of looping unbounded. */
-export class WorkflowInvocationCapError extends Error {
-  readonly cap: number;
-  /**
-   * `detail` replaces the generic sentence when the refusal has a more precise one
-   * — a Fusion panel that cannot fit its worst case, for instance. The CLASS is what
-   * `journalBudgetStop` reads to name the axis, so every refusal on `totalAgents`
-   * prints as `stopped by budget totalAgents` whatever its sentence says.
-   */
-  constructor(cap: number, detail?: string) {
-    super(detail ?? `workflow exceeded maxTotalAgentInvocations cap of ${cap}`);
-    this.name = "WorkflowInvocationCapError";
-    this.cap = cap;
-  }
-}
-
 /**
  * The per-call failure causes that mean "an explicit budget stopped this", mapped
  * to the axis an operator would recognise.
@@ -1501,36 +1112,6 @@ const PER_CALL_BUDGET_STOPS: Readonly<Partial<Record<WorkflowAgentFailureCause, 
     "assistant-turn-budget": "turns",
   },
 );
-
-/** The two failures that bound the RUN, not one branch. Both are thrown before any
- *  child work and must exit grouped contexts unchanged. */
-function isRunLevelWorkflowFailure(err: unknown): boolean {
-  return err instanceof WorkflowInvocationCapError || err instanceof WorkflowRunDeadlineError;
-}
-
-/**
- * Thrown when a child would START after the run's wall clock expired. Mirrors
- * WorkflowInvocationCapError deliberately: same check site, same bubbling past
- * grouped contexts, same "refuse the next one rather than abort the current one"
- * discipline. Aborting a child mid-flight would need a second abort path racing
- * the per-child fuse, which is the defect the single-deadline rule removes.
- *
- * What it bounds, stated so a reader does not have to infer it: the AGENT CHAIN.
- * A run is bounded by `runtimeMs` plus at most one child's own `timeoutMs`. Script
- * code that calls no further agent is not bounded by this at all.
- */
-export class WorkflowRunDeadlineError extends Error {
-  readonly runtimeMs: number;
-  readonly elapsedMs: number;
-  constructor(runtimeMs: number, elapsedMs: number) {
-    super(
-      `workflow exceeded its runtimeMs budget of ${runtimeMs} ms (${elapsedMs} ms elapsed) before this agent call started`,
-    );
-    this.name = "WorkflowRunDeadlineError";
-    this.runtimeMs = runtimeMs;
-    this.elapsedMs = elapsedMs;
-  }
-}
 
 /** Typed failure for one child execution. Public agent() callers receive text only;
  * runtime status and diagnostics remain available on this internal error and journal. */
@@ -2029,12 +1610,17 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
    *  child answer and agent_end, before artifact recording and replay journaling, so a
    *  nested child call there has no defined position in either sequence. */
   let insideValidate = false;
-  let groupCounter = 0;
-  const groupContext = new AsyncLocalStorage<WorkflowGroupContext>();
-  const currentPhase = (): string | undefined => {
-    const context = groupContext.getStore();
-    return context === undefined ? _currentPhase : context.phase;
-  };
+  const groups: WorkflowGroupExecution = createWorkflowGroupExecution({
+    runId,
+    now: nowFn,
+    emit,
+    sharedExecution,
+    rootPhase: () => _currentPhase,
+    setRootPhase: (name) => {
+      _currentPhase = name;
+    },
+  });
+  const currentPhase = (): string | undefined => groups.currentPhase();
 
   function emit(line: WorkflowJournalLine): void {
     journalMirror.push(line);
@@ -2138,7 +1724,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
     const effectivePhase = opts?.phase ?? currentPhase();
     if (opts?.title !== undefined) assertWorkflowDisplayTitle(opts.title, "agent title");
-    const groupScope = groupContext.getStore();
+    const groupScope = groups.branchContext();
     const itemPath = groupScope?.hasBusinessKeys === true ? [...groupScope.memberPath] : undefined;
     const maxToolCalls =
       opts?.maxToolCalls !== undefined
@@ -2166,7 +1752,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     const workspaceMode = opts?.workspaceHandle !== undefined ? "worktree" : defaultWorkflowWorkspaceMode(opts);
     const baseSlotKey =
       opts?.label === undefined ? undefined : workflowSlotKey({ phase: effectivePhase, label: opts.label });
-    const groupMember = groupContext.getStore()?.member;
+    const groupMember = groups.branchContext()?.member;
     const workflowSlot =
       baseSlotKey === undefined
         ? undefined
@@ -2405,7 +1991,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         permissionMode,
         workspaceMode,
         ...(req.workspaceHandle !== undefined ? { workspaceHandle: req.workspaceHandle } : {}),
-        ...activeGroupFields(),
+        ...groups.activeGroupFields(),
         // Both facts, neither fabricated: `model` keeps its documented live-row display
         // meaning for existing readers, `requestedModel` says out loud that at this point
         // in the run the value is a request and nothing has executed yet.
@@ -2681,7 +2267,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(finalResult.outputAcceptance === undefined ? {} : { outputAcceptance: finalResult.outputAcceptance }),
       permissionMode: finalResult.permissionMode ?? permissionMode,
       workspaceMode: finalResult.workspaceMode ?? workspaceMode,
-      ...activeGroupFields(),
+      ...groups.activeGroupFields(),
       ...(finalResult.model !== undefined ? { model: finalResult.model } : {}),
       // The two model facts this line can honestly carry: what the host said the child
       // ran on, and — when a declared tier had nothing assigned — that it degraded.
@@ -2764,7 +2350,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
         currentPhase(),
       );
 
-      const answers = await parallel(
+      const answers = await groups.parallel(
         fusion.members.map((member, index) => {
           const memberOptions: WorkflowInternalAgentOptions = {
             ...member.agentOptions,
@@ -2983,7 +2569,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     decision: WorkflowChoiceDecision,
     callId?: string,
   ): void {
-    const context = groupContext.getStore();
+    const context = groups.branchContext();
     emit({
       ts: nowFn(),
       runId,
@@ -2994,7 +2580,7 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       ...(opts?.label === undefined ? {} : { label: opts.label }),
       ...(callId === undefined ? {} : { callId }),
       ...(currentPhase() === undefined ? {} : { phase: currentPhase()! }),
-      ...activeGroupFields(),
+      ...groups.activeGroupFields(),
       ...(context?.hasBusinessKeys ? { itemPath: [...context.memberPath] } : {}),
     });
   }
@@ -3129,112 +2715,10 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     }
   }
 
-  async function parallel<T>(thunks: Array<() => Promise<T>>, input?: WorkflowParallelOptions): Promise<T[]> {
-    const groupOptions = normalizeWorkflowParallelOptions(input, thunks.length);
-    return runGrouped(
-      "parallel",
-      thunks.length,
-      () => runGroupBranches("parallel", thunks, groupOptions),
-      groupOptions,
-    );
-  }
-
-  async function pipeline<T>(items: readonly T[], ...stages: Array<WorkflowStage<unknown>>): Promise<unknown[]> {
-    const itemThunks: Array<() => Promise<unknown>> = items.map((_item, itemIndex) => {
-      const item = _item;
-      return async () => {
-        let acc: unknown = item;
-        for (const [_si, stage] of stages.entries()) {
-          const si = _si;
-          try {
-            const next = await stage(acc, itemIndex * stages.length + si);
-            const returnedFailure = classifyReturnedGroupFailure(next, itemIndex, si);
-            if (returnedFailure !== undefined) {
-              throw new CapturedWorkflowBranchFailure(next, returnedFailure);
-            }
-            acc = next;
-          } catch (err) {
-            if (isRunLevelWorkflowFailure(err) || err instanceof CapturedWorkflowBranchFailure) throw err;
-            throw new CapturedWorkflowBranchFailure(undefined, {
-              index: itemIndex,
-              stageIndex: si,
-              kind: "thrown",
-              message: workflowErrorMessage(err),
-            });
-          }
-        }
-        return acc;
-      };
-    });
-    return runGrouped("pipeline", itemThunks.length, () => runGroupBranches("pipeline", itemThunks));
-  }
-
-  async function runGroupBranches<T>(
-    kind: WorkflowGroupKind,
-    thunks: Array<() => Promise<T>>,
-    groupOptions?: WorkflowParallelOptions,
-  ): Promise<T[]> {
-    const groupId = groupContext.getStore()!.group.id;
-    const wrapped: Array<() => Promise<WorkflowGroupSlot<T>>> = thunks.map((thunk, index) => async () => {
-      const currentContext = groupContext.getStore();
-      const memberContext: WorkflowGroupContext = {
-        group: currentContext!.group,
-        member: { groupId, memberIndex: index },
-        phase: currentPhase(),
-        memberPath: [...currentContext!.memberPath, groupOptions?.keys?.[index] ?? `#${index}`],
-        hasBusinessKeys: currentContext!.hasBusinessKeys || groupOptions?.keys !== undefined,
-      };
-      try {
-        const value = await groupContext.run(memberContext, thunk);
-        const returnedFailure = classifyReturnedGroupFailure(value, index);
-        if (returnedFailure === undefined) return { index, status: "completed", value };
-        emitGroupBranchFailure(returnedFailure);
-        return { index, status: "failed", value, failure: returnedFailure };
-      } catch (err) {
-        // The invocation cap and the run deadline are hard RUN-level failures and
-        // keep their own public error types instead of being converted into a
-        // partial group: a bound on the whole run is not one branch's problem.
-        if (isRunLevelWorkflowFailure(err)) throw err;
-        const failure =
-          err instanceof CapturedWorkflowBranchFailure
-            ? err.failure
-            : { index, kind: "thrown" as const, message: workflowErrorMessage(err) };
-        emitGroupBranchFailure(failure);
-        return {
-          index,
-          status: "failed",
-          ...(err instanceof CapturedWorkflowBranchFailure && err.failure.kind === "returned-failure"
-            ? { value: err.value as T }
-            : {}),
-          failure,
-        };
-      }
-    });
-    // The run's ONE effective concurrency, unless this group's author narrowed it
-    // explicitly. There is no second hidden package width any more.
-    const slots = await runScheduled(wrapped, groupOptions?.concurrency ?? sharedExecution.concurrency);
-    if (slots.some((slot) => slot.status === "failed")) {
-      throw new WorkflowGroupFailureError(kind, groupId, slots);
-    }
-    return slots.map((slot) => (slot as Extract<WorkflowGroupSlot<T>, { status: "completed" }>).value);
-  }
-
-  function emitGroupBranchFailure(failure: WorkflowBranchFailure): void {
-    emit({
-      ts: nowFn(),
-      runId,
-      kind: "error",
-      message: failure.message,
-      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
-      ...activeGroupFields(),
-    });
-  }
-
   function phase(name: string): void {
-    const context = groupContext.getStore();
-    if (context === undefined) _currentPhase = name;
-    else context.phase = name;
-    emit({ ts: nowFn(), runId, kind: "phase", phase: name, ...activeGroupFields() });
+    // A branch owns its own phase; only an ungrouped call moves the run-level one.
+    groups.setBranchPhase(name);
+    emit({ ts: nowFn(), runId, kind: "phase", phase: name, ...groups.activeGroupFields() });
   }
 
   function log(msg: string): void {
@@ -3312,81 +2796,6 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
       message,
       ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
     });
-  }
-
-  async function runGrouped<T extends unknown[]>(
-    kind: "parallel" | "pipeline",
-    total: number,
-    run: () => Promise<T>,
-    groupOptions?: WorkflowParallelOptions,
-  ): Promise<T> {
-    const id = `${kind}-${++groupCounter}`;
-    const label = groupOptions?.title ?? `${kind} ${total}`;
-    const parentContext = groupContext.getStore();
-    emit({
-      ts: nowFn(),
-      runId,
-      kind: "group_start",
-      groupId: id,
-      groupKind: kind,
-      groupLabel: label,
-      groupTotal: total,
-      ...(groupOptions?.keys === undefined ? {} : { groupKeys: [...groupOptions.keys] }),
-      ...(parentContext === undefined ? {} : { parentGroupId: parentContext.group.id }),
-      ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
-    });
-    const currentContext: WorkflowGroupContext = {
-      group: { id, kind, label },
-      phase: currentPhase(),
-      memberPath: parentContext?.memberPath ?? [],
-      hasBusinessKeys: parentContext?.hasBusinessKeys ?? false,
-      ...(parentContext?.member === undefined ? {} : { member: parentContext.member }),
-    };
-    return groupContext.run(currentContext, async () => {
-      const start = Date.now();
-      try {
-        const results = await run();
-        emit({
-          ts: nowFn(),
-          runId,
-          kind: "group_end",
-          status: "completed",
-          groupId: id,
-          groupKind: kind,
-          groupLabel: label,
-          groupTotal: total,
-          groupCompleted: total,
-          groupFailed: 0,
-          ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
-          durationMs: Date.now() - start,
-        });
-        return results;
-      } catch (err) {
-        const groupFailure = err instanceof WorkflowGroupFailureError ? err : undefined;
-        emit({
-          ts: nowFn(),
-          runId,
-          kind: "group_end",
-          status: "failed",
-          groupId: id,
-          groupKind: kind,
-          groupLabel: label,
-          groupTotal: total,
-          groupCompleted: groupFailure?.completed ?? 0,
-          groupFailed: groupFailure?.failed ?? total,
-          ...(currentPhase() !== undefined ? { phase: currentPhase()! } : {}),
-          message: workflowErrorMessage(err),
-          durationMs: Date.now() - start,
-        });
-        throw err;
-      }
-    });
-  }
-
-  function activeGroupFields(): Pick<WorkflowJournalLine, "groupId" | "groupKind" | "groupLabel"> {
-    const group = groupContext.getStore()?.group;
-    if (group === undefined) return {};
-    return { groupId: group.id, groupKind: group.kind, groupLabel: group.label };
   }
 
   async function promptFile(path: string, variables?: Record<string, string>): Promise<string> {
@@ -3491,8 +2900,8 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
     consumeTextArtifact,
     continuationArtifacts,
     items: () => items,
-    parallel,
-    pipeline,
+    parallel: groups.parallel,
+    pipeline: groups.pipeline,
     phase,
     log,
     awaitOperator,
@@ -3687,52 +3096,6 @@ function isThinkingSuffix(value: string): boolean {
     value === "xhigh" ||
     value === "thinking"
   );
-}
-
-function classifyReturnedGroupFailure(
-  value: unknown,
-  index: number,
-  stageIndex?: number,
-): WorkflowBranchFailure | undefined {
-  const prepared = prepareWorkflowResult(value);
-  if (prepared.diagnostic !== undefined) {
-    return {
-      index,
-      kind: "returned-failure",
-      message: workflowErrorMessage(prepared.diagnostic.message),
-      ...(stageIndex !== undefined ? { stageIndex } : {}),
-    };
-  }
-  const returnedFailure = classifyWorkflowReturnedFailure(prepared.value);
-  if (returnedFailure === undefined) return undefined;
-  const record = isRecord(value) ? value : {};
-  const firstDiagnostic = Array.isArray(record.diagnostics)
-    ? record.diagnostics.find((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
-    : undefined;
-  const fallback =
-    returnedFailure.status !== undefined
-      ? `branch returned status=${returnedFailure.status}`
-      : returnedFailure.kind === "partial"
-        ? "branch returned partial:true"
-        : "branch returned ok:false";
-  const message = workflowErrorMessage(returnedFailure.summary ?? firstDiagnostic ?? fallback);
-  return {
-    index,
-    kind: "returned-failure",
-    message,
-    ...(stageIndex !== undefined ? { stageIndex } : {}),
-    ...(returnedFailure.status !== undefined ? { status: returnedFailure.status } : {}),
-  };
-}
-
-function workflowErrorMessage(value: unknown): string {
-  try {
-    const raw = value instanceof Error ? value.message : String(value);
-    const compact = raw.replace(/\s+/gu, " ").trim();
-    return compact === "" ? "unknown branch failure" : compact.slice(0, 240);
-  } catch {
-    return "unknown branch failure";
-  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

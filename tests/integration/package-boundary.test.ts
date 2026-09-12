@@ -370,7 +370,9 @@ describe("npm public package boundary", () => {
     // so the widget ships as three modules instead of one.
     // T-218 W15 splits the strict source checker into diagnostic identity, lexical
     // facts, provenance and permitted-use rules, packing four modules beside it.
-    expect(dryRun.files).toHaveLength(279);
+    // T-218 W7 lifts the run's one execution budget and the group machinery out of the
+    // DSL core, so the runtime ships as three modules instead of one.
+    expect(dryRun.files).toHaveLength(281);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

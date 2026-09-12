@@ -184,6 +184,11 @@ const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
  * names against `workflow-run-layout.ts`, which reaches `node:fs`, exactly as
  * `workflow-artifact-format.ts` does. Every specifier the DSL core imports from it is
  * type-only, so the `workflow-runtime.ts` entry below still proves the core's value closure.
+ *
+ * `workflow-execution-state.ts` (the run's one counter, leaf gate and deadline) and
+ * `workflow-groups.ts` (`parallel()`/`pipeline()`) are likewise absent and need no entry of
+ * their own: the core value-imports both, and rule 7 walks the closure transitively, so the
+ * `workflow-runtime.ts` entry already holds them to the same `node:fs`-free proof.
  */
 const PURE_MODULES: readonly PureModuleEntry[] = [
   {
