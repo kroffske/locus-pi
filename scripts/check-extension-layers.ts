@@ -150,6 +150,20 @@ const FEATURE_INTERNAL_MODULES: readonly FeatureInternalEntry[] = [
       "the strict line codec decides what counts as readable run evidence, so validating a persisted line outside the feature reads a run around the facade; the line TYPES stay reachable through workflow-runtime.ts, which re-exports them.",
   },
   {
+    module: "extensions/workflows/runtime/workflow-result.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module both writes the persisted result envelope and decides, on readback, which stored fields still count as readable run evidence; the run-local result PATH stays reachable through the workflow facade.",
+  },
+  {
+    module: "extensions/workflows/runtime/workflow-run-snapshot.ts",
+    owner: "extensions/workflows",
+    facade: WORKFLOW_READ_FACADE,
+    reason:
+      "this module decides whether the bytes a run actually executed are still provable (ready/legacy/missing/unreadable/invalid/tampered), so verifying a snapshot outside the feature reads a run around the facade.",
+  },
+  {
     module: "extensions/workflows/runtime/workflow-live.ts",
     owner: "extensions/workflows",
     facade: WORKFLOW_READ_FACADE,
