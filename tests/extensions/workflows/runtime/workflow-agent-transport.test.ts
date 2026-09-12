@@ -1676,33 +1676,31 @@ describe("agent attempts — one shaped call is one physical child", () => {
   });
 
   it("reads the option only in the logical call, and keeps the deleted loop deleted", () => {
-    // A transport retry that leaked into a shape budget would re-ask a child that
-    // ANSWERED, which is the one thing the retry must never do. This pins WHERE the
-    // option is read, by function, rather than by how the file happens to be laid out.
-    const source = readFileSync(
-      path.join(process.cwd(), "extensions", "workflows", "runtime", "workflow-runtime.ts"),
-      "utf8",
-    );
-    const lines = source.split("\n");
-    const lineOf = (needle: string): number => {
-      const index = lines.findIndex((line) => line.includes(needle));
-      expect(index, `expected to find ${needle}`).toBeGreaterThanOrEqual(0);
-      return index;
-    };
-    const logicalStart = lineOf("async function runAgentAttempt(");
-    const physicalStart = lineOf("async function runPhysicalAgentAttempt(");
-    expect(logicalStart).toBeLessThan(physicalStart);
+    // A transport retry that leaked into a shape budget would re-ask a child that ANSWERED,
+    // the one thing the retry must never do. The logical call and the physical attempt are
+    // separate owners now, so this pins the read to the call module by NAME.
+    const modules = ["workflow-agent-call.ts", "workflow-agent-attempt.ts", "workflow-agent-contract.ts", "workflow-runtime.ts"]; // prettier-ignore
+    const sourceOf = (name: string): string =>
+      readFileSync(path.join(process.cwd(), "extensions", "workflows", "runtime", name), "utf8");
+    const logicalStart = sourceOf(modules[0]!)
+      .split("\n")
+      .findIndex((line) => line.includes("async function runAgentAttempt("));
+    expect(logicalStart, "expected the logical call to own runAgentAttempt").toBeGreaterThanOrEqual(0);
+    expect(sourceOf("workflow-agent-attempt.ts")).toContain("async function runPhysicalAgentAttempt(");
 
-    // The declared option is read exactly once, inside the logical call.
-    const optionReads = lines
-      .map((line, index) => ({ line, index }))
-      .filter((entry) => /\bopts\??\.attempts\b/u.test(entry.line));
-    expect(optionReads).toHaveLength(1);
-    expect(optionReads[0]!.index).toBeGreaterThan(logicalStart);
-    expect(optionReads[0]!.index).toBeLessThan(physicalStart);
+    // Read exactly once across every module of the agent call, inside the logical call.
+    const optionRead = /\bopts\??\.attempts\b/u;
+    const reads = modules.flatMap((name) =>
+      sourceOf(name)
+        .split("\n")
+        .flatMap((line, index) => (optionRead.test(line) ? [{ name, index }] : [])),
+    );
+    expect(reads).toEqual([{ name: modules[0], index: expect.any(Number) as number }]);
+    expect(reads[0]!.index).toBeGreaterThan(logicalStart);
 
     // The legacy text transport is gone from the runtime, not merely unused: a dormant
-    // second structured path is a path something will quietly fall back to.
+    // second structured path is a path something will quietly fall back to. Checked across
+    // all four modules, so the split cannot be where one of them comes back.
     for (const removed of [
       "SCHEMA_MAX_ATTEMPTS =",
       "function checkAgentSchema",
@@ -1716,7 +1714,9 @@ describe("agent attempts — one shaped call is one physical child", () => {
       // boundary"), where a source-string absence could never have shown that the option
       // was silently dropped instead.
     ]) {
-      expect(source).not.toContain(removed);
+      for (const name of modules) {
+        expect(sourceOf(name), `${removed} must stay deleted from ${name}`).not.toContain(removed);
+      }
     }
   });
 });

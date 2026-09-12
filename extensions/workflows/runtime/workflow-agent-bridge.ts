@@ -39,7 +39,7 @@ import {
   type ModelRolesState,
 } from "../../_shared/model/model-settings.js";
 import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
-import { workflowSlotKey, WORKFLOW_SHAPED_TRANSPORT_REFUSAL } from "./workflow-runtime.js";
+import { workflowSlotKey, WORKFLOW_SHAPED_TRANSPORT_REFUSAL } from "./workflow-agent-contract.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-live.js";
 import type {
   WorkflowAgentPreflight,
@@ -48,7 +48,7 @@ import type {
   WorkflowAgentResult,
   WorkflowUsage,
   WorkspaceMode,
-} from "./workflow-runtime.js";
+} from "./workflow-agent-contract.js";
 import { assertRepresentableTimeoutMs } from "./workflow-budget.js";
 import { scheduleLongTimeout } from "../../_shared/runtime/long-timer.js";
 import {

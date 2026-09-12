@@ -203,6 +203,15 @@ const PURE_MODULE_FORBIDDEN_BUILTINS: ReadonlySet<string> = new Set([
  * `workflow-groups.ts` (`parallel()`/`pipeline()`) are likewise absent and need no entry of
  * their own: the core value-imports both, and rule 7 walks the closure transitively, so the
  * `workflow-runtime.ts` entry already holds them to the same `node:fs`-free proof.
+ *
+ * The three owners of ONE agent call are in that same closure for the same reason:
+ * `workflow-agent-contract.ts` (the shared request/result/options vocabulary and the typed
+ * refusals), `workflow-agent-call.ts` (the logical call — ordinal, slot claim, canonical
+ * key, replay envelope, transport retry) and `workflow-agent-attempt.ts` (ONE physical
+ * child — invocation charge, `callId`, leaf permit, journal pair, evidence adoption). The
+ * core value-imports the call and the attempt, both value-import the contract, and
+ * `workflow-agent-bridge.ts` reads the contract directly rather than the core — so the host
+ * side of a call never pulls the DSL composition root in behind it.
  */
 const PURE_MODULES: readonly PureModuleEntry[] = [
   {
