@@ -360,8 +360,8 @@ describe("npm public package boundary", () => {
     //   W2 source literals · W3 artifact format · W6 workspace + workspace state
     //   W4 journal event format · W16 progress-render + agent-observer
     //   W15 source diagnostics/bindings/provenance/value-rules · W7 execution state + groups
-    //   W5 run snapshot reader
-    expect(dryRun.files).toHaveLength(282);
+    //   W5 run snapshot reader · W12 saved child
+    expect(dryRun.files).toHaveLength(283);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {

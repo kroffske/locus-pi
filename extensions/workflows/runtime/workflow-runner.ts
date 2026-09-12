@@ -49,8 +49,6 @@ import {
   WORKFLOW_NO_OPERATOR_HEADLESS_PRELUDE,
   WORKFLOW_NO_OPERATOR_PRELUDE,
   type WorkflowAgentResult,
-  type WorkflowSavedChildResult,
-  type WorkflowSharedExecutionState,
 } from "./workflow-runtime.js";
 import type { AgentExecutor } from "../../_shared/agent-runtime/agent-runner.js";
 import {
@@ -85,8 +83,6 @@ import {
 } from "./workflow-saved-name.js";
 import {
   assertResolvedWorkflowTargetBinding,
-  packagedWorkflowPath,
-  resolveOwnedWorkflowChild,
   resolveWorkflowTarget,
   WORKFLOW_ENTRY_SUFFIX,
   type ResolvedWorkflowTarget,
@@ -128,22 +124,16 @@ import {
   assertWorkflowRunName,
   assertFreshWorkflowOutputNamespace,
   assertFreshWorkflowOutputNamespacePath,
-  assertUniqueWorkflowItemKeys,
-  assertWorkflowItemKey,
   assertWorkflowRootLease,
-  commitWorkflowCompletedCheckpoint,
   ensureWorkflowWorkspaceFile,
   isLegacyWorkflowWorkspacePath,
   isWorkflowPathWithinRoot,
-  readWorkflowCompletedCheckpoint,
   referenceWorkflowPrimaryFile,
-  revalidateWorkflowPrimaryFile,
   releaseWorkflowRootLease,
   resolveWorkflowOutputDirectory,
   resolveWorkflowOutputDirectoryPath,
   resolveWorkflowOutputDirectoryForReuse,
   resolveNamedWorkflowWorkspacePath,
-  type WorkflowCheckpointIdentity,
   type WorkflowOutputDirectory,
   type WorkflowPrimaryFileReference,
   type WorkflowWorkspaceReuseBinding,
@@ -195,7 +185,18 @@ import {
   type WorkflowOperatorHandoffEnvelope,
 } from "./workflow-handoff.js";
 
+import {
+  SavedChildExecutionOwner,
+  type SavedChildLaunchRequest,
+  type WorkflowChildRunEvidence,
+  type WorkflowRunLineage,
+  type WorkflowRunnerCoordination,
+} from "./workflow-saved-child.js";
+
 export type { WorkflowScriptIdentity } from "./workflow-script-identity.js";
+// The saved-child owner moved out whole. Its public names stay importable here
+// so existing callers keep one import for a run and its child evidence.
+export type { WorkflowChildRunEvidence, WorkflowRunLineage } from "./workflow-saved-child.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -209,41 +210,6 @@ export interface WorkflowScriptModule {
     description?: string;
     identityCoverage?: "self-contained-static" | "entry-only";
   };
-}
-
-export interface WorkflowRunLineage {
-  rootRunId: string;
-  depth: 0 | 1;
-  parentRunId?: string;
-  parentItemKey?: string;
-}
-
-export interface WorkflowChildRunEvidence extends Omit<WorkflowSavedChildResult, "status"> {
-  status: "running" | "completed" | "skipped" | "awaiting_operator" | "cancelled" | "failed";
-  runDir?: string;
-  childScriptSha256: string;
-}
-
-interface ExpectedWorkflowChildSource {
-  canonicalPath: string;
-  scriptSha256: string;
-}
-
-interface WorkflowRunnerCoordination {
-  rootRunId: string;
-  storageRootRunId: string;
-  depth: 0 | 1;
-  parentRunId?: string;
-  parentItemKey?: string;
-  sharedExecution: WorkflowSharedExecutionState;
-  lease: WorkflowRootLease;
-  output: WorkflowOutputDirectory;
-  ancestry: readonly { sourcePath: string; scriptSha256: string }[];
-  budget: WorkflowBudget;
-  /** Run-level no-operator mode. Lives on coordination so a saved child can
-   *  neither drop nor weaken it: one run, one guarantee. */
-  noOperator?: true;
-  expectedChildSource?: ExpectedWorkflowChildSource;
 }
 
 const RUN_COORDINATION = Symbol("workflow-run-coordination");
@@ -396,133 +362,6 @@ export interface RunWorkflowScriptResult {
   /** What this run did about recorded-call replay. Absent only when the run
    *  failed before its script identity was established. */
   replay?: WorkflowReplayEnvelope;
-}
-
-interface SavedChildLifecycleOwner {
-  recordSkipped(checkpoint: {
-    childRunId: string;
-    primaryFile?: WorkflowPrimaryFileReference;
-  }): WorkflowSavedChildResult;
-  recordStarted(run: { runId: string; runDir: string }): void;
-  recordTerminal(
-    child: RunWorkflowScriptResult,
-    overrideStatus?: WorkflowChildRunEvidence["status"],
-  ): WorkflowChildRunEvidence;
-  recordThrownFailure(): void;
-}
-
-function savedChildResult(evidence: WorkflowChildRunEvidence): WorkflowSavedChildResult {
-  if (evidence.status !== "completed" && evidence.status !== "skipped") {
-    throw new Error(`saved child result cannot expose non-success status ${evidence.status}`);
-  }
-  return {
-    status: evidence.status,
-    key: evidence.key,
-    outputDir: evidence.outputDir,
-    ...(evidence.runId === undefined ? {} : { runId: evidence.runId }),
-    ...(evidence.sourceRunId === undefined ? {} : { sourceRunId: evidence.sourceRunId }),
-    ...(evidence.primaryFile === undefined ? {} : { primaryFile: evidence.primaryFile }),
-  };
-}
-
-/** One parent-owned source of truth for saved-child evidence and navigation lines. */
-function createSavedChildLifecycleOwner(input: {
-  key: string;
-  outputDir: string;
-  childScriptSha256: string;
-  childRuns: WorkflowChildRunEvidence[];
-  record: (message: string) => void;
-}): SavedChildLifecycleOwner {
-  let evidenceIndex: number | undefined;
-  let startedEvidence: WorkflowChildRunEvidence | undefined;
-
-  return {
-    recordSkipped(checkpoint) {
-      const evidence: WorkflowChildRunEvidence = {
-        status: "skipped",
-        key: input.key,
-        outputDir: input.outputDir,
-        sourceRunId: checkpoint.childRunId,
-        childScriptSha256: input.childScriptSha256,
-        ...(checkpoint.primaryFile === undefined ? {} : { primaryFile: checkpoint.primaryFile }),
-      };
-      input.childRuns.push(evidence);
-      input.record(
-        `[workflow:child-skip] key=${JSON.stringify(input.key)} sourceRunId=${checkpoint.childRunId} ` +
-          `childScriptSha256=${input.childScriptSha256}`,
-      );
-      return savedChildResult(evidence);
-    },
-
-    recordStarted(run) {
-      const evidence: WorkflowChildRunEvidence = {
-        status: "running",
-        key: input.key,
-        outputDir: input.outputDir,
-        runId: run.runId,
-        runDir: run.runDir,
-        childScriptSha256: input.childScriptSha256,
-      };
-      startedEvidence = evidence;
-      evidenceIndex = input.childRuns.push(evidence) - 1;
-      input.record(
-        `[workflow:child-start] key=${JSON.stringify(input.key)} runId=${run.runId} ` +
-          `childScriptSha256=${input.childScriptSha256}`,
-      );
-    },
-
-    recordTerminal(child, overrideStatus) {
-      const status = overrideStatus ?? child.disposition?.status ?? (child.ok ? "completed" : "failed");
-      const evidence: WorkflowChildRunEvidence = {
-        status,
-        key: input.key,
-        outputDir: input.outputDir,
-        runId: child.runId,
-        runDir: child.runDir,
-        childScriptSha256: input.childScriptSha256,
-        ...(child.primaryFile === undefined ? {} : { primaryFile: child.primaryFile }),
-      };
-      if (evidenceIndex === undefined) evidenceIndex = input.childRuns.push(evidence) - 1;
-      else input.childRuns[evidenceIndex] = evidence;
-      input.record(`[workflow:child-end] key=${JSON.stringify(input.key)} runId=${child.runId} status=${status}`);
-      return evidence;
-    },
-
-    recordThrownFailure() {
-      if (evidenceIndex === undefined || startedEvidence === undefined) return;
-      const evidence: WorkflowChildRunEvidence = { ...startedEvidence, status: "failed" };
-      input.childRuns[evidenceIndex] = evidence;
-      input.record(`[workflow:child-end] key=${JSON.stringify(input.key)} runId=${evidence.runId} status=failed`);
-    },
-  };
-}
-
-interface SavedChildExecutionOwnerOptions {
-  pi: ExtensionAPI;
-  ctx: ExtensionContext;
-  signal: AbortSignal;
-  projectRoot: string;
-  workingDirectory: string;
-  parentRunId: string;
-  parentTarget: ResolvedWorkflowTarget;
-  parentScriptSha256: string;
-  coordination: WorkflowRunnerCoordination;
-  childRuns: WorkflowChildRunEvidence[];
-  createExecutor?: RunWorkflowScriptOptions["createExecutor"];
-  resolveModel?: RunWorkflowScriptOptions["resolveModel"];
-  onEvent?: RunWorkflowScriptOptions["onEvent"];
-  record: (message: string) => void;
-}
-
-interface ValidatedSavedChildInvocation {
-  key: string;
-  items: readonly string[];
-}
-
-interface ResolvedSavedChildSource {
-  target: ResolvedWorkflowTarget;
-  path: string;
-  scriptSha256: string;
 }
 
 interface WorkflowResumeWorkspaceIdentity {
@@ -744,236 +583,6 @@ function assertWorkflowHandoffWorkspaceReuse(
     throw new Error("Workflow handoff source workspace identity changed");
   }
   return resolveWorkflowOutputDirectoryForReuse(projectRoot, binding, { create: false });
-}
-
-/** Owns validation, checkpoint reuse, and recursive execution for one root run. */
-class SavedChildExecutionOwner {
-  readonly invoke = async (
-    input: import("./workflow-runtime.js").WorkflowSavedChildInvocation,
-  ): Promise<WorkflowSavedChildResult> => {
-    const validated = this.validateInvocation(input);
-    const source = this.resolveSource(input);
-    const checkpointIdentity = {
-      parentScriptSha256: this.options.parentScriptSha256,
-      childScriptSha256: source.scriptSha256,
-      outputDir: this.options.coordination.output.identity,
-      itemKey: validated.key,
-    };
-    const lifecycle = createSavedChildLifecycleOwner({
-      key: validated.key,
-      outputDir: this.options.coordination.output.relativePath,
-      childScriptSha256: source.scriptSha256,
-      childRuns: this.options.childRuns,
-      record: this.options.record,
-    });
-    const skipped = this.reuseCheckpoint(checkpointIdentity, lifecycle, validated.key);
-    if (skipped !== undefined) return skipped;
-    const child = await this.runChild(input, validated, source, lifecycle);
-    if ((child.disposition?.status ?? (child.ok ? "completed" : "failed")) === "completed") {
-      try {
-        this.verifySourceAfterRun(source, child);
-      } catch (error) {
-        lifecycle.recordTerminal(child, "failed");
-        throw error;
-      }
-    }
-    const evidence = lifecycle.recordTerminal(child);
-    if (evidence.status !== "completed") {
-      throw new Error(
-        `saved child workflow ${JSON.stringify(source.target.ref)} ${evidence.status}: ${child.error ?? "no terminal detail"}`,
-      );
-    }
-    commitWorkflowCompletedCheckpoint(this.options.coordination.lease, {
-      ...checkpointIdentity,
-      childRunId: child.runId,
-      ...(child.primaryFile === undefined ? {} : { primaryFile: child.primaryFile }),
-    });
-    return savedChildResult(evidence);
-  };
-
-  private declaredKeys: readonly string[] | undefined;
-  private readonly invokedKeys = new Set<string>();
-
-  constructor(private readonly options: SavedChildExecutionOwnerOptions) {}
-
-  private resolveSource(input: import("./workflow-runtime.js").WorkflowSavedChildInvocation): ResolvedSavedChildSource {
-    const target: ResolvedWorkflowTarget =
-      input.child !== undefined
-        ? resolveOwnedWorkflowChild(
-            this.options.parentTarget,
-            input.child,
-            this.options.projectRoot,
-            this.options.workingDirectory,
-          )
-        : input.packageName === undefined
-          ? resolveWorkflowTarget(
-              {
-                ...(input.name === undefined ? {} : { name: input.name }),
-                ...(input.scriptPath === undefined ? {} : { scriptPath: input.scriptPath }),
-              },
-              this.options.projectRoot,
-              this.options.workingDirectory,
-            )
-          : {
-              kind: "name",
-              ref: input.packageName,
-              path: packagedWorkflowPath(input.packageName),
-              source: "package",
-            };
-    const sourcePath = realpathSync(target.path);
-    const scriptSha256 = sha256WorkflowBytes(readFileSync(sourcePath));
-    if (
-      this.options.coordination.ancestry.some(
-        (ancestor) => ancestor.sourcePath === sourcePath || ancestor.scriptSha256 === scriptSha256,
-      )
-    ) {
-      throw new Error(`saved workflow cycle detected for ${JSON.stringify(target.ref)}`);
-    }
-    return { target, path: sourcePath, scriptSha256 };
-  }
-
-  private reuseCheckpoint(
-    identity: WorkflowCheckpointIdentity,
-    lifecycle: SavedChildLifecycleOwner,
-    key: string,
-  ): WorkflowSavedChildResult | undefined {
-    const checkpoint = readWorkflowCompletedCheckpoint(this.options.coordination.lease, identity);
-    if (checkpoint === undefined) return undefined;
-    let primaryFile = checkpoint.primaryFile;
-    if (primaryFile !== undefined) {
-      try {
-        primaryFile = revalidateWorkflowPrimaryFile(this.options.coordination.output, primaryFile);
-      } catch (error) {
-        this.options.record(
-          `[workflow:checkpoint-stale] key=${JSON.stringify(key)} reason=${JSON.stringify(
-            error instanceof Error ? error.message : String(error),
-          )}`,
-        );
-        return undefined;
-      }
-    }
-    assertWorkflowRootLease(this.options.coordination.lease);
-    return lifecycle.recordSkipped({
-      ...checkpoint,
-      ...(primaryFile === undefined ? {} : { primaryFile }),
-    });
-  }
-
-  private async runChild(
-    input: import("./workflow-runtime.js").WorkflowSavedChildInvocation,
-    validated: ValidatedSavedChildInvocation,
-    source: ResolvedSavedChildSource,
-    lifecycle: SavedChildLifecycleOwner,
-  ): Promise<RunWorkflowScriptResult> {
-    const childCoordination: WorkflowRunnerCoordination = {
-      rootRunId: this.options.coordination.rootRunId,
-      storageRootRunId: this.options.coordination.storageRootRunId,
-      depth: 1,
-      parentRunId: this.options.parentRunId,
-      parentItemKey: validated.key,
-      sharedExecution: this.options.coordination.sharedExecution,
-      lease: this.options.coordination.lease,
-      output: this.options.coordination.output,
-      ancestry: [...this.options.coordination.ancestry, { sourcePath: source.path, scriptSha256: source.scriptSha256 }],
-      budget: this.options.coordination.budget,
-      ...(this.options.coordination.noOperator === undefined
-        ? {}
-        : { noOperator: this.options.coordination.noOperator }),
-      expectedChildSource: { canonicalPath: source.path, scriptSha256: source.scriptSha256 },
-    };
-    try {
-      return await runWorkflowScript({
-        pi: this.options.pi,
-        ctx: this.options.ctx,
-        signal: this.options.signal,
-        ...(source.target.kind === "name" ? { name: source.target.ref } : { scriptPath: source.target.ref }),
-        // packageName is the legacy exact-Package selector. Let the child
-        // source snapshot reject a newly introduced project shadow with the
-        // established source-change error instead of rebinding it.
-        ...(input.packageName === undefined ? { targetBinding: source.target } : {}),
-        ...(input.input === undefined ? {} : { input: input.input }),
-        items: validated.items,
-        outputDir: this.options.coordination.output.relativePath,
-        ...(this.options.createExecutor === undefined ? {} : { createExecutor: this.options.createExecutor }),
-        ...(this.options.resolveModel === undefined ? {} : { resolveModel: this.options.resolveModel }),
-        ...(this.options.onEvent === undefined ? {} : { onEvent: this.options.onEvent }),
-        onRunStart: lifecycle.recordStarted,
-        [RUN_COORDINATION]: childCoordination,
-      });
-    } catch (error) {
-      lifecycle.recordThrownFailure();
-      throw error;
-    }
-  }
-
-  private verifySourceAfterRun(source: ResolvedSavedChildSource, child: RunWorkflowScriptResult): void {
-    const sourcePath = realpathSync(source.target.path);
-    const scriptSha256 = sha256WorkflowBytes(readFileSync(sourcePath));
-    if (
-      child.scriptIdentity?.scriptSha256 !== source.scriptSha256 ||
-      sourcePath !== source.path ||
-      scriptSha256 !== source.scriptSha256
-    ) {
-      throw new Error(`saved child workflow source changed during execution: ${JSON.stringify(source.target.ref)}`);
-    }
-  }
-
-  private validateInvocation(
-    input: import("./workflow-runtime.js").WorkflowSavedChildInvocation,
-  ): ValidatedSavedChildInvocation {
-    if (this.options.coordination.depth >= 1) {
-      // Not a size or budget policy, and not a claim that deeper nesting is wrong:
-      // one shared scheduler, journal and budget ledger for nested saved runs is an
-      // open decision, and until it exists a second level would run outside the
-      // accounting this level is held to. The guard stays until that ledger lands.
-      throw new Error(
-        "saved child workflows may not invoke another saved workflow yet: nested saved runs stay closed " +
-          "until one shared scheduler, journal and explicit budget ledger covers them (pending decision)",
-      );
-    }
-    if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      throw new Error("invokeWorkflow requires one closed invocation object");
-    }
-    const allowed = new Set([
-      "child",
-      "name",
-      "scriptPath",
-      "packageName",
-      "input",
-      "items",
-      "key",
-      "keys",
-      "outputDir",
-    ]);
-    const unknown = Object.keys(input).find((key) => !allowed.has(key));
-    if (unknown !== undefined) throw new Error(`invokeWorkflow has no field ${JSON.stringify(unknown)}`);
-    const targetCount = [input.child, input.name, input.scriptPath, input.packageName].filter(
-      (value) => value !== undefined,
-    ).length;
-    if (targetCount !== 1) {
-      throw new Error("invokeWorkflow requires exactly one of child, name, scriptPath, or packageName");
-    }
-    assertWorkflowInput(input.input, "saved child input");
-    const items = snapshotWorkflowItems(input.items);
-    if (!Array.isArray(input.keys)) throw new Error("invokeWorkflow keys must be an array");
-    const keys = assertUniqueWorkflowItemKeys(input.keys);
-    if (this.declaredKeys === undefined) this.declaredKeys = keys;
-    else if (JSON.stringify(keys) !== JSON.stringify(this.declaredKeys)) {
-      throw new Error("invokeWorkflow keys must remain the same complete list for one parent run");
-    }
-    const key = assertWorkflowItemKey(input.key);
-    if (!keys.includes(key)) throw new Error(`invokeWorkflow key is not present in keys: ${JSON.stringify(key)}`);
-    if (this.invokedKeys.has(key)) {
-      throw new Error(`invokeWorkflow key was already used in this parent run: ${JSON.stringify(key)}`);
-    }
-    if (input.outputDir !== this.options.coordination.output.relativePath) {
-      throw new Error(
-        `invokeWorkflow outputDir must equal ${JSON.stringify(this.options.coordination.output.relativePath)}`,
-      );
-    }
-    this.invokedKeys.add(key);
-    return { key, items };
-  }
 }
 
 const MAX_PROJECTED_WORKFLOW_ARTIFACT_REFS = 20;
@@ -2320,9 +1929,6 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const agentRunner = createWorkflowAgentRunner(agentBridgeOptions);
   const preflightAgentRequests = createWorkflowAgentPreflight(agentBridgeOptions);
   const savedChildren = new SavedChildExecutionOwner({
-    pi: opts.pi,
-    ctx: opts.ctx,
-    signal: opts.signal,
     projectRoot,
     workingDirectory,
     parentRunId: runId,
@@ -2330,9 +1936,25 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     parentScriptSha256: scriptIdentity.scriptSha256,
     coordination: executionCoordination,
     childRuns,
-    ...(opts.createExecutor === undefined ? {} : { createExecutor: opts.createExecutor }),
-    ...(opts.resolveModel === undefined ? {} : { resolveModel: opts.resolveModel }),
-    ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
+    // Recursion is injected, so the child owner never imports this module and
+    // never names the coordination symbol: only this closure attaches it.
+    launchChild: (request: SavedChildLaunchRequest) =>
+      runWorkflowScript({
+        pi: opts.pi,
+        ctx: opts.ctx,
+        signal: opts.signal,
+        ...(request.name === undefined ? {} : { name: request.name }),
+        ...(request.scriptPath === undefined ? {} : { scriptPath: request.scriptPath }),
+        ...(request.targetBinding === undefined ? {} : { targetBinding: request.targetBinding }),
+        ...(request.input === undefined ? {} : { input: request.input }),
+        items: request.items,
+        outputDir: request.outputDir,
+        ...(opts.createExecutor === undefined ? {} : { createExecutor: opts.createExecutor }),
+        ...(opts.resolveModel === undefined ? {} : { resolveModel: opts.resolveModel }),
+        ...(opts.onEvent === undefined ? {} : { onEvent: opts.onEvent }),
+        onRunStart: request.onRunStart,
+        [RUN_COORDINATION]: request.coordination,
+      }),
     record: (message) => runtime!.recordRuntimeLog(message),
   });
   runtime = createWorkflowRuntime({
