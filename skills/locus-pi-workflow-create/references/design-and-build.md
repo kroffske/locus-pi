@@ -71,7 +71,7 @@ that Build must create; do not declare grandchildren or an implicit root.
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
-Budgets: <axis=value with a one-line reason, or none — undeclared axes are unbounded>
+Budgets: <axis=value with a one-line reason, or none — launch defaults apply; every other undeclared workflow budget axis is unbounded>
 Declared sizes: <each maxItems/minItems/maxLength/singleLine with its consumer, or none>
 File boundary: workflow source performs no file reads; name any child-owned source inspection
 Worst-case calls: <exact formula including saved children>

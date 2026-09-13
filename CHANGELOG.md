@@ -6,6 +6,12 @@ User-visible changes to the public package.
 
 ### Changed
 
+- The packaged workflows manifest and authoring guidance now state the mode-scoped
+  launch defaults consistently: every run defaults to `concurrency = 4`; headless
+  Pi `print`/`json` root launches additionally default to `totalAgents = 10_000`,
+  shared across fresh child attempts made by the root, saved children and Fusion;
+  TUI/RPC leaves `totalAgents` unbounded, as are all other undeclared workflow
+  budget axes. Runtime behavior is unchanged.
 - Workflow documentation now ships as a topical manual under `docs/workflows/`.
   Budgets, agent results, DSL, replay and recovery each have a named owner;
   workflow skills link to those pages and explain how to find them through an
