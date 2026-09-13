@@ -183,14 +183,11 @@ export interface RunWorkflowScriptOptions {
   /** Explicit conservative hard-crash admission; absent terminal result, identical serial source, no in-flight effects. */
   recoverInterrupted?: boolean;
   /**
-   * Per-run declaration of what this run may spend, axis by axis.
-   *
-   * An unstated axis is UNBOUNDED, not defaulted: nothing is armed and the run
-   * header prints the word. Only `concurrency` carries a package value (it queues
-   * work rather than stopping it), and raising that one is journalled, never quiet.
-   *
+   * Approved defaults: concurrency=4, plus totalAgents=10_000 for print/json roots.
+   * Other undeclared axes are unbounded. Applied values and raises are journaled.
+   * Saved children inherit the root budget without resolving defaults again.
    * The workflow tool and command launcher pass explicit operator-approved overrides.
-   * Workflow source cannot raise this shared execution-tree budget itself; four
+   * Workflow source cannot raise this shared execution-tree budget itself; three
    * per-call axes additionally have an author surface in `agent(prompt, opts)`.
    */
   budget?: Partial<WorkflowBudget>;
@@ -275,7 +272,10 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
   const workingDirectory = getWorkingDirectory(opts.ctx);
   const inheritedCoordination = opts[RUN_COORDINATION];
   let items: readonly string[];
-  const resolvedBudget = inheritedCoordination?.budget === undefined ? resolveWorkflowBudget(opts.budget) : undefined;
+  const resolvedBudget =
+    inheritedCoordination?.budget === undefined
+      ? resolveWorkflowBudget(opts.budget, isOneShotHostMode(opts.ctx))
+      : undefined;
   const budget = inheritedCoordination?.budget ?? resolvedBudget!.budget;
   const budgetRaises = resolvedBudget?.raises ?? [];
   let storageLocation: WorkflowRunLocation | undefined;

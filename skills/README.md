@@ -32,6 +32,39 @@ symlink target. `remove` has the same ownership check. The command snapshots
 managed links and provenance before mutation and rolls the whole selected host
 set back after an unexpected filesystem error.
 
+## Find the installed workflow documentation
+
+The [workflow manual](../docs/workflows/index.md) ships in the same npm package.
+Pi loads these skills through `package.json#pi.skills`. Codex and Claude Code may
+expose a managed directory symlink as the skill's location. Resolve the physical
+`SKILL.md` **before** following any package-relative link; then resolve
+`../../docs/workflows/index.md` from its parent directory. Do not use the caller's
+working directory or assume a global npm prefix. A copied skill folder without
+its package is not the supported installation; use the managed sync above.
+
+Given the actual skill location reported by the host:
+
+```bash
+realpath '<skill-location>/SKILL.md'
+```
+
+The portable Python equivalent also prints the manual's absolute entry path:
+
+```bash
+python3 - '<skill-location>/SKILL.md' <<'PYDOC'
+from pathlib import Path
+import sys
+skill = Path(sys.argv[1]).resolve(strict=True)
+manual = (skill.parent / "../../docs/workflows/index.md").resolve(strict=True)
+print(manual)
+PYDOC
+```
+
+This follows Pi's own packaging pattern: it [ships a docs directory](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/package.json)
+and its [system prompt supplies the absolute docs path](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/core/system-prompt.ts).
+That path identifies Pi's documentation; the physical skill identifies the Locus
+package and its version-matched manual.
+
 ## Model selection
 
 For an external Pi invocation, select the main Pi model and reasoning level on

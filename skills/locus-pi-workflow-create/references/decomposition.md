@@ -16,4 +16,4 @@ Replay of an identical recorded discovery call is allowed, and only the exact re
 
 Keep decomposition in the visible harness, not child `spawn_agent`/`task`, which remains unavailable. A supervisor here discovers bounded work units; it does not acquire an independent orchestration control plane.
 
-[Runnable decomposition example](../../../extensions/workflows/references/examples/decomposition.workflow.mjs). For author-owned keyed inventories use [execution controls](../../../extensions/workflows/references/execution-controls.md).
+[Runnable decomposition example](../../../extensions/workflows/references/examples/decomposition.workflow.mjs). For author-owned keyed inventories use [execution controls](../../../docs/workflows/dsl.md).

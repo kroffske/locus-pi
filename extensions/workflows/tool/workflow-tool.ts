@@ -59,7 +59,7 @@ import {
 } from "../runtime/workflow-run-layout.js";
 import {
   resolveWorkflowBudget,
-  formatWorkflowBudgetPrelude,
+  WORKFLOW_BUDGET_AXES,
   removedWorkflowBudgetKeyMessage,
   WORKFLOW_AGENT_MAX_TURNS,
 } from "../runtime/workflow-budget.js";
@@ -201,20 +201,20 @@ function workflowApprovalDetails(args: unknown, projectRoot: string): string[] {
   } else {
     workspace = `${WORKFLOW_WORKSPACES_STORAGE_PREFIX}<generated-run-name>`;
   }
+  const declaredBudget =
+    record.budget !== null && typeof record.budget === "object"
+      ? (record.budget as Parameters<typeof resolveWorkflowBudget>[0])
+      : undefined;
+  const resolvedBudget = declaredBudget && resolveWorkflowBudget(declaredBudget).budget;
   return [
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
     `Workflow workspace: ${workspace}`,
-    // Only an explicit declaration is approval-worthy; a run that declares nothing
-    // has nothing to approve here and its prelude already prints every axis as
-    // `unbounded` where the rest of the run evidence lives.
-    ...(record.budget !== null &&
-    typeof record.budget === "object" &&
-    Object.keys(record.budget as Record<string, unknown>).length > 0
+    ...(declaredBudget !== undefined && Object.keys(declaredBudget).length > 0
       ? [
-          formatWorkflowBudgetPrelude(
-            resolveWorkflowBudget(record.budget as Parameters<typeof resolveWorkflowBudget>[0]).budget,
-          ),
+          `Budget overrides: ${WORKFLOW_BUDGET_AXES.filter((axis) => declaredBudget?.[axis] !== undefined)
+            .map((axis) => `${axis}=${resolvedBudget?.[axis]}`)
+            .join(" ")}; other axes use launch defaults`,
         ]
       : []),
     ...(record.recoverInterrupted === true
@@ -269,7 +269,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       `packaged \`locus-pi-workflow-create\` skill: a raw request writes and reviews .locus-pi/workflows/<name>/<name>.design.md before writing exactly the ` +
       `design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses ` +
       `before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the ` +
-      `workflow. Substantive implementation defaults to adaptive slices with owner re-cutting and outcome-led briefs; fixed graphs are explicit alternatives. The contract is skills/locus-pi-workflow-create/SKILL.md → skills/locus-pi-workflow-create/references/source-boundary.md → extensions/workflows/REFERENCE.md.`,
+      `workflow. Substantive implementation defaults to adaptive slices with owner re-cutting and outcome-led briefs; fixed graphs are explicit alternatives. The contract is skills/locus-pi-workflow-create/SKILL.md → skills/locus-pi-workflow-create/references/source-boundary.md → docs/workflows/index.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",

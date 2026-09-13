@@ -10,6 +10,7 @@ const tempRoots: string[] = [];
 
 afterEach(() => {
   agentLiveStore.reset();
+  vi.restoreAllMocks();
   vi.resetModules();
   vi.doUnmock("@earendil-works/pi-coding-agent");
   vi.doUnmock("../../../../extensions/_shared/agent-runtime/agent-runner.js");
@@ -43,7 +44,7 @@ function tempRootWithTaskAgent(): string {
   return root;
 }
 
-function mockSdkResult(text: string): void {
+function mockSdkResult(text: string, turns = 1): void {
   vi.doMock("@earendil-works/pi-coding-agent", () => ({
     SessionManager: { create: () => ({ kind: "isolated-test-session" }) },
     DefaultResourceLoader: class {
@@ -65,7 +66,7 @@ function mockSdkResult(text: string): void {
             };
           },
           async prompt() {
-            listener?.({ type: "turn_start" });
+            for (let turn = 0; turn < turns; turn++) listener?.({ type: "turn_start" });
             listener?.({ type: "agent_end", willRetry: false });
           },
           getSessionStats() {
@@ -85,6 +86,19 @@ function mockSdkResult(text: string): void {
 }
 
 describe("agent task tool execution", () => {
+  it("allows more than five turns and arms exactly one hour for a standalone task", async () => {
+    mockSdkResult("done after six turns", 6);
+    const timer = vi.spyOn(globalThis, "setTimeout");
+    const { default: agents } = await import("../../../../extensions/agents/index.js");
+    const h = createHarness(tempRootWithTaskAgent(), { mode: "tui" });
+    agents(h.pi);
+    const result = await runTool(h, "spawn_agent", { task: "Complete six turns" });
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toContainEqual({ type: "text", text: "done after six turns" });
+    expect(timer.mock.calls.filter((call) => call[1] === 3_600_000)).toHaveLength(1);
+    expect(timer.mock.calls.some((call) => call[1] === 600_000)).toBe(false);
+  });
+
   it("streams the generated live agent name as soon as the child starts", async () => {
     mockSdkResult("done");
     const { default: agents } = await import("../../../../extensions/agents/index.js");

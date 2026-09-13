@@ -70,7 +70,7 @@ after the cause is resolved.
 
 An absent process with no child completion or terminal result is an unconfirmed
 call. Preserve its journal, replay, transcript and partial artifacts. Read the
-canonical [reconciliation path](../../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call)
+canonical [reconciliation path](../../../docs/workflows/recovery-and-continuation.md#reconcile-an-unconfirmed-call)
 before editing source: it requires assessing current effects and any reusable
 prerequisites. Direct interrupted recovery does not admit an unfinished child.
 
@@ -160,7 +160,7 @@ There is no package default: an undeclared `maxTurns` is unbounded. A completed
 call keeps the value its record was written with (a prefix recorded with
 `maxTurns: 20` keeps `maxTurns: 20`); changing every call to the new allowance
 would change their request keys and end reuse. Verify actual prefix reuse before
-resuming. The [runtime reference](../../../extensions/workflows/REFERENCE.md)
+resuming. The [runtime reference](../../../docs/workflows/index.md)
 owns the axis list and timer constraints.
 
 Ordinary narrative still uses plain text. A narrative report wrapped in a
@@ -187,4 +187,4 @@ Ordinary terminal resume, a real `awaiting_operator` continuation, and explicit 
 
 A larger legitimate work list is not a reason to erase completed agent work. Do not insert a new total-call cap and do not automatically raise an existing bound. Preserve user choices. Run-level operational changes and changes to one call's prompt, model or options have different identities; do not replace them with a blanket whole-source equality rule.
 
-Canonical owners: [runtime reference](../../../extensions/workflows/REFERENCE.md#continuing-a-repaired-workflow), [recovery and continuation](../../../extensions/workflows/references/recovery-and-continuation.md) and [execution controls](../../../extensions/workflows/references/execution-controls.md).
+Canonical owners: [runtime reference](../../../docs/workflows/replay.md#continuing-a-repaired-workflow), [recovery and continuation](../../../docs/workflows/recovery-and-continuation.md) and [execution controls](../../../docs/workflows/dsl.md).

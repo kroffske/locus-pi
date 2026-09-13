@@ -53,4 +53,4 @@ npm run check:workflow-source -- tests/manual/repair-continue-tui/repair-smoke.a
 ```
 
 Background on the mechanism: [Repair + Continue](../../../skills/locus-pi-workflow-create/references/repair-and-continue.md)
-and the runtime reference section [Continuing a repaired workflow](../../../extensions/workflows/REFERENCE.md#continuing-a-repaired-workflow).
+and the runtime reference section [Continuing a repaired workflow](../../../docs/workflows/replay.md#continuing-a-repaired-workflow).

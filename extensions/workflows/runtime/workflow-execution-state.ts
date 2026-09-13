@@ -166,8 +166,8 @@ function createAgentConcurrencyGate(maxConcurrentAgents: number): AgentConcurren
  *
  * Two of the three axes here are OPTIONAL and unbounded when absent: an undeclared
  * `maxTotalAgentInvocations` refuses nobody and an undeclared `runtimeMs` arms no
- * clock. Only the concurrency width has a package value, because it queues rather
- * than stops.
+ * clock. The launch resolver supplies the headless cap; this host-agnostic owner
+ * only defaults the queueing width.
  */
 export function createWorkflowSharedExecutionState(input: {
   maxConcurrentAgents?: number;

@@ -41,6 +41,14 @@ function toolHarness(): Harness {
 }
 
 describe("workflow tool: removed budget options", () => {
+  it("shows only declared budget overrides before the host policy is resolved", () => {
+    const h = toolHarness();
+    const details =
+      h.tools.get("workflow")!.formatApprovalDetails?.({ name: "live-smoke", budget: { turns: 7 } }) ?? [];
+    expect(details).toContain("Budget overrides: turns=7; other axes use launch defaults");
+    expect(String(details)).not.toContain("totalAgents=unbounded");
+  });
+
   it("names answerChars and the contract to declare instead", async () => {
     const result = await runTool(toolHarness(), "workflow", {
       name: "any",

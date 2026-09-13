@@ -5,6 +5,8 @@ description: Run, start, execute, launch, or resume an existing locus-pi workflo
 
 # Run a locus-pi workflow
 
+Resolve this `SKILL.md` to its physical file before following relative links; the installed [workflow manual](../../docs/workflows/index.md) is relative to that file, never the caller cwd (see [discovery](../README.md#find-the-installed-workflow-documentation)).
+
 Run an existing reviewed workflow through the host that already owns model,
 authentication, session, child-agent, and evidence lifecycle. Do not add a new
 workflow API wrapper, ask a parent model to call the tool, or import the workflow
@@ -18,7 +20,7 @@ one workflow file.
 
 Workflow not working → open `.locus-pi/logs/errors.jsonl` → follow the exact
 journal/result pointer → repair the responsible layer. Read the shared
-[error diagnostics and jq examples](../../extensions/workflows/references/error-diagnostics.md).
+[error diagnostics and jq examples](../../docs/workflows/error-diagnostics.md).
 Captured failures remain there even after success; successful review findings
 are not execution failures. If the index is unavailable, use the evidence path
 and warning in the failure message.
@@ -220,13 +222,14 @@ runtimeMs=unbounded timeoutMs=unbounded toolCalls=unbounded turns=unbounded`.
 `unbounded` means nobody declared that axis and nothing will stop the run on
 it; it is not an error, not a default to "fix", and not a hidden number.
 `/workflows status <runId>` and `runtime/result.json` (`budget`) repeat the same
-six values as `budget applied: …`. Only `concurrency` has a package value; it
-queues work rather than stopping it.
+six values as `budget applied: …`. The canonical [budget policy](../../docs/workflows/budgets.md#run-budget)
+owns all defaults, their launch-mode scope and explicit controls. Read that policy
+before choosing an override; do not infer a default from an example receipt.
 
 - `[workflow:budget] call raised <axis> above the applied default: default=…
 requested=…` — a per-call value above the run's; informational.
 - `[workflow:budget] stopped by budget <axis>: … Data received so far is kept.`
-  — the run reached an explicit budget. It is stopped, not wrong: every answer
+  — the run reached an applied budget. It is stopped, not wrong: every answer
   already received stays stored and readable, and no result becomes invalid.
   Continue through Repair + Continue with an explicit `budget` on the structured
   tool or an explicit per-call value, chosen by the operator; never raise it
@@ -416,10 +419,10 @@ requires identical bound source/input/budget, a healthy fully confirmed serial
 prefix, workspace ownership and the existing lease. A started but unconfirmed
 child, grouped execution, malformed result or missing binding requires operator
 review. Never fabricate `result.json` to bypass admission. See the canonical
-[recovery contract](../../extensions/workflows/references/recovery-and-continuation.md).
+[recovery contract](../../docs/workflows/recovery-and-continuation.md).
 
 For a dead process with a started-but-unconfirmed call, read the contract's
-[reconciliation path](../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
+[reconciliation path](../../docs/workflows/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
 The project owner reconciles current changes and effects first. When prerequisites
 remain suitable, ordinary resume from a verified terminal ancestor can reuse its
 prefix and run a repaired reconciliation stage fresh. Name that ancestor and the
@@ -431,10 +434,11 @@ technical uncertainty is not a missing repeat approval.
 The same structured tool accepts an optional `budget` object with the six axes
 (`concurrency`, `totalAgents`, `runtimeMs`, `timeoutMs`, `toolCalls`, `turns`),
 forwarded to the single runtime budget owner and shown in approval details.
-Unspecified axes stay unbounded; `answerChars` is refused by name because a run
-does not bound answer size. One explicit `timeoutMs` is the whole wall clock of
+The [budget policy](../../docs/workflows/budgets.md#run-budget) owns launch-mode
+defaults; other undeclared axes are unbounded. `answerChars` is refused by name
+because a run does not bound answer size. One explicit `timeoutMs` is the whole wall clock of
 a child attempt, operator waits included. Slash syntax above is unchanged. See
-[execution controls](../../extensions/workflows/references/execution-controls.md).
+[execution controls](../../docs/workflows/dsl.md).
 Semantic extra rounds and same-session output corrections are not crash replay.
 
 ## Large runs: observe and let the operator decide
@@ -443,11 +447,10 @@ Hundreds of small agents can be the intended workload: thirty-five work units
 with ten focused fields each legitimately require 350 agent calls. Do not infer
 from that count that the graph is wrong, and do not add a new total-agent limit,
 token-floor stop, estimated-cost gate or automatic graph reduction. Explicit
-operator budgets stay in force; there are no package fuses behind them, so an
-undeclared axis really is unbounded and a headless run keeps spending until the
-work ends or the operator stops it. Concurrency limits simultaneous work, not the
+operator budgets and the documented launch defaults stay in force. Do not add
+stops on other axes: they remain unbounded unless explicitly declared. Concurrency limits simultaneous work, not the
 total number of tasks: a `parallel(thunks, { concurrency, keys, title })` group
-runs at the run's effective `concurrency` (package value 4) unless the author
+runs at the run's effective `concurrency` unless the author
 passed a local width, and every child still passes the shared leaf gate. A
 chosen maximum number of refinement rounds is local to one design, not an
 economic policy for every workflow.
@@ -464,7 +467,7 @@ starts no child and is not charged, and the run report counts
 cross an explicit cap needs an explicit operator `budget` on the structured
 tool; never raise it automatically, and never reinterpret interrupted-recovery
 binding checks as ordinary-resume rules. See
-[execution controls](../../extensions/workflows/references/execution-controls.md).
+[execution controls](../../docs/workflows/dsl.md).
 Report actual reuse from the new result.
 
 When more work is discovered after a run stops, preserve the completed work

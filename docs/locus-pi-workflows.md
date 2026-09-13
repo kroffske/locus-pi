@@ -9,6 +9,8 @@ tags: [workflows, authoring]
 
 # Locus Pi workflows
 
+[Workflow documentation by topic](workflows/index.md) — open only the contract needed for the current task.
+
 Create a readable graph of agents for a real task. The default implementation style works through reviewable slices and revises the remaining plan after each slice. [Run and inspect workflows](workflows.md) covers commands, evidence and recovery.
 
 ## Create a workflow
@@ -73,8 +75,8 @@ Show the worst-case agent calls and explain if the task requires more.
 This is advice to the author. Locus Pi has no `workflowSizeGuideline` setting or
 `small`/`medium` runtime switch. The reviewed design records concrete slice and
 correction bounds; run budgets — time, agents, turns, tool calls — are a separate
-concern and are explicit-only, so an axis nobody declares is reported as
-`unbounded` rather than silently defaulted. Never remove required work to meet an
+concern governed by the [budget policy](workflows/budgets.md#run-budget).
+Only the listed launch defaults apply; other undeclared axes are `unbounded`. Never remove required work to meet an
 advisory size preference.
 
 Claude Code's **Dynamic workflow size** setting uses `workflowSizeGuideline`:
@@ -85,10 +87,9 @@ advisory agent count, not prompt length or reasoning effort. See the
 
 ### What the runtime does not bound
 
-Graph size is the author's choice. The size of an ANSWER is nobody's: the runtime
-never rejects or truncates what a child returned because of its length, and there is
-no package ceiling on answer characters, handoff items, or artifact bytes to design
-around. Two consequences for authoring:
+Use the [output acceptance principle](workflows/agent-results.md#the-principle)
+when designing results and the [budget policy](workflows/budgets.md#run-budget)
+when planning execution. Two practical consequences for authoring:
 
 - Shape a stage by asking for what you want — "one paragraph and three bullets", "one
   sentence naming the failing check". Do not write "keep this under 2000 characters"
@@ -99,7 +100,7 @@ around. Two consequences for authoring:
   told about it and can correct the value in the same session.
 
 The full statement, including how budgets and unsupported capabilities behave, is in
-[output acceptance](../extensions/workflows/references/output-acceptance.md#the-principle).
+[output acceptance](workflows/agent-results.md#the-principle).
 
 ### Use the references
 
@@ -140,7 +141,7 @@ returns immediately. The host starts a new run after a real answer and verifies
 its continuation artifacts. This is separate from manual cross-workflow handoff
 and from `invokeWorkflow`, which actually invokes a saved child with runtime-owned
 checkpoint semantics. Choose the mechanism needed by the design; never run a
-child across an unresolved owner decision. See [continuation](../extensions/workflows/references/recovery-and-continuation.md).
+child across an unresolved owner decision. See [continuation](workflows/recovery-and-continuation.md).
 
 ## Specification and implementation as independent workflows
 
@@ -193,10 +194,10 @@ global retry scheduler, status system or automatic cross-workflow launcher.
 
 The default uses outcome-led briefs for capable agents and substantive arbitration. Fixed graphs and procedural detail remain separate task-dependent choices; no model route is changed automatically.
 
-An opted-in `agent(prompt, { result: "report" })` returns the actual answer or eligible host-observed failure facts for the next agent. Preserve full reports from completed, failed, missing and skipped checks. An arbiter may reject a finding, request correction, retry a review or continue with a disclosed limitation when the requested outcome is evidenced. A failed check is never described as completed. Cancellation, global limits, uncertain shutdown and persistence failures remain fatal. See [the exact report contract](../extensions/workflows/REFERENCE.md#agent-execution-reports).
+An opted-in `agent(prompt, { result: "report" })` returns the actual answer or eligible host-observed failure facts for the next agent. Preserve full reports from completed, failed, missing and skipped checks. An arbiter may reject a finding, request correction, retry a review or continue with a disclosed limitation when the requested outcome is evidenced. A failed check is never described as completed. Cancellation, global limits, uncertain shutdown and persistence failures remain fatal. See [the exact report contract](workflows/agent-results.md#agent-execution-reports).
 
 Both adaptive references allow new residuals to return to the author after the second review. Teaching limits allow two corrections with fresh reviews; actual resource limits come from the task. On exhaustion they return the latest reviewed artifact and remaining criteria with a continuation action. Scripted-child regression tests prove graph routing and failure/replay boundaries; they do not certify model judgment, the user's feature or a previously stopped project run.
 
 ## Authoring references
 
-The installed [workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md) owns Design → review → Build. The [workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md) owns execution and recovery. Read the [source boundary](../skills/locus-pi-workflow-create/references/source-boundary.md) before building and the [exact source contract](../extensions/workflows/references/source-shape.md) when resolving checker diagnostics.
+The installed [workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md) owns Design → review → Build. The [workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md) owns execution and recovery. Read the [source boundary](../skills/locus-pi-workflow-create/references/source-boundary.md) before building and the [exact source contract](workflows/source-shape.md) when resolving checker diagnostics.

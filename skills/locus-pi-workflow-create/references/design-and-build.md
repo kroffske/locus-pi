@@ -148,7 +148,7 @@ copyable launch command `/workflows run <name>` (or the qualified child ref).
 
 For adaptive slices, name the queue owner, cumulative slice allowance, correction/recheck edge, scope-change exit and required final QA. Re-cut after each accepted slice, including the apparent last one, so an empty queue cannot hide unmet requirements. For fixed graphs, do not add a judge or semantic retry that the request did not require. For refinement, record the completion authority, immutable criteria, measured evidence, literal round cap, no-progress rule, exact handoff and terminal outcomes. For decomposition, record local concurrency, global budget and key ownership. Human continuation names two runs and a verified artifact handoff, never a suspended JavaScript stack.
 
-Budget values and failure dispositions belong to the [runtime reference](../../../extensions/workflows/REFERENCE.md); source provenance, mutation and permitted DSL methods belong to [source contract](../../../extensions/workflows/references/source-shape.md#machine-enforced-standard-source-shape). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
+Budget values and failure dispositions belong to the [runtime reference](../../../docs/workflows/index.md); source provenance, mutation and permitted DSL methods belong to [source contract](../../../docs/workflows/source-shape.md#machine-enforced-standard-source-shape). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
 
 A standard source check is not live proof. Report the exact checks executed and any unavailable native checker, dependency, host or model route. Do not report successful Build after a skipped gate.
 

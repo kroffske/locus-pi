@@ -10,6 +10,7 @@ const expectedDocs = [
   "locus-pi-workflows.md",
   "third-party-notices.md",
   "tui-design.md",
+  "workflows",
   "workflows.md",
 ];
 
@@ -57,6 +58,7 @@ describe("public documentation topology", () => {
       "docs/getting-started.md",
       "docs/extensions.md",
       "docs/workflows.md",
+      "docs/workflows/index.md",
       "docs/locus-pi-workflows.md",
       "docs/tui-design.md",
       "docs/architecture.md",

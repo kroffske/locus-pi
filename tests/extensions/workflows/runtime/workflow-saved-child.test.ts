@@ -590,7 +590,7 @@ export default (dsl, input) => dsl.agent(input);
     const root = project();
     writeWorkflow(root, "child", CHILD);
     writeWorkflow(root, "parent", PARENT);
-    const harness = createHarness(root);
+    const harness = createHarness(root, { mode: "json" });
     let calls = 0;
     const result = await runWorkflowScript({
       pi: harness.pi,
@@ -612,6 +612,7 @@ export default (dsl, input) => dsl.agent(input);
     expect(result.ok).toBe(false);
     expect(result.error).toContain("maxTotalAgentInvocations cap of 1");
     expect(calls).toBe(1);
+    expect(readWorkflowRunResult(root, result.childRuns![0]!.runId!)?.budget?.totalAgents).toBe(1);
   });
 
   it("shares one concurrency gate across parallel saved children", async () => {
