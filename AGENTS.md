@@ -34,4 +34,6 @@ The public contract is `package.json#pi.extensions`, extension manifests, co-loc
 - Do not widen extensions, workflows, dependencies, permissions, or the npm package without matching proof and documentation.
 - Cross-cutting guides live in `docs/`. Extension behavior lives in `extensions/<name>/README.md`.
 - Git is the public repository inventory. `package.json#files` is the separate npm-package boundary.
-- User-visible changes update `CHANGELOG.md#Unreleased`.
+- Ordinary task pull requests into `dev` do not require a `CHANGELOG.md` entry.
+  Record useful release notes while work accumulates; the `dev` to `main` release
+  pull request must update `CHANGELOG.md` with the matching dated release heading.
