@@ -59,7 +59,7 @@ import {
 } from "../runtime/workflow-run-layout.js";
 import {
   resolveWorkflowBudget,
-  formatWorkflowBudgetPrelude,
+  WORKFLOW_BUDGET_AXES,
   removedWorkflowBudgetKeyMessage,
   WORKFLOW_AGENT_MAX_TURNS,
 } from "../runtime/workflow-budget.js";
@@ -201,20 +201,20 @@ function workflowApprovalDetails(args: unknown, projectRoot: string): string[] {
   } else {
     workspace = `${WORKFLOW_WORKSPACES_STORAGE_PREFIX}<generated-run-name>`;
   }
+  const declaredBudget =
+    record.budget !== null && typeof record.budget === "object"
+      ? (record.budget as Parameters<typeof resolveWorkflowBudget>[0])
+      : undefined;
+  const resolvedBudget = declaredBudget && resolveWorkflowBudget(declaredBudget).budget;
   return [
     `Workflow: ${target}`,
     `Items: ${Array.isArray(record.items) ? String(record.items.length) : "none"}`,
     `Workflow workspace: ${workspace}`,
-    // Only an explicit declaration is approval-worthy; a run that declares nothing
-    // has nothing to approve here and its prelude already prints every axis as
-    // `unbounded` where the rest of the run evidence lives.
-    ...(record.budget !== null &&
-    typeof record.budget === "object" &&
-    Object.keys(record.budget as Record<string, unknown>).length > 0
+    ...(declaredBudget !== undefined && Object.keys(declaredBudget).length > 0
       ? [
-          formatWorkflowBudgetPrelude(
-            resolveWorkflowBudget(record.budget as Parameters<typeof resolveWorkflowBudget>[0]).budget,
-          ),
+          `Budget overrides: ${WORKFLOW_BUDGET_AXES.filter((axis) => declaredBudget?.[axis] !== undefined)
+            .map((axis) => `${axis}=${resolvedBudget?.[axis]}`)
+            .join(" ")}; other axes use launch defaults`,
         ]
       : []),
     ...(record.recoverInterrupted === true

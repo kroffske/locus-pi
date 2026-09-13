@@ -255,9 +255,8 @@ ${authoring[1] ?? ""}
     expect(authoring).toContain("Markdown/table/report renderers");
     expect(authoring).toContain("raw `schema`");
     expect(manual).toContain("dsl.items()");
-    // The manual owns the axis list, and it owns the fact that five of the six carry
-    // no package value at all.
-    expect(manual).toContain("none — unbounded");
+    expect(manual).toContain("## Run budget");
+    expect(manual).toContain("No additional axis acquires a default without a separate policy decision.");
     expect(manual).toContain("output-acceptance.md");
     expect(manual).toContain("execution-controls.md");
     expect(manual).toContain("recovery-and-continuation.md");
@@ -296,15 +295,18 @@ ${authoring[1] ?? ""}
   it("keeps the surviving runtime defaults in the runtime owner, not the router", () => {
     const manual = source("extensions/workflows/REFERENCE.md");
     expect(manual).toContain("MAX_DAGS_IN_SCOPE");
-    // The execution-budget numbers are no longer among the surviving defaults: the
-    // manual must say the axes are unbounded rather than reprint a value the code
-    // does not apply. `concurrency` is the single exception and keeps its number.
-    expect(manual).toMatch(/\| `concurrency` \| 4 attempts at once/u);
-    expect(manual).toMatch(/an axis nobody declared is UNBOUNDED/iu);
-    expect(manual).not.toMatch(/24-hour (?:emergency|new-child)/u);
-    expect(manual).not.toMatch(/1,000 turns per child attempt/u);
-    // One deadline reaches the host, so there is no second SDK-side backstop to describe.
-    expect(manual).toMatch(/reaches the SDK host unchanged/u);
+    const policy = manual.split("## Run budget\n")[1]?.split("\n---\n")[0] ?? "";
+    expect(policy).toMatch(/Workflow `concurrency`\s*\| 4\s*\|/u);
+    expect(policy).toMatch(/Workflow `totalAgents`\s*\| \*\*10,000 in headless; unbounded in TUI\/RPC\*\*/u);
+    expect(policy).toMatch(/Standalone task runtime\s*\| `runtimeMs = 3_600_000`/u);
+    expect(policy).toMatch(/Standalone task turns\/tools\s*\| Unbounded/u);
+    for (const axis of ["runtimeMs", "timeoutMs", "toolCalls", "turns"]) {
+      const row = policy.split("\n").find((line) => line.includes(`Workflow \`${axis}\``));
+      expect(row, axis).toMatch(/\| Unbounded\s*\|/u);
+    }
+    expect(policy).toContain("No multiplication by turns");
+    expect(policy).toContain("one wall-clock deadline per physical child attempt");
+    expect(manual).not.toMatch(/24-hour (?:emergency|new-child)|1,000 turns per child attempt/u);
     expect(source("skills/locus-pi-workflow-create/SKILL.md")).not.toContain("10,000");
   });
 
@@ -313,14 +315,13 @@ ${authoring[1] ?? ""}
     // may be. A manual that still printed those numbers would be the last place an author
     // could learn a rule the code no longer has.
     const manual = source("extensions/workflows/REFERENCE.md");
-    expect(manual).not.toMatch(/maxAnswerChars|SCHEMA_MAX_ATTEMPTS/u);
+    expect(manual).not.toContain("SCHEMA_MAX_ATTEMPTS");
     expect(manual).not.toMatch(/500,000\s+(?:answer\s+)?characters/u);
-    // `maxItemChars` may still appear, but only as a name the runtime refuses — never as
-    // an option with a default an author could copy.
-    for (const mention of manual.match(/.{0,60}maxItemChars.{0,40}/gu) ?? []) {
+    // Removed names remain searchable, but every mention identifies their refusal.
+    for (const mention of manual.split("\n").filter((line) => /maxItemChars|maxAnswerChars/u.test(line))) {
       expect(mention).toContain("refused by name");
     }
-    expect(manual).toMatch(/six axes/u);
+    expect(manual).toMatch(/all six resolved axes/u);
     expect(manual).toContain("`maxItems` may be omitted entirely");
   });
 

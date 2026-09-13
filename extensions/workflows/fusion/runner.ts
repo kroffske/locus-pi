@@ -2,12 +2,16 @@
 
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory, isOneShotHostMode } from "../../_shared/host/pi-api.js";
 import type { WorkflowAgentBridgeOptions } from "../runtime/workflow-agent-bridge.js";
 import { createWorkflowAgentPreflight, createWorkflowAgentRunner } from "../runtime/workflow-agent-bridge.js";
 import { workflowArtifactRef } from "../runtime/workflow-artifact-format.js";
 import { createWorkflowArtifactStore, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
-import { formatWorkflowBudgetPrelude, resolveWorkflowBudget } from "../runtime/workflow-budget.js";
+import {
+  formatWorkflowBudgetPrelude,
+  resolveWorkflowBudget,
+  workflowBudgetEnvelope,
+} from "../runtime/workflow-budget.js";
 import { claimNewWorkflowRun } from "../runtime/workflow-journal.js";
 import {
   acquireWorkflowRootLease,
@@ -32,14 +36,6 @@ import {
   type WorkflowFusionMode,
 } from "../runtime/workflow-fusion.js";
 import { createWorkflowRuntime, type WorkflowJournalLine } from "../runtime/workflow-runtime.js";
-
-/**
- * A direct `/fusion` declares no budget, so every stop axis is unbounded and only
- * the queueing width applies. The prelude prints all six axes, five of them as
- * `unbounded`, which is the point: an operator sees that nothing will stop this run
- * on time, turns, tool calls or fan-out instead of inheriting numbers nobody chose.
- */
-const FUSION_BUDGET = resolveWorkflowBudget().budget;
 
 export interface DirectFusionRunOptions {
   pi: ExtensionAPI;
@@ -71,6 +67,7 @@ export interface DirectFusionRunResult {
 }
 
 export async function runDirectFusion(options: DirectFusionRunOptions): Promise<DirectFusionRunResult> {
+  const budget = resolveWorkflowBudget(undefined, isOneShotHostMode(options.ctx)).budget;
   const projectRoot = getProjectRoot(options.ctx);
   const workingDirectory = getWorkingDirectory(options.ctx);
   const {
@@ -83,7 +80,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     runId: mintedRunId,
     kind: "log",
     source: "runtime",
-    message: formatWorkflowBudgetPrelude(FUSION_BUDGET),
+    message: formatWorkflowBudgetPrelude(budget),
   }));
   options.onEvent?.(prelude);
 
@@ -107,7 +104,8 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     preflightAgentRequests: createWorkflowAgentPreflight(bridgeOptions),
     artifactPorts: artifactStore,
     journal: journalSink,
-    maxConcurrentAgents: FUSION_BUDGET.concurrency,
+    maxConcurrentAgents: budget.concurrency,
+    ...(budget.totalAgents === undefined ? {} : { maxTotalAgentInvocations: budget.totalAgents }),
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
   });
   const workspaceLease = acquireWorkflowRootLease({ projectRoot, output: workspace, rootRunId: runId });
@@ -189,7 +187,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
       result: prepared,
       ...(finalError === undefined ? {} : { error: finalError }),
       journal,
-      budget: { applied: FUSION_BUDGET, peakConcurrency: runtime.peakAgentConcurrency() },
+      budget: { applied: budget, peakConcurrency: runtime.peakAgentConcurrency() },
     },
     artifactStore,
   );
@@ -222,6 +220,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     journal,
     ...(artifactRefs.length === 0 ? {} : { artifactRefs }),
     resultPersistence: intendedPersistence,
+    budget: workflowBudgetEnvelope(budget),
   });
   const persistenceError = resultPersistence.ok ? undefined : resultPersistence.message;
   const returnedError = finalError ?? persistenceError;

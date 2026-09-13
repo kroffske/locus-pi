@@ -18,6 +18,9 @@
 
 ## Contract and limits
 
+Standalone task defaults and workflow constraints are listed together in the
+[budget policy](../workflows/REFERENCE.md#run-budget).
+
 - Unknown agents, unavailable SDK support, cancellation, failure, blocked execution, and empty answers return explicit errors.
 - Direct child-to-child delegation is blocked by removing `spawn_agent` from child sessions.
 - Explicit native `readOnly` profiles are narrowed by the Pi host adapter. Workflow children use the full tool surface. External Claude Code repository-agent profiles own a separate CLI tool loop and must expose full tools; a reviewer role alone must not remove shell/git or report writing.

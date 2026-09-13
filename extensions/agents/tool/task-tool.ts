@@ -16,8 +16,7 @@ import { EmptyAgentToolCallComponent, renderAgentToolResultCard } from "./agent-
 import { refreshAgents, resolveAgentSelection, TaskParams } from "../catalog/catalog.js";
 import { AGENTS_WIDGET_KEY } from "../operator/operator-surface.js";
 import {
-  INTERACTIVE_AGENT_MAX_TURNS,
-  INTERACTIVE_AGENT_TIMEOUT_MS,
+  INTERACTIVE_AGENT_RUNTIME_MS,
   nextAgentRunSequence,
   resolveAgentTitle,
   runAgentLiveTask,
@@ -128,8 +127,7 @@ async function runTaskTool(
       task,
       approvalTier: "allow",
       liveModel,
-      maxTurns: INTERACTIVE_AGENT_MAX_TURNS,
-      childTimeoutMs: INTERACTIVE_AGENT_TIMEOUT_MS,
+      childTimeoutMs: INTERACTIVE_AGENT_RUNTIME_MS,
       onStarted: (line: string) =>
         update({
           content: [{ type: "text", text: line }],

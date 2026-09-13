@@ -17,7 +17,8 @@ Reserve `choice` for routing and `handoffs` for discovered work
 units, sequential or independent. Do not wrap a report in a singleton list or guess a response-length cap.
 An author-selected bound must come from an explicit user requirement, actual
 consumer contract or measured failure. The runtime adds no size policy of its
-own and no default budget: an undeclared budget axis is unbounded.
+own. Use the canonical [budget policy](../../../extensions/workflows/REFERENCE.md#run-budget)
+for approved launch defaults; other undeclared axes stay unbounded.
 
 ```js
 export const meta = {

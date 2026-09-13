@@ -10,6 +10,7 @@
  */
 import assert from "node:assert/strict";
 import { it } from "vitest";
+import { resolveWorkflowBudget } from "../../../../extensions/workflows/runtime/workflow-budget.js";
 import { createWorkflowRuntime } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import {
   createWorkflowReplayController,
@@ -43,6 +44,7 @@ it("recorded adaptive prefix replays without repeating confirmed worker side eff
     });
     const resumed = createWorkflowRuntime({
       runId: "resume",
+      maxTotalAgentInvocations: resolveWorkflowBudget(undefined, true).budget.totalAgents!,
       replay,
       agentRunner: async (req) => {
         effects += 1;

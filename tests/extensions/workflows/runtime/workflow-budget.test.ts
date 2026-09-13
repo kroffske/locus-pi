@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   DEFAULT_WORKFLOW_CONCURRENCY,
+  DEFAULT_HEADLESS_WORKFLOW_TOTAL_AGENTS,
   WORKFLOW_BUDGET_AXES,
   WORKFLOW_BUDGET_UNBOUNDED,
   formatWorkflowBudgetPrelude,
@@ -14,6 +15,7 @@ import {
   type WorkflowBudget,
 } from "../../../../extensions/workflows/runtime/workflow-budget.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { workflowJournalFile } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
   WorkflowRunDeadlineError,
@@ -24,23 +26,31 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../../test-harness.js";
 
-/**
- * The execution-budget contract after the defaults were removed.
- *
- * The rule under test is one sentence: a budget axis nobody declared is unbounded,
- * printed as the word `unbounded`, and arms nothing. The one exception is
- * `concurrency`, which queues work instead of stopping it and therefore keeps a
- * package value. These are owner-approved decisions, so they are asserted verbatim:
- * re-introducing a default has to break a test and be re-decided, not ride along in
- * a refactor.
- */
+/** Approved launch defaults and explicit overrides, checked through persisted evidence. */
 
 describe("the applied budget", () => {
-  it("declares nothing but the queueing width when the launch declares nothing", () => {
-    // Five stop axes and no numbers among them. A package default here would be a
-    // spend decision taken by nobody, on money that is not this package's.
+  it("defaults only the queueing width outside headless mode", () => {
     expect(resolveWorkflowBudget().budget).toEqual({ concurrency: DEFAULT_WORKFLOW_CONCURRENCY });
     expect(DEFAULT_WORKFLOW_CONCURRENCY).toBe(4);
+  });
+
+  it("defaults only the fresh-child allowance in headless mode", () => {
+    expect(DEFAULT_HEADLESS_WORKFLOW_TOTAL_AGENTS).toBe(10_000);
+    expect(resolveWorkflowBudget(undefined, true)).toEqual({
+      budget: { concurrency: 4, totalAgents: 10_000 },
+      raises: [],
+    });
+    expect(
+      resolveWorkflowBudget({ totalAgents: undefined } as unknown as Partial<WorkflowBudget>, true).budget.totalAgents,
+    ).toBe(10_000);
+    expect(resolveWorkflowBudget({ totalAgents: 2 }, true)).toEqual({
+      budget: { concurrency: 4, totalAgents: 2 },
+      raises: [],
+    });
+    expect(resolveWorkflowBudget({ totalAgents: 20_000 }, true)).toEqual({
+      budget: { concurrency: 4, totalAgents: 20_000 },
+      raises: [{ axis: "totalAgents", applied: 10_000, requested: 20_000 }],
+    });
   });
 
   it("names every axis exactly once in WORKFLOW_BUDGET_AXES", () => {
@@ -51,8 +61,6 @@ describe("the applied budget", () => {
   });
 
   it("prints an undeclared axis as one word rather than omitting it", () => {
-    // Omission and "nobody set this" must not look the same. The envelope is what a
-    // resume, a report or another tool reads back out of `result.json`.
     expect(workflowBudgetEnvelope(resolveWorkflowBudget().budget)).toEqual({
       concurrency: 4,
       totalAgents: WORKFLOW_BUDGET_UNBOUNDED,
@@ -72,23 +80,18 @@ describe("resolveWorkflowBudget", () => {
   });
 
   it("treats an explicit value on an unbounded axis as a narrowing, never a raise", () => {
-    // There is no default to exceed: going from "nothing stops this" to a finite
-    // number can only tighten the run, however large the number is.
     const resolved = resolveWorkflowBudget({ runtimeMs: 172_800_000, turns: 10_000 });
     expect(resolved.raises).toEqual([]);
     expect(resolved.budget.runtimeMs).toBe(172_800_000);
   });
 
-  it("still records a raise on the one axis that has a package value", () => {
+  it("records an explicit raise of the concurrency default", () => {
     const resolved = resolveWorkflowBudget({ concurrency: 16 });
     expect(resolved.budget.concurrency).toBe(16);
     expect(resolved.raises).toEqual([{ axis: "concurrency", applied: 4, requested: 16 }]);
   });
 
   it("accepts a deadline far longer than one Node timer instead of refusing it", () => {
-    // 48 hours. The former ceiling existed only because a single setTimeout clamps;
-    // a long wait is now a chain of representable ones, so the operator gets the
-    // deadline they asked for.
     const fortyEightHours = 48 * 60 * 60 * 1000;
     expect(resolveWorkflowBudget({ timeoutMs: fortyEightHours }).budget.timeoutMs).toBe(fortyEightHours);
     expect(() => resolveWorkflowBudget({ turns: 1.5 })).toThrow(/positive safe integer/u);
@@ -101,9 +104,6 @@ describe("resolveWorkflowBudget", () => {
   });
 
   it("names the option it replaced instead of silently dropping the bound it carries", () => {
-    // `RunWorkflowScriptOptions.maxTotalAgentInvocations` became `budget.totalAgents`.
-    // TypeScript catches the old spelling on a literal; a JS embedder would have had
-    // its explicit cap dropped with nothing said.
     expect(() => resolveWorkflowBudget({ maxTotalAgentInvocations: 5 } as unknown as Partial<WorkflowBudget>)).toThrow(
       /workflow budget option maxTotalAgentInvocations was removed; use budget\.totalAgents instead/u,
     );
@@ -116,8 +116,6 @@ describe("resolveWorkflowBudget", () => {
   });
 
   it("still accepts an unknown key that states nothing, so a spread-built override survives", () => {
-    // `undefined` asks for no bound at all — the same rule the axes follow — so it
-    // cannot be a silently dropped limit and must not fail a legitimate spread.
     const resolved = resolveWorkflowBudget({
       turns: 2,
       somethingElse: undefined,
@@ -129,8 +127,6 @@ describe("resolveWorkflowBudget", () => {
 
 describe("budget journal text", () => {
   it("prints all six axes, undeclared ones included, in one header line", () => {
-    // The whole headless-visibility guarantee is this line: an operator with no UI
-    // reads what will and will not stop their run without opening anything else.
     const line = formatWorkflowBudgetPrelude(resolveWorkflowBudget({ totalAgents: 2 }).budget);
     expect(line).toContain("concurrency=4");
     expect(line).toContain("totalAgents=2");
@@ -147,10 +143,6 @@ describe("budget journal text", () => {
     expect(line).toContain("call");
   });
 });
-
-// ---------------------------------------------------------------------------
-// W2 — the runner applies the contract to a run that declares nothing
-// ---------------------------------------------------------------------------
 
 const roots: string[] = [];
 
@@ -183,15 +175,14 @@ interface ChildObservation {
   request: AgentRunRequest;
 }
 
-/**
- * Run a saved workflow with a scripted child, capturing what each child was
- * actually bounded by. `onEnter`/`onExit` let a case observe overlap.
- */
+/** Scripted execution captures child bounds; callbacks observe concurrency. */
 async function runSaved(
   root: string,
   name: string,
   options: {
     budget?: Partial<WorkflowBudget>;
+    mode?: "tui" | "rpc" | "print" | "json";
+    noOperator?: true;
     input?: string;
     answer?: (request: AgentRunRequest) => string;
     onEnter?: () => void;
@@ -199,7 +190,10 @@ async function runSaved(
     hold?: () => Promise<void>;
   } = {},
 ) {
-  const harness = createHarness(root, { sessionId: `budget-${name}` });
+  const harness = createHarness(root, {
+    sessionId: `budget-${name}`,
+    ...(options.mode === undefined ? {} : { mode: options.mode }),
+  });
   const children: ChildObservation[] = [];
   const createExecutor = (factory: { maxToolCalls?: number; childTimeoutMs?: number }): AgentExecutor => ({
     async run(request: AgentRunRequest) {
@@ -223,21 +217,14 @@ async function runSaved(
     signal: new AbortController().signal,
     name,
     createExecutor,
+    ...(options.noOperator === undefined ? {} : { noOperator: options.noOperator }),
     ...(options.budget !== undefined ? { budget: options.budget } : {}),
     ...(options.input !== undefined ? { input: options.input } : {}),
   });
   return { result, children };
 }
 
-/**
- * The run's append-only journal FILE, not the in-memory mirror `result.journal`
- * returns.
- *
- * An audit record that exists only in the object handed back to the caller is not
- * an audit record: the operator who reads a raise weeks later opens
- * `journal.ndjson`. Every raise assertion below is made against this, so a
- * regression that emitted the line into the mirror alone would fail.
- */
+/** Read durable evidence, independently of the in-memory result journal. */
 function persistedJournal(runDir: string): WorkflowJournalLine[] {
   return readFileSync(workflowJournalFile(runDir), "utf8")
     .split("\n")
@@ -285,6 +272,43 @@ export default async function runWorkflow(dsl) {
 `;
 
 describe("the runner applies the budget contract", () => {
+  it.each(["print", "json", "tui", "rpc"] as const)(
+    "persists the applied %s host policy without child limits",
+    async (mode) => {
+      const root = scratchProject();
+      saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+      const { result, children } = await runSaved(root, "no-limits", { mode, noOperator: true });
+      expect(result.ok, result.error).toBe(true);
+      const cap = mode === "print" || mode === "json" ? 10_000 : "unbounded";
+      expect(persistedJournal(result.runDir)[0]?.message).toContain(`totalAgents=${cap}`);
+      const stored = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8"));
+      expect(stored.budget).toEqual({
+        concurrency: 4,
+        totalAgents: cap,
+        runtimeMs: "unbounded",
+        timeoutMs: "unbounded",
+        toolCalls: "unbounded",
+        turns: "unbounded",
+      });
+      expect(children).toHaveLength(1);
+      expect(children[0]?.factory.childTimeoutMs).toBeUndefined();
+      expect(children[0]?.factory.maxToolCalls).toBeUndefined();
+      expect(children[0]?.request.maxTurns).toBeUndefined();
+    },
+  );
+
+  it("journals an explicit headless raise over the default", async () => {
+    const root = scratchProject();
+    saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+    const { result } = await runSaved(root, "no-limits", { mode: "print", budget: { totalAgents: 20_000 } });
+    expect(result.ok, result.error).toBe(true);
+    const messages = persistedJournal(result.runDir)
+      .map((line) => line.message)
+      .join("\n");
+    expect(messages).toContain("totalAgents=20000");
+    expect(messages).toContain("run raised totalAgents above the applied default: default=10000 requested=20000");
+  });
+
   it("runs 201 children when nobody declared a cap, because there is no cap", async () => {
     const root = scratchProject();
     saveWorkflow(root, "atomic-decomposition", ATOMIC_DECOMPOSITION_WORKFLOW);
@@ -295,21 +319,6 @@ describe("the runner applies the budget contract", () => {
     expect(result.result).toEqual({ calls: 201 });
     expect(children).toHaveLength(201);
   }, 30_000);
-
-  it("arms no per-child fuse at all for a script that declares nothing", async () => {
-    const root = scratchProject();
-    saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
-
-    const { result, children } = await runSaved(root, "no-limits");
-
-    expect(result.ok, result.error).toBe(true);
-    expect(children).toHaveLength(1);
-    // Nobody declared a tool-call budget or a wall clock, so the host is handed
-    // neither. A package number here would be a limit its author never saw.
-    expect(children[0]?.factory.maxToolCalls).toBeUndefined();
-    expect(children[0]?.factory.childTimeoutMs).toBeUndefined();
-    expect(children[0]?.request.maxTurns).toBeUndefined();
-  });
 
   it("runs a three-child chain with no budgets declared and prints six axes in the header", async () => {
     const root = scratchProject();
@@ -353,7 +362,7 @@ export default async function runWorkflow(dsl) {
 `,
     );
 
-    const { result, children } = await runSaved(root, "three-children", { budget: { totalAgents: 2 } });
+    const { result, children } = await runSaved(root, "three-children", { mode: "json", budget: { totalAgents: 2 } });
 
     expect(result.ok).toBe(false);
     // Two children ran; the third never reached the child runner, so no work was
@@ -435,12 +444,7 @@ export default async function runWorkflow(dsl) {
     const root = scratchProject();
     saveWorkflow(root, "loop", LOOP_WORKFLOW);
 
-    // Each child holds for 30 ms against a 1 ms run budget, so the run cannot reach
-    // the script's fiftieth call. No injected clock reaches the runner, so this is
-    // the wiring proof the unit cases above cannot give. WHICH call is refused
-    // first is deliberately not asserted: on a loaded machine the module import
-    // alone can outlast a 1 ms budget, and pinning the ordinal would make the
-    // wiring proof a timing bet.
+    // Import may itself exceed 1 ms; assert a stop, not a timing-dependent ordinal.
     const { result, children } = await runSaved(root, "loop", {
       budget: { runtimeMs: 1 },
       hold: () => new Promise<void>((resolve) => setTimeout(resolve, 30)),
@@ -463,9 +467,7 @@ export default async function runWorkflow(dsl) {
     for (const axis of WORKFLOW_BUDGET_AXES) {
       expect(prelude?.message).toContain(`${axis}=${String(applied[axis] ?? WORKFLOW_BUDGET_UNBOUNDED)}`);
     }
-    // A run that declares nothing raises nothing.
     expect(result.journal.filter((line) => line.message?.includes("raised"))).toEqual([]);
-    // And the same line is on disk, first, where an operator would look for it.
     expect(persistedJournal(result.runDir)[0]?.message).toBe(prelude?.message);
   });
 
@@ -473,9 +475,7 @@ export default async function runWorkflow(dsl) {
     const root = scratchProject();
     saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
 
-    // `concurrency` is the only axis with a package value left, so it is the only
-    // axis a run-level declaration can RAISE rather than narrow. The explicit
-    // runtimeMs alongside it tightens an unbounded axis and stays silent.
+    // TUI has only a concurrency default; explicit runtimeMs narrows silently.
     const { result } = await runSaved(root, "no-limits", {
       budget: { concurrency: 8, runtimeMs: 60_000 },
     });

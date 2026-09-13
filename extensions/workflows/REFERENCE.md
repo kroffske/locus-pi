@@ -2267,102 +2267,78 @@ absolute path in a message is a replay defect, not a cosmetic one.
 
 ## Run budget
 
-A workflow run is bounded on six axes, and **none of them has a package default**.
-A budget stops spending, and spending is the author's or the operator's money, so
-an axis nobody declared is UNBOUNDED: no timer is armed, no counter refuses a
-child, and the axis prints as the literal `unbounded`. None of them bounds the
-SIZE of an answer either: that is a consumer contract, declared on the call.
+This is the canonical policy for workflow budgets and standalone `task`/`spawn_agent`
+execution. The list below gathers the standard defaults, explicit controls and existing
+structural guards. It covers Locus execution and output acceptance; provider quotas,
+context windows, OS resources and UI display projections are separate limits.
 
-`concurrency` is the one exception and it is not a stop — exceeding it makes a
-child WAIT, never fail:
+**Launch modes.** Headless means Pi `print` or `json`, determined from the root host
+context. TUI and RPC can reach an operator; a missing UI or `noOperator: true` does
+not make them headless. The `workflow` tool, slash commands and direct runner use the
+same resolver. Direct `/fusion` and the `fusion` tool use these mode defaults too
+(with no launch-budget override). Saved children inherit the root's budget, counter, deadline and gate.
+A fresh root resolves defaults once; an explicit number replaces its default.
 
-| Axis          | Package value      | What it bounds                                                                                                                                                                                                                     |
-| ------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `concurrency` | 4 attempts at once | Simultaneously executing leaf agents across the WHOLE run, including nested `parallel()`/`pipeline()` wrappers. Also the default width of a `parallel()`/`pipeline()` group whose author declared none.                            |
-| `totalAgents` | none — unbounded   | FRESH physical attempts across the root and saved children: implementation, review, transport retry, value repair. A replayed call starts no child and is not charged. The attempt that would exceed an explicit cap never starts. |
-| `runtimeMs`   | none — unbounded   | Wall-clock gate over the root and saved-child agent chain. Checked before a new child starts; it does not abort an in-flight child.                                                                                                |
-| `timeoutMs`   | none — unbounded   | Wall clock for one child attempt, operator waits included. On expiry the runtime aborts the child.                                                                                                                                 |
-| `toolCalls`   | none — unbounded   | Tool calls per child attempt. The call that would exceed an explicit budget is refused BEFORE it runs, not counted after it started.                                                                                               |
-| `turns`       | none — unbounded   | Cumulative SDK model cycles per child attempt, shared by ordinary work and output clarification. The generation past an explicit budget is never started.                                                                          |
+| Control                     | Standard value                               | Scope, explicit setting and effect                                                                                                                                                                                                                                                                                          |
+| --------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Standalone task runtime     | `runtimeMs = 3_600_000` (1 hour)             | `spawn_agent` and `/agent run`, including the historical `task` surface: one child wall-clock deadline, passed internally as SDK `childTimeoutMs`. No multiplication by turns; expiry aborts the child. These surfaces expose no budget override. This is also their policy when called from print/json.                    |
+| Standalone task turns/tools | Unbounded                                    | No `maxTurns` or tool-call default. A task may use more than five turns within its hour. One call starts one child; orchestration belongs to workflows.                                                                                                                                                                     |
+| Workflow `concurrency`      | 4                                            | Run-wide simultaneous physical leaf attempts. Excess work queues; it is not refused. Explicit `budget.concurrency` changes the width. A local `parallel()`/`pipeline()` concurrency can narrow a group; without one it uses the run width.                                                                                  |
+| Workflow `totalAgents`      | **10,000 in headless; unbounded in TUI/RPC** | `budget.totalAgents` bounds fresh physical child attempts across root, saved children, review, transport retries and Fusion. The next attempt beyond the cap never starts. Replay and same-session clarification start no child and are not charged.                                                                        |
+| Workflow `runtimeMs`        | Unbounded                                    | `budget.runtimeMs` checks elapsed run time after admission to the concurrency gate, before starting a child. It does not abort an in-flight child or bound trusted JavaScript between calls.                                                                                                                                |
+| Workflow `timeoutMs`        | Unbounded                                    | `budget.timeoutMs` or `agent({ timeoutMs })`: one wall-clock deadline per physical child attempt, including operator waits and output clarification. Expiry aborts the child.                                                                                                                                               |
+| Workflow `toolCalls`        | Unbounded                                    | `budget.toolCalls` or `agent({ maxToolCalls })`: tool dispatches per physical child, cumulative across clarification. The first dispatch beyond the cap is refused.                                                                                                                                                         |
+| Workflow `turns`            | Unbounded                                    | `budget.turns` or `agent({ maxTurns })`: cumulative SDK model cycles per physical child, including ordinary work and clarification. The next generation beyond the cap is refused.                                                                                                                                          |
+| Transport attempts          | 1 attempt                                    | `agent({ attempts })` is a positive safe integer including the first child. Eligible transport retries start fresh children and consume `totalAgents`; provider errors are not automatically retried.                                                                                                                       |
+| Shaped-return attempts      | 2 submissions: initial + 1 clarification     | `repair.maxAttempts` includes the initial submission; 1 disables clarification. No package upper ceiling. Correction stays in the same child and shares its turns/tools/deadline. The applied allowance and its source are journaled.                                                                                       |
+| Output size and item count  | No runtime size ceiling                      | Only explicit consumer contracts: `output.maxLength`, schema constraints such as `maxLength`/`maxItems`, or `handoffs.maxItems`. `maxAnswerChars`, `maxItemChars`, `schemaMaxLength` and `budget.answerChars` are removed and refused by name. Input, parent context and text artifact content have no package size budget. |
+| Output shape and minima     | Always validated                             | Types, nonblank values, uniqueness and semantic validation remain. `choice` needs at least 2 options; Fusion at least 2 members. These are contract requirements, not spend budgets.                                                                                                                                        |
+| Saved-workflow nesting      | Root plus one saved-child level              | The existing `invokeWorkflow()` depth guard refuses deeper saved composition. `subflow()` is in-run grouping and does not add a saved level. This guard remains a separate structural constraint.                                                                                                                           |
+| Direct child delegation     | Leaf children (`depth=0`, `maxDepth=1`)      | `spawn_agent` is removed from child tools; descendants cannot start an independent delegation tree outside shared workflow accounting.                                                                                                                                                                                      |
+| Numeric representation      | Positive safe integers                       | Budget numbers must be integers in `1..Number.MAX_SAFE_INTEGER`; zero, fractions, `null`, infinity and unknown/removed axes are refused. Omission or `undefined` selects the launch default, then `unbounded` if there is none; it does not disable the headless cap.                                                       |
+| Timer implementation        | Safe chained waits                           | Delays above Node's 2,147,483,647 ms are chained, not clamped to 1 ms or rejected as policy. SDK cancellation has a separate 5-second abort-settlement wait; that is cleanup, not extra work time.                                                                                                                          |
+| Tokens and cost             | Not enforced                                 | Reported tokens are recorded. Cost is unavailable because the host supplies no price; missing measurement never means zero.                                                                                                                                                                                                 |
 
-**`toolCalls` and `turns` are admission, not accounting.** The host installs a
-pre-dispatch hook on the child's agent loop: the (N+1)-th tool call is refused
-before the tool executes, and the turn after the last declared one is never
-generated. Either way the run ends with the same named budget stop
-(`tool-call-budget`, `assistant-turn-budget`) and everything the child already
-produced is kept. A host that does not expose that seam keeps the older
-behaviour — the budget is still enforced, but the over-budget action may have
-started before the stop lands.
+**The headless safeguard bounds agent spending, not all execution time.** It permits
+at most 10,000 fresh physical children by default. A hung child without `timeoutMs`,
+a script loop without further agent calls, and work after the last child remain
+outside it. No additional axis acquires a default without a separate policy decision.
 
-**One deadline per child.** A declared `timeoutMs` reaches the SDK host unchanged.
-There is no derived per-turn backstop any more: the host used to be handed
-`ceil(timeoutMs / maxTurns) + 5_000` and multiply it back, which produced a
-deadline nobody wrote and, at the former defaults, a product larger than Node's
-maximum timer delay — which `setTimeout` answers by firing after one millisecond.
-Turn count and wall clock are separate axes and are no longer multiplied.
+**Overrides and visibility.** The structured `workflow` tool and command launcher
+accept `budget` through `RunWorkflowScriptOptions.budget`; there are no slash budget
+flags. `concurrency`, `totalAgents` and `runtimeMs` remain host-owned. The three
+per-child settings remain ordinary `agent()` options. Explicit values may narrow or
+raise their applied defaults; every raise is journaled with axis, old value and requested
+value. Approval details show supplied values; the run header, journal, `result.json`
+and report show all six resolved axes, with absent stop axes written as `unbounded`.
 
-**Long deadlines are honoured, not refused.** A timeout above Node's maximum delay
-(2,147,483,647 ms ≈ 24.8 days) runs as a chain of representable waits, so a 48-hour
-deadline is a 48-hour deadline. The former `WORKFLOW_MAX_TIMEOUT_MS` policy ceiling
-is gone; representability is checked only when a timeout was chosen, and only to
-reject a value that is not a positive whole number of milliseconds.
+**Enforcement and evidence.** SDK pre-dispatch hooks enforce turns and tools before
+spending. Older hosts without that seam use event counting and abort, so an excess
+action may already have started. Workflow budget stops retain the named
+`stopped by budget <axis>` journal entry and data received so far; standalone expiry
+retains its `host-turn-timeout` failure and evidence. Neither is a verdict that earlier
+answers were wrong. Root and saved children use one physical-attempt counter, and
+Fusion reservations use that same allowance. A fully replayed panel consumes none.
 
-Review and retry attempts consume an explicit `totalAgents` exactly like
-implementation attempts: the axis counts physical fresh attempts, not only authored
-`agent()` call sites.
+**Compatibility.** Readers preserve historical budget values, including `unbounded`,
+and still read results that predate the budget field. Reading an old result never
+inserts today's defaults or rewrites its records. A new headless resume applies the
+current root cap to fresh work; changing only `totalAgents` does not change per-agent
+replay keys. Hard-crash recovery additionally checks the exact launch fingerprint,
+including resolved budgets: a mismatch refuses recovery rather than rewriting history.
+Earlier per-child default removal and shaped-return version changes retain their
+[documented replay boundaries](references/recovery-and-continuation.md).
 
-**What `runtimeMs` does and does not bound.** It is a shared emergency deadline
-for the root and saved children, checked after a child acquires the run-wide concurrency slot and immediately before the
-child starts — not a timer that
-aborts a child mid-flight, because two abort paths for one child is the same
-defect the single per-child deadline removes. So a run is bounded by `runtimeMs`
-plus at most one child's own `timeoutMs`, and three cases are outside it: a script
-that stops calling `agent()` (a `while (true)` of pure script code is not bounded
-at all), script work after the last child returns, and that last in-flight child.
-Nothing in the runtime bounds workflow script code today either; this is a
-pre-existing limit stated rather than a new one introduced. "Bounded on every
-axis" therefore means **the agent chain**.
+**Report measurements.** The selected execution's `outputs/README.md` includes every
+applied axis, fresh and replayed calls separately, wall clock, longest fresh child,
+reported tokens and gate-owned peak concurrency. `agent_queued` is demand;
+`agent_start` follows admission. Replayed durations/tokens are excluded. Per-child turns
+and tools have no durable measured totals and print as `not recorded`, never `0`.
 
-**Narrowing versus raising.** A per-call value below the run's declared one applies
-silently. A value above it applies too — a down-only rule would make a legitimately
-long stage unauthorable — but never silently: the runtime writes a
-`[workflow:budget] call raised …` journal line naming the axis, the applied value
-and the requested one. An explicit value on an axis the run left unbounded is
-always a narrowing, so it is never reported as a raise.
-
-**Stopping is not a verdict.** Reaching an explicit budget ends the run as
-`stopped by budget <axis>`, journaled by name, with every answer already received
-kept and readable. It never means the work was wrong, and it never turns a received
-answer into an invalid one.
-
-**Which axes a script can override.** The four per-call axes — `maxToolCalls`,
-`timeoutMs` and `maxTurns` — remain ordinary `agent()` options.
-The three run-level axes — `concurrency`, `totalAgents`, `runtimeMs` — remain
-host-owned rather than writable from workflow JavaScript. The structured
-`workflow` tool and command launcher now accept an optional `budget` object
-forwarded to the existing `RunWorkflowScriptOptions.budget`; approval displays
-the declared values. Unspecified axes stay unbounded. There are
-no new slash-command flags. See [execution controls](references/execution-controls.md)
-for the exact boundary and local group concurrency.
-
-**Evidence.** Every run's journal opens with one runtime-source line listing the
-applied budget. The selected execution's `outputs/README.md` carries a `## Budget`
-section with each axis, its applied value, and the spend the run evidence can measure.
-For the root it is under `.locus-pi/runs/<storageRootRunId>/`; children and resume
-attempts use their fixed nested execution directories. The measured values are:
-agent invocations, run wall clock, longest child, tokens, and the gate-owned peak
-concurrency. The peak comes from the concurrency gate rather than from journal
-intervals. `agent_queued` records demand; `agent_start` is now emitted only
-after gate admission. Neither event claims a provider token has arrived. Replayed
-calls are counted apart and charged to nothing: the row reads
-`N fresh + M replayed (not charged)`, and their durations and tokens are excluded —
-a run served entirely from records reports its longest child as "not recorded".
-Per-child tool calls and turns are enforced but counted by nobody, so they print as
-"not recorded" rather than `0`. Tokens are printed when the host reports them; cost
-prints as unavailable because the host reports no price at all, and a limit over an
-unknown would report "under budget" forever. Neither tokens nor cost is enforced.
-`result.json` carries the same six axes, so a later reader cannot mistake an
-undeclared axis for a missing field.
+**Source owners.** [Budget resolution](runtime/workflow-budget.ts),
+[root launch](runtime/workflow-runner.ts), [shared enforcement](runtime/workflow-execution-state.ts),
+[standalone tasks](../agents/run/run-launcher.ts), [SDK child execution](../_shared/agent-runtime/agent-sdk-host.ts),
+[return clarification](runtime/workflow-return.ts) and [saved composition](runtime/workflow-saved-child.ts).
 
 ---
 

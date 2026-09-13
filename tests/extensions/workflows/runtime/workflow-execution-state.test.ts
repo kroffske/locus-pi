@@ -4,7 +4,10 @@ import {
   WorkflowRunDeadlineError,
   createWorkflowSharedExecutionState,
 } from "../../../../extensions/workflows/runtime/workflow-execution-state.js";
-import { DEFAULT_WORKFLOW_CONCURRENCY } from "../../../../extensions/workflows/runtime/workflow-budget.js";
+import {
+  DEFAULT_WORKFLOW_CONCURRENCY,
+  resolveWorkflowBudget,
+} from "../../../../extensions/workflows/runtime/workflow-budget.js";
 
 /**
  * The run-level budget seen from its own owner. The DSL-level behaviour of these axes is
@@ -76,6 +79,19 @@ describe("the run's one execution state", () => {
     expect(() => state.spendInvocation("fresh")).toThrow(WorkflowInvocationCapError);
     // A replayed attempt projects a recorded answer, so an exhausted cap never refuses one.
     expect(state.spendInvocation("replayed")).toBe(4);
+  });
+
+  it("allows 10,000 fresh headless attempts, excludes replay and refuses attempt 10,001", () => {
+    const budget = resolveWorkflowBudget(undefined, true).budget;
+    const state = createWorkflowSharedExecutionState({ maxTotalAgentInvocations: budget.totalAgents! });
+    for (let i = 0; i < 10_000; i++) {
+      state.spendInvocation("replayed");
+      state.spendInvocation("fresh");
+    }
+    expect(state.invocationCounts()).toEqual({ fresh: 10_000, replayed: 10_000 });
+    expect(() => state.spendInvocation("fresh")).toThrow(WorkflowInvocationCapError);
+    expect(state.spendInvocation("replayed")).toBe(20_001);
+    expect(state.invocationCounts()).toEqual({ fresh: 10_000, replayed: 10_001 });
   });
 
   it("leaves both stop axes unbounded when nobody declared them", () => {

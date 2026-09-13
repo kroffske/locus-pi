@@ -48,21 +48,11 @@ export function nextAgentRunSequence(): number {
   return ++agentRunSeq;
 }
 
-/**
- * The interactive spawn surface names its own child budget, because the library
- * no longer invents one (L25). These are exactly the values this surface has
- * always enforced: five assistant turns, and a ten-minute wall clock for a child
- * nobody is watching turn by turn. They live here, at the call site, so the owner
- * of the interactive UX can see and change them without a package default changing
- * anyone else's run.
- *
- * The wall clock is stated as ONE number. It used to be written as a 120s
- * "per-turn" value that the host multiplied by the turn count; the host never
- * applied it per turn, so the spelling described arithmetic rather than behaviour.
- * The effective stop is unchanged.
+/** One hour for a standalone task; turns and tool calls remain unbounded.
+ * The SDK receives this runtime budget as its single child wall-clock deadline.
+ * Policy: extensions/workflows/REFERENCE.md#run-budget.
  */
-export const INTERACTIVE_AGENT_MAX_TURNS = 5;
-export const INTERACTIVE_AGENT_TIMEOUT_MS = 10 * 60 * 1000;
+export const INTERACTIVE_AGENT_RUNTIME_MS = 60 * 60 * 1000;
 
 interface AgentLiveTaskBaseInput {
   pi: ExtensionAPI;
@@ -74,8 +64,6 @@ interface AgentLiveTaskBaseInput {
   task: string;
   approvalTier: ApprovalTier;
   liveModel: { model?: string; thinking?: string } | undefined;
-  /** Explicit assistant-turn budget for this interactive child. */
-  maxTurns: number;
   /** Explicit wall clock for this whole interactive child. */
   childTimeoutMs: number;
   onStarted?: (line: string) => void;
@@ -165,7 +153,6 @@ export async function runAgentLiveTask(
     liveExecution: execution,
   });
   const requestInput = {
-    maxTurns: input.maxTurns,
     approvalTier: input.approvalTier,
     // Travels on the request for the same reason it does in the bridge: the
     // run-result artifact is written inside the boundary. `writeAgentRunResultArtifact`
@@ -382,8 +369,7 @@ export async function executeAgentRunCommand(
       approvalTier,
       liveModel,
       modelRoleResolution,
-      maxTurns: INTERACTIVE_AGENT_MAX_TURNS,
-      childTimeoutMs: INTERACTIVE_AGENT_TIMEOUT_MS,
+      childTimeoutMs: INTERACTIVE_AGENT_RUNTIME_MS,
     });
     if (hasUI) {
       panel?.render(80);

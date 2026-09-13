@@ -77,12 +77,12 @@ User-visible changes to the public package.
   defaulting `maxTurns` to 5, and the SDK host stopped deriving a wall clock of
   120 seconds per turn from it. A caller that wants a stop passes one; the
   interactive `task`/`spawn_agent` and `/agent run` surfaces now declare the same
-  five turns and one ten-minute wall clock they always enforced, at their own call
-  site.
+  one-hour runtime at their own call site, with no turn or tool-call limit.
   Requests without a declared turn budget record it as `unbounded`.
-- Execution budgets became explicit-only. `totalAgents`, `runtimeMs`, `timeoutMs`,
-  `toolCalls` and `turns` have no package default any more: an axis nobody declared
-  is unbounded, so no timer is armed and no counter refuses a child. Every run opens
+- Execution budgets follow one [documented policy](extensions/workflows/REFERENCE.md#run-budget).
+  Headless (`print`/`json`) root workflows default to `totalAgents: 10_000`, shared
+  with saved children; concurrency remains 4. Explicit numbers override defaults,
+  with raises journaled. Other undeclared axes remain `unbounded`. Every run opens
   with one header line naming all six axes — an undeclared one reads `unbounded` —
   and the journal, `result.json` and the run report print the same word, so a
   headless launch cannot mistake absence for a number. Declare a budget on the

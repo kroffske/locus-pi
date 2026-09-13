@@ -73,8 +73,8 @@ Show the worst-case agent calls and explain if the task requires more.
 This is advice to the author. Locus Pi has no `workflowSizeGuideline` setting or
 `small`/`medium` runtime switch. The reviewed design records concrete slice and
 correction bounds; run budgets — time, agents, turns, tool calls — are a separate
-concern and are explicit-only, so an axis nobody declares is reported as
-`unbounded` rather than silently defaulted. Never remove required work to meet an
+concern governed by the [budget policy](../extensions/workflows/REFERENCE.md#run-budget).
+Only the listed launch defaults apply; other undeclared axes are `unbounded`. Never remove required work to meet an
 advisory size preference.
 
 Claude Code's **Dynamic workflow size** setting uses `workflowSizeGuideline`:

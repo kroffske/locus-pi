@@ -33,7 +33,7 @@ The existing `workflow` tool accepts optional `budget` with the six axes: concur
 
 For the three-round refinement example, `totalAgents: 9` permits at most nine physical workflow children when transport retries are not enabled. Every shaped decision is corrected inside its own child session, so a format correction never costs another physical child — it consumes that child's cumulative turns/tools/time.
 
-Every axis is explicit or absent. The package declares no default for any of them: an axis nobody set is **unbounded**, the run header and journal print it as `unbounded`, and the run stops on an axis only when someone chose a number for it. So choose time, tool and agent bounds for the actual workload — a headless run left entirely unbounded will keep spending until the work ends or the operator stops it. Reaching a declared bound is _stopped by budget_: the answers and artifacts produced up to that point are kept, and none of them is retroactively wrong. See [the principle](output-acceptance.md#the-principle) and [run budget](../REFERENCE.md#run-budget).
+The canonical [budget and constraint list](../REFERENCE.md#run-budget) defines the launch defaults and every explicit axis. Headless (`print`/`json`) root runs default to `totalAgents: 10_000`; concurrency defaults to 4. Other stop axes remain `unbounded` unless declared. Saved children share the root's allowance. Reaching an applied budget is _stopped by budget_: answers and artifacts received so far remain stored and readable. See [the principle](output-acceptance.md#the-principle).
 
 A complete structured invocation can narrow the budget, for example:
 

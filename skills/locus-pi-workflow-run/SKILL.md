@@ -220,13 +220,14 @@ runtimeMs=unbounded timeoutMs=unbounded toolCalls=unbounded turns=unbounded`.
 `unbounded` means nobody declared that axis and nothing will stop the run on
 it; it is not an error, not a default to "fix", and not a hidden number.
 `/workflows status <runId>` and `runtime/result.json` (`budget`) repeat the same
-six values as `budget applied: …`. Only `concurrency` has a package value; it
-queues work rather than stopping it.
+six values as `budget applied: …`. The canonical [budget policy](../../extensions/workflows/REFERENCE.md#run-budget)
+lists all defaults and explicit controls: headless roots get `totalAgents: 10_000`,
+and `concurrency: 4` queues work rather than stopping it.
 
 - `[workflow:budget] call raised <axis> above the applied default: default=…
 requested=…` — a per-call value above the run's; informational.
 - `[workflow:budget] stopped by budget <axis>: … Data received so far is kept.`
-  — the run reached an explicit budget. It is stopped, not wrong: every answer
+  — the run reached an applied budget. It is stopped, not wrong: every answer
   already received stays stored and readable, and no result becomes invalid.
   Continue through Repair + Continue with an explicit `budget` on the structured
   tool or an explicit per-call value, chosen by the operator; never raise it
@@ -443,9 +444,8 @@ Hundreds of small agents can be the intended workload: thirty-five work units
 with ten focused fields each legitimately require 350 agent calls. Do not infer
 from that count that the graph is wrong, and do not add a new total-agent limit,
 token-floor stop, estimated-cost gate or automatic graph reduction. Explicit
-operator budgets stay in force; there are no package fuses behind them, so an
-undeclared axis really is unbounded and a headless run keeps spending until the
-work ends or the operator stops it. Concurrency limits simultaneous work, not the
+operator budgets and the documented launch defaults stay in force. Do not add
+stops on other axes: they remain unbounded unless explicitly declared. Concurrency limits simultaneous work, not the
 total number of tasks: a `parallel(thunks, { concurrency, keys, title })` group
 runs at the run's effective `concurrency` (package value 4) unless the author
 passed a local width, and every child still passes the shared leaf gate. A

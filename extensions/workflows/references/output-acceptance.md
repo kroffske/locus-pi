@@ -14,8 +14,8 @@ repeating it, so there is one place to correct if it ever changes.
    under N characters" — that is the same policy rewritten in English, and it fails the
    same way: the work is already paid for when the bound bites.
 2. **Budgets stop spending, not answers.** Time, turns, tool calls and agents are
-   declared by the author or the operator, checked before the next spend, and printed as
-   `unbounded` on every axis nobody declared. A run that ends on one is _stopped by
+   resolved from the approved launch defaults and explicit author/operator settings,
+   checked before the next spend, and printed as `unbounded` where neither sets a value. A run that ends on one is _stopped by
    budget_ — a statement about what it may still spend, never a verdict on the answers
    it already produced, all of which stay stored and readable. See
    [run budget](../REFERENCE.md#run-budget) for the axes.

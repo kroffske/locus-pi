@@ -2,18 +2,10 @@
  * workflow-budget.ts — ONE place that says what a workflow run is allowed to
  * spend, on every axis the host can actually enforce.
  *
- * The module used to carry a package DEFAULT for each axis. It no longer does, and
- * that is the whole point of this revision: a number nobody chose is not a policy,
- * it is a guess that ends someone's run. A budget stops SPEND, so the party that
- * pays — the author in the workflow, the operator on the launch — is the only party
- * that may set one. An axis nobody declared is UNBOUNDED, printed as the literal
- * `unbounded` in the run header, the journal and the run report, so the absence is
- * something an operator reads rather than something they have to infer.
- *
- * `concurrency` is the one axis that keeps a package value (4). It is not a stop:
- * exceeding it makes a child WAIT, never fail, so it bounds simultaneous
- * processes and memory rather than what a run may finish. One effective width, no
- * second hidden one (the former `SCHEDULER_WIDTH` in `workflow-runtime.ts`).
+ * The approved defaults are concurrency=4 (queueing width), plus totalAgents=10_000
+ * for headless root launches. All other stop axes require an explicit declaration.
+ * The applied values, including `unbounded`, are printed in the header, journal
+ * and result. Policy: extensions/workflows/REFERENCE.md#run-budget.
  *
  * Pure data and pure functions. No fs / process / network; no import of the
  * runtime, so the runtime can import this without a cycle.
@@ -35,9 +27,8 @@ export { NODE_TIMER_MAX_DELAY_MS };
  * one of them bounds SPEND — time, work, fan-out — and none of them judges an
  * answer.
  *
- * Five of the six are optional, and `undefined` means UNBOUNDED, not "use a
- * default": no timer is armed, no counter refuses a child, and the axis prints as
- * `unbounded` wherever the applied budget is shown.
+ * In a resolved budget, optional axes left `undefined` mean UNBOUNDED: no timer
+ * is armed, no counter refuses a child, and the axis prints as `unbounded`.
  *
  * `answerChars` was the seventh and is deliberately gone: it refused a completed
  * child's answer for its length, which is a size policy over a result already paid
@@ -64,14 +55,10 @@ export interface WorkflowBudget {
   turns?: number;
 }
 
-/**
- * The one package value left, and the reason it survived the removal of the rest:
- * it queues work instead of stopping it. Too low only makes a run slower, so the
- * failure mode of a wrong guess here is not somebody's lost run. It is also the
- * ONLY concurrency width in the runtime — `parallel()`/`pipeline()` narrow it only
- * when their author passes an explicit one.
- */
+/** One run-wide queueing width; local groups only narrow it when explicitly asked. */
 export const DEFAULT_WORKFLOW_CONCURRENCY = 4;
+/** Finite fresh-child allowance for print/json root runs, shared by saved children. */
+export const DEFAULT_HEADLESS_WORKFLOW_TOTAL_AGENTS = 10_000;
 
 /** Every axis name, in the order the header, the journal and the run report print them. */
 export const WORKFLOW_BUDGET_AXES: readonly (keyof WorkflowBudget)[] = Object.freeze([
@@ -127,21 +114,20 @@ export interface ResolvedWorkflowBudget {
 /**
  * Build the budget one run applies from what its launch declared.
  *
- * Only `concurrency` has a value to start from; every other axis exists in the
- * result only if the caller named it. That is the difference an operator has to be
- * able to see: an axis absent here arms nothing at all, rather than quietly
- * applying somebody's idea of a safe maximum.
- *
- * Raising the one defaulted axis is allowed — a wider run is a legitimate ask —
- * but it is never silent: the raise comes back as a record the caller journals.
+ * Headless is host mode, independent of noOperator or UI availability. A saved
+ * child inherits its root's resolved budget rather than resolving defaults again.
+ * Explicit numbers replace defaults; increases are returned for journaling.
  *
  * `undefined` on an axis means "unstated", which is not the same as a value: an
  * explicit invalid value is refused rather than ignored. The same rule reaches the
  * key set: the object is closed over the axes, so a typo or a removed option is
  * named rather than quietly dropped.
  */
-export function resolveWorkflowBudget(override?: Partial<WorkflowBudget>): ResolvedWorkflowBudget {
-  const budget: WorkflowBudget = { concurrency: DEFAULT_WORKFLOW_CONCURRENCY };
+export function resolveWorkflowBudget(override?: Partial<WorkflowBudget>, headless = false): ResolvedWorkflowBudget {
+  const budget: WorkflowBudget = {
+    concurrency: DEFAULT_WORKFLOW_CONCURRENCY,
+    ...(headless ? { totalAgents: DEFAULT_HEADLESS_WORKFLOW_TOTAL_AGENTS } : {}),
+  };
   const raises: WorkflowBudgetRaise[] = [];
   if (override === undefined) return { budget, raises };
   assertClosedWorkflowBudgetKeys(override);
@@ -237,7 +223,7 @@ export function formatWorkflowBudgetAxis(budget: WorkflowBudget, axis: keyof Wor
 /**
  * The one header line a run emits before any workflow code runs. It lists ALL six
  * axes, including the ones nobody declared, because that line is the only place a
- * headless launch says out loud that five of its six stops do not exist. It is a
+ * launch states which stops apply and which axes remain unbounded. It is a
  * `log` line rather than a new journal kind on purpose: a new kind would touch
  * every journal reader for a string.
  */
@@ -273,10 +259,10 @@ export function workflowBudgetEnvelope(
 }
 
 /**
- * The line an explicit budget emits when it actually stops a run.
+ * The line an applied budget emits when it actually stops a run.
  *
  * The wording is the decision, not decoration. A budget stop means the operator's
- * own limit was reached; it says nothing about whether the work so far was any
+ * applied limit was reached; it says nothing about whether the work so far was any
  * good, and every answer already received stays stored and readable. Calling it a
  * failed or invalid answer would destroy that distinction, so the journal never
  * does.

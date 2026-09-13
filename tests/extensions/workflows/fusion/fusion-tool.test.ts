@@ -312,6 +312,7 @@ describe("direct Fusion runner", () => {
       "utf8",
     );
     const harness = createHarness(root, {
+      mode: "json",
       models: [
         { provider: "test", id: "alpha" },
         { provider: "test", id: "beta" },
@@ -365,7 +366,19 @@ describe("direct Fusion runner", () => {
       ]),
     );
     const envelope = JSON.parse(readFileSync(path.join(result.runDir, "runtime", "result.json"), "utf8"));
-    expect(envelope).toMatchObject({ ok: true, disposition: { status: "completed" } });
+    expect(envelope).toMatchObject({
+      ok: true,
+      disposition: { status: "completed" },
+      budget: {
+        concurrency: 4,
+        totalAgents: 10_000,
+        runtimeMs: "unbounded",
+        timeoutMs: "unbounded",
+        toolCalls: "unbounded",
+        turns: "unbounded",
+      },
+    });
+    expect(result.journal[0]?.message).toContain("totalAgents=10000");
     const persistedJournal = readWorkflowRunJournalState(root, result.runId);
     expect(persistedJournal.diagnostics).toEqual([]);
     expect(
