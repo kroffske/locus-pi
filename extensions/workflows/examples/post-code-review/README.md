@@ -5,7 +5,7 @@ saved child workflows. The parent makes no model call itself: it owns order,
 parallelism, the shared output directory, child identity, and final publication.
 
 > **External entry point:**
-> [`post-code-review.workflow.mjs`](./post-code-review.workflow.mjs). The other
+> [`post-code-review.workflow.mjs`](post-code-review.workflow.mjs). The other
 > seven workflow files are source-bound child components coordinated by this
 > parent.
 
@@ -40,7 +40,7 @@ style:
 The diagram below shows these workflow boundaries, exact source filenames,
 model roles, Markdown handoffs, and the failure boundary on one canvas.
 
-![Post-code review workflow graph](./post-code-review-pipeline.svg)
+![Post-code review workflow graph](post-code-review-pipeline.svg)
 
 ## Install
 

@@ -271,7 +271,7 @@ allowed set, and every item is about being able to continue at all:
 
 - non-empty text — an empty handoff breaks the next prompt before the model ever
   sees it. Not its length: there is no per-stage character cap, here or in the
-  runtime (see [the principle](output-acceptance.md#the-principle));
+  runtime (see [the principle](../../../docs/workflows/agent-results.md#the-principle));
 - confining an operator-supplied path, or refusing to start when there is nothing
   to act on;
 - host-owned trust: continuation refs, lineage, digests, identity;
@@ -454,7 +454,7 @@ can satisfy, instead of failing the call after the work is done. Keep
 hand-written bounds only for text the workflow itself owns — operator input,
 consumed artifacts, and strings the script composes. The whole rule, and the
 budget and capability rules beside it, are stated once in
-[the principle](output-acceptance.md#the-principle).
+[the principle](../../../docs/workflows/agent-results.md#the-principle).
 
 ### Declare the fact, do not scan the prose
 

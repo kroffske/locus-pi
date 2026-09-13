@@ -38,7 +38,7 @@ spending, not answers, and never silently truncate complete work to pass validat
 
 Extend the existing workflow_return path, not a second return tool. Format clarification stays in the same child session and uses bounded attempts and cumulative resources. Semantic improvement is a fresh worker with the original goal and exact feedback. A successful proposal followed by cancellation/provider failure is not an accepted result.
 
-Shape validity does not prove factual correctness. A required verifier remains required. An unknown field is not a verified absence; a missing verifier is not a clean decision. Reused answers are marked as reused, not given invented new child receipts. See the canonical [output acceptance contract](../../../extensions/workflows/references/output-acceptance.md) for the principle, the supported combinations and the visible clarification default.
+Shape validity does not prove factual correctness. A required verifier remains required. An unknown field is not a verified absence; a missing verifier is not a clean decision. Reused answers are marked as reused, not given invented new child receipts. See the canonical [output acceptance contract](../../../docs/workflows/agent-results.md) for the principle, the supported combinations and the visible clarification default.
 
 When code branches on an arbiter's judgement, prefer that arbiter returning the
 `choice` directly. The call returns the branch, not

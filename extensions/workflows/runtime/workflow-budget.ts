@@ -5,7 +5,7 @@
  * The approved defaults are concurrency=4 (queueing width), plus totalAgents=10_000
  * for headless root launches. All other stop axes require an explicit declaration.
  * The applied values, including `unbounded`, are printed in the header, journal
- * and result. Policy: extensions/workflows/REFERENCE.md#run-budget.
+ * and result. Policy: docs/workflows/budgets.md#run-budget.
  *
  * Pure data and pure functions. No fs / process / network; no import of the
  * runtime, so the runtime can import this without a cycle.

@@ -50,7 +50,7 @@ export function nextAgentRunSequence(): number {
 
 /** One hour for a standalone task; turns and tool calls remain unbounded.
  * The SDK receives this runtime budget as its single child wall-clock deadline.
- * Policy: extensions/workflows/REFERENCE.md#run-budget.
+ * Policy: docs/workflows/budgets.md#run-budget.
  */
 export const INTERACTIVE_AGENT_RUNTIME_MS = 60 * 60 * 1000;
 

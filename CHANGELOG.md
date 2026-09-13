@@ -6,6 +6,11 @@ User-visible changes to the public package.
 
 ### Changed
 
+- Workflow documentation now ships as a topical manual under `docs/workflows/`.
+  Budgets, agent results, DSL, replay and recovery each have a named owner;
+  workflow skills link to those pages and explain how to find them through an
+  installed skill symlink. Old reference paths retain bookmark anchors, and
+  package tests verify the documentation from an unpacked npm tarball.
 - Workflow runtime responsibilities now live in named modules for execution state,
   agent calls and attempts, shaped returns, model routing, and run lifecycle. Existing
   module export paths remain available. `check:push` now checks size growth against

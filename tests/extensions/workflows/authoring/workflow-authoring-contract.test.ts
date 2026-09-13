@@ -42,7 +42,7 @@ describe("readable workflow authoring references", () => {
   const authoringSurfaces = [
     "skills/locus-pi-workflow-create/SKILL.md",
     "skills/locus-pi-workflow-create/references/design-and-build.md",
-    "extensions/workflows/REFERENCE.md",
+    "docs/workflows/authoring.md",
     "extensions/workflows/tool/workflow-tool.ts",
     "extensions/workflows/manifest.json",
     "extensions/workflows/examples/README.md",
@@ -71,13 +71,13 @@ describe("readable workflow authoring references", () => {
       "/workflows run <name|path> [--run-name <name> | --output-dir <path>] [--resume <runId>] [--no-operator|--operator] [--] [input]";
     for (const relativePath of [
       "skills/locus-pi-workflow-run/SKILL.md",
-      "extensions/workflows/REFERENCE.md",
+      "docs/workflows/running.md",
       "extensions/workflows/references/patterns.md",
     ]) {
       expect(source(relativePath)).toContain(canonical);
     }
-    expect(source("extensions/workflows/REFERENCE.md")).not.toContain("/workflow-run <name|path>");
-    for (const relativePath of ["extensions/workflows/REFERENCE.md", "docs/workflows.md"]) {
+    expect(source("docs/workflows/running.md")).not.toContain("/workflow-run <name|path>");
+    for (const relativePath of ["docs/workflows/running.md", "docs/workflows.md"]) {
       const text = source(relativePath);
       expect(text).toContain("--run-name <name>");
       expect(text).toContain("--output-dir <path>");
@@ -87,8 +87,8 @@ describe("readable workflow authoring references", () => {
 
   it.each([
     "skills/locus-pi-workflow-create/SKILL.md",
-    "extensions/workflows/references/source-shape.md",
-    "extensions/workflows/REFERENCE.md",
+    "docs/workflows/source-shape.md",
+    "docs/workflows/authoring.md",
   ])("publishes the runnable standard source gate on %s", (relativePath) => {
     expect(source(relativePath)).toContain("workflow_check_source");
   });
@@ -103,17 +103,17 @@ describe("readable workflow authoring references", () => {
   });
 
   it("keeps the manual hello-world inside the enforced input-normalization grammar", () => {
-    expect(source("extensions/workflows/REFERENCE.md")).toContain(
+    expect(source("docs/workflows/authoring.md")).toContain(
       'const task = typeof input === "string" && input.trim() ? input.trim() : "list the cwd";',
     );
   });
 
   it("runs every public declared-standard documentation snippet through the source checker", () => {
     const documents = [
-      "extensions/workflows/references/source-shape.md",
+      "docs/workflows/source-shape.md",
       "skills/locus-pi-workflow-create/references/source-boundary.md",
       "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/REFERENCE.md",
+      ...readdirSync(path.join(root, "docs/workflows")).map((name) => `docs/workflows/${name}`),
       "extensions/workflows/examples/README.md",
       "README.md",
     ];
@@ -128,10 +128,10 @@ describe("readable workflow authoring references", () => {
 
   it("keeps standard teaching free of author-side capability and answer engineering", () => {
     const documents = [
-      "extensions/workflows/references/source-shape.md",
+      "docs/workflows/source-shape.md",
       "skills/locus-pi-workflow-create/references/source-boundary.md",
       "skills/locus-pi-workflow-create/SKILL.md",
-      "extensions/workflows/REFERENCE.md",
+      ...readdirSync(path.join(root, "docs/workflows")).map((name) => `docs/workflows/${name}`),
       "extensions/workflows/examples/README.md",
       "README.md",
     ];
@@ -164,7 +164,7 @@ describe("readable workflow authoring references", () => {
     for (const relativePath of [
       "skills/locus-pi-workflow-create/SKILL.md",
       "skills/locus-pi-workflow-create/references/source-boundary.md",
-      "extensions/workflows/REFERENCE.md",
+      "docs/workflows/dsl.md",
       "docs/workflows.md",
     ]) {
       const text = source(relativePath);
@@ -180,7 +180,7 @@ describe("readable workflow authoring references", () => {
   });
 
   it("checks canonical AUTHORING fragments while keeping the installed router code-free", () => {
-    const authoring = javascriptDocSnippets("extensions/workflows/references/source-shape.md");
+    const authoring = javascriptDocSnippets("docs/workflows/source-shape.md");
     const skill = javascriptDocSnippets("skills/locus-pi-workflow-create/SKILL.md");
     expect(authoring).toHaveLength(3);
     expect(skill).toHaveLength(0); // Entrypoint routes to tested complete examples; it duplicates no harness.
@@ -211,10 +211,7 @@ ${authoring[1] ?? ""}
   });
 
   it("keeps unused acknowledgement protocols review-owned instead of parsing prompt English", () => {
-    for (const relativePath of [
-      "extensions/workflows/references/source-shape.md",
-      "extensions/workflows/REFERENCE.md",
-    ]) {
+    for (const relativePath of ["docs/workflows/source-shape.md", "docs/workflows/authoring.md"]) {
       const text = source(relativePath);
       expect(text).toMatch(/acknowledgement/iu);
       expect(text).toMatch(/review/iu);
@@ -228,7 +225,7 @@ ${authoring[1] ?? ""}
     expect(router).toContain("This skill owns authoring only.");
     expect(router).toContain("references/design-and-build.md");
     expect(router).toContain("source-shape.md#machine-enforced-standard-source-shape");
-    expect(router).toContain("REFERENCE.md");
+    expect(router).toContain("docs/workflows/index.md");
     expect(router).toContain("Build does not run");
     expect(router).toContain("exact copyable launch command");
     expect(router).toContain("/workflows run <name>");
@@ -243,10 +240,12 @@ ${authoring[1] ?? ""}
 
   it("keeps source grammar, labels, output and failure authority in canonical references", () => {
     const authoring =
-      source("extensions/workflows/references/source-shape.md") +
+      source("docs/workflows/source-shape.md") +
       source("skills/locus-pi-workflow-create/references/source-boundary.md");
-    const manual = source("extensions/workflows/REFERENCE.md");
-    const output = source("extensions/workflows/references/output-acceptance.md");
+    const dsl = source("docs/workflows/dsl.md");
+    const policy = source("docs/workflows/budgets.md");
+    const index = source("docs/workflows/index.md");
+    const output = source("docs/workflows/agent-results.md");
     expect(authoring).toContain("exact text");
     expect(authoring).toContain("choice:");
     expect(authoring).toContain("handoffs:");
@@ -254,12 +253,11 @@ ${authoring[1] ?? ""}
     expect(authoring).toContain("provenance");
     expect(authoring).toContain("Markdown/table/report renderers");
     expect(authoring).toContain("raw `schema`");
-    expect(manual).toContain("dsl.items()");
-    expect(manual).toContain("## Run budget");
-    expect(manual).toContain("No additional axis acquires a default without a separate policy decision.");
-    expect(manual).toContain("output-acceptance.md");
-    expect(manual).toContain("execution-controls.md");
-    expect(manual).toContain("recovery-and-continuation.md");
+    expect(dsl).toContain("items()");
+    expect(policy).toContain("## Run budget");
+    expect(policy).toContain("No additional axis acquires a default without a separate policy decision.");
+    for (const owner of ["agent-results.md", "dsl.md", "budgets.md", "recovery-and-continuation.md"])
+      expect(index).toContain(owner);
     expect(output).toContain("returnVia");
     expect(output).toContain("workflow_return");
     expect(output).toContain("same");
@@ -293,8 +291,8 @@ ${authoring[1] ?? ""}
   });
 
   it("keeps the surviving runtime defaults in the runtime owner, not the router", () => {
-    const manual = source("extensions/workflows/REFERENCE.md");
-    expect(manual).toContain("MAX_DAGS_IN_SCOPE");
+    const manual = source("docs/workflows/budgets.md");
+    expect(source("docs/workflows/agent-results.md")).toContain("MAX_DAGS_IN_SCOPE");
     const policy = manual.split("## Run budget\n")[1]?.split("\n---\n")[0] ?? "";
     expect(policy).toMatch(/Workflow `concurrency`\s*\| 4\s*\|/u);
     expect(policy).toMatch(/Workflow `totalAgents`\s*\| \*\*10,000 in headless; unbounded in TUI\/RPC\*\*/u);
@@ -314,15 +312,15 @@ ${authoring[1] ?? ""}
     // The runtime stopped guessing how long an answer, a handoff item or a routing list
     // may be. A manual that still printed those numbers would be the last place an author
     // could learn a rule the code no longer has.
-    const manual = source("extensions/workflows/REFERENCE.md");
-    expect(manual).not.toContain("SCHEMA_MAX_ATTEMPTS");
-    expect(manual).not.toMatch(/500,000\s+(?:answer\s+)?characters/u);
-    // Removed names remain searchable, but every mention identifies their refusal.
-    for (const mention of manual.split("\n").filter((line) => /maxItemChars|maxAnswerChars/u.test(line))) {
-      expect(mention).toContain("refused by name");
+    for (const file of readdirSync(path.join(root, "docs/workflows"))) {
+      const manual = source(`docs/workflows/${file}`);
+      expect(manual, file).not.toContain("SCHEMA_MAX_ATTEMPTS");
+      expect(manual, file).not.toMatch(/500,000\s+(?:answer\s+)?characters/u);
+      for (const mention of manual.split("\n").filter((line) => /maxItemChars|maxAnswerChars/u.test(line)))
+        expect(mention, file).toContain("refused by name");
     }
-    expect(manual).toMatch(/all six resolved axes/u);
-    expect(manual).toContain("`maxItems` may be omitted entirely");
+    expect(source("docs/workflows/budgets.md")).toMatch(/all six resolved axes/u);
+    expect(source("docs/workflows/agent-results.md")).toContain("`maxItems` may be omitted entirely");
   });
 
   it("keeps ordered stages separate from the caller-item inline mini-workflow pattern", () => {

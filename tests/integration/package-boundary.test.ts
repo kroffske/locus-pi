@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-discovery.js";
+import { verifyInstalledWorkflowDocs } from "../docs/helpers/installed-workflow-docs.js";
 import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {
@@ -362,7 +363,8 @@ describe("npm public package boundary", () => {
     //   W15 source diagnostics/bindings/provenance/value-rules · W7 execution state + groups
     //   W5 run snapshot reader · W12 saved child · W8 agent contract/call/attempt · W9 agent output
     //   W13 resume + admission · W10 fusion · W14 finalization · W11 agent model
-    expect(dryRun.files).toHaveLength(292);
+    // Seventeen topical workflow pages replace the old monolith with bookmark pointers.
+    expect(dryRun.files).toHaveLength(309);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -517,7 +519,7 @@ describe("npm public package boundary", () => {
     expect(deadMarkdownLinks(root, { name: "the npm package", files: packedPaths })).toEqual([]);
   });
 
-  it("loads every declared entrypoint from an unpacked real tarball", () => {
+  it("loads every declared entrypoint and workflow documentation from an unpacked real tarball", () => {
     const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-pack-boundary-"));
     try {
       const packOutput = execFileSync(
@@ -532,6 +534,11 @@ describe("npm public package boundary", () => {
       execFileSync("tar", ["-xzf", path.join(temporaryRoot, packed.filename), "-C", unpackRoot]);
 
       const packageRoot = path.join(unpackRoot, "package");
+      verifyInstalledWorkflowDocs(
+        packageRoot,
+        temporaryRoot,
+        packed.files.map((file) => file.path),
+      );
       symlinkSync(path.join(root, "node_modules"), path.join(packageRoot, "node_modules"), "dir");
       const entrypointUrls = pkg.pi.extensions.map(
         (entrypoint) => pathToFileURL(path.join(packageRoot, entrypoint)).href,

@@ -1,7 +1,7 @@
 # Author-facing source boundary
 
 Read before Build. For exact grammar diagnostics read the runtime-owned
-[source contract](../../../extensions/workflows/references/source-shape.md).
+[source contract](../../../docs/workflows/source-shape.md).
 
 ## Target source shape
 
@@ -17,7 +17,7 @@ Reserve `choice` for routing and `handoffs` for discovered work
 units, sequential or independent. Do not wrap a report in a singleton list or guess a response-length cap.
 An author-selected bound must come from an explicit user requirement, actual
 consumer contract or measured failure. The runtime adds no size policy of its
-own. Use the canonical [budget policy](../../../extensions/workflows/REFERENCE.md#run-budget)
+own. Use the canonical [budget policy](../../../docs/workflows/budgets.md#run-budget)
 for approved launch defaults; other undeclared axes stay unbounded.
 
 ```js
@@ -91,7 +91,7 @@ and usually preferable durable root: `.tasks/<task>/artifacts/<stage>/` keeps
 stage reports beside the task text a human already reads, and later stages read
 earlier ones from there instead of receiving them again as prompt text.
 `--output-dir .tasks/<task>/artifacts` is accepted by the operator surface (see
-[REFERENCE](../../../extensions/workflows/REFERENCE.md)); the runtime places its own lock and run marker inside
+[REFERENCE](../../../docs/workflows/index.md)); the runtime places its own lock and run marker inside
 whatever root is selected. Nothing changes for disposable output: environments,
 dependency caches, test basetemp and staging stay in ordinary OS or tool
 temporary and cache locations, never beside evidence.

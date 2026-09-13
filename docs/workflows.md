@@ -13,6 +13,8 @@ tags: [workflows, guide]
 
 # Workflow guide
 
+[Workflow documentation by topic](workflows/index.md) — open only the contract needed for the current task.
+
 The `workflows` extension discovers trusted JavaScript workflow modules, runs them through Pi child sessions, and persists execution groups under `.locus-pi/runs/<storageRootRunId>/`.
 
 To create or revise a workflow, start with [Locus Pi workflows: authoring and styles](locus-pi-workflows.md).
@@ -120,20 +122,13 @@ A workflow that stopped at some node is repaired in the same file and continued 
 
 The precondition is binding: the workspace and project tree must still hold the files the replayed calls produced, because replay reuses answer text only. A resume runs in the source run's workspace. When that workspace was chosen explicitly, repeat it with `--run-name <name>` (or `outputDir` on the tool path); omitting it or passing another path fails closed rather than starting somewhere new.
 
-When the prefix is reused after a repair:
+Reuse ends at the first changed, failed, unnamed or otherwise ineligible recorded
+call. That call and the suffix execute fresh; accepted answers before it remain
+replayed. The [replay contract](workflows/replay.md#continuing-a-repaired-workflow) owns
+the refusal reasons and their effects. See [recovery and continuation](workflows/recovery-and-continuation.md)
+for a missing terminal result or an operator handoff.
 
-| Condition                                                         | Result                                                    |
-| ----------------------------------------------------------------- | --------------------------------------------------------- |
-| recorded node name and current node name match, request unchanged | the recorded answer is reused                             |
-| the record has no node name, or the current call has no `label`   | `unnamed-node` — that call and everything after run fresh |
-| the names differ                                                  | `node-mismatch` — same                                    |
-| the resolved request differs, which is what a repaired node is    | `key-mismatch` — same                                     |
-| the recorded call failed, or the call writes to a worktree        | `recorded-failure` / `side-effecting-call` — same         |
-| the record predates the shaped return contract this release sends | `return-contract-changed` — same                          |
-
-`return-contract-changed` is the one row that is not about your script. Shaped calls — `choice`, `handoffs`, `output`, `schema` — send a versioned contract, and this release removed the size ceilings that contract used to carry, so a record written by an older release cannot match the key its call now computes. The journal names the release boundary, and that call and the tail after it run fresh. Nothing in the old run is rewritten and no call that failed then is now read as accepted.
-
-**A run recorded before this release usually re-runs from its first agent call, whatever kind of call it is.** `timeoutMs`, `toolCalls` and `turns` belong to every call's canonical request, and the package defaults that used to fill them (`86400000` / `1000` / `1000`) are gone, so those axes now read `null` and the recorded key no longer matches. Plain text is affected exactly like a shaped call: the first call reports `key-mismatch` and the whole run is fresh. A run that declared each of those budgets explicitly inherited nothing, so its keys are unchanged and it replays as before. See [replay across this release boundary](../extensions/workflows/references/recovery-and-continuation.md#replay-across-this-release-boundary).
+**A run recorded before this release usually re-runs from its first agent call, whatever kind of call it is.** `timeoutMs`, `toolCalls` and `turns` belong to every call's canonical request, and the package defaults that used to fill them (`86400000` / `1000` / `1000`) are gone, so those axes now read `null` and the recorded key no longer matches. Plain text is affected exactly like a shaped call: the first call reports `key-mismatch` and the whole run is fresh. A run that declared each of those budgets explicitly inherited nothing, so its keys are unchanged and it replays as before. See [replay across this release boundary](workflows/recovery-and-continuation.md#replay-across-this-release-boundary).
 
 A `fusion()` group standing after the point where continuation went fresh runs as an ordinary fresh panel — every leg fresh, with its model preflight. What is refused is a MIXED panel, some legs recorded and some fresh, which ends the run with `fusion resume cannot mix recorded and fresh agent calls`: the group's transactional rule is kept at the cost of a terminal error. A panel served entirely from the record costs nothing against `totalAgents`, because it starts no child.
 
@@ -160,7 +155,7 @@ Pi approvals remain the enforcement owner. Source hashes, confined output paths,
 ## Authoring
 
 - [Readable workflow authoring contract](locus-pi-workflows.md)
-- [Advanced runtime and DSL reference](../extensions/workflows/REFERENCE.md)
+- [Advanced runtime and DSL reference](workflows/index.md)
 - [Packaged examples](../extensions/workflows/examples/README.md)
 - [Workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md)
 - [Workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md)

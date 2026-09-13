@@ -29,7 +29,7 @@ Run Pi in the target repository. A path mentioned in a prompt does not change th
 /workflows run adaptive-slices --output-dir .tasks/example/artifacts/implementation -- .tasks/example
 ```
 
-Choose a fresh output directory for an independent run. Agents create their working documents there; source does not read paths or files. See [runtime inputs](../../../extensions/workflows/REFERENCE.md#workflow-input-and-host-continuation).
+Choose a fresh output directory for an independent run. Agents create their working documents there; source does not read paths or files. See [runtime inputs](../../../docs/workflows/authoring.md#workflow-input-and-host-continuation).
 
 ## Executor selection
 

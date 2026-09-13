@@ -4,6 +4,9 @@
 
 Requires Node.js `>=22.19.0`, Pi `>=0.83.0`, and trusted project and workflow sources.
 
+For workflow authoring, API contracts, budgets and recovery, start with the
+[workflow documentation](docs/workflows/index.md), included in the npm installation.
+
 ## Install
 
 ```bash

@@ -12,4 +12,4 @@ Failure: noOperator fails closed; cancellation, declined authorization and corru
 
 Primitives: awaitOperator, publishArtifact and the host's operator continuation launcher. Exact reading of continuationArtifacts().consumedArtifact text is an integration/compatibility surface, not permission for standard-generated source to parse artifacts. Do not label that example standard or skip the source gate.
 
-[Runnable compatibility example](../../../extensions/workflows/references/examples/human-continuation.workflow.mjs). The [recovery and continuation contract](../../../extensions/workflows/references/recovery-and-continuation.md) distinguishes operator continuation from resumeFromRunId.
+[Runnable compatibility example](../../../extensions/workflows/references/examples/human-continuation.workflow.mjs). The [recovery and continuation contract](../../../docs/workflows/recovery-and-continuation.md) distinguishes operator continuation from resumeFromRunId.
