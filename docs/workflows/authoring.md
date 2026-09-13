@@ -43,10 +43,11 @@ edit that full text, then pass it as semantic input to `task/plan`. That workflo
 designs, reviews, builds, checks, and publishes one concrete `workflow.mjs`.
 Neither stage runs the generated source.
 
-New standard source omits `maxToolCalls` and `timeoutMs`: package defaults are
-the emergency policy. A Design emits a narrower or raised per-attempt override
-only when the operator explicitly requests it and records why. This rule does
-not mechanically rewrite legacy workflows.
+New standard source omits `maxToolCalls` and `timeoutMs`: both are unbounded unless
+the author or operator explicitly supplies a fuse. Launch-mode defaults apply only
+as stated in the [budget policy](budgets.md#run-budget). A Design records a
+per-attempt override only when the operator explicitly requests it and records why.
+This rule does not mechanically rewrite legacy workflows.
 
 A workflow is a single ESM module `<name>.workflow.mjs` with two exports:
 

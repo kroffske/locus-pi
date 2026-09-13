@@ -23,6 +23,8 @@ const chapters = [
   "trust.md",
 ];
 const read = (file: string) => readFileSync(path.join(root, file), "utf8");
+const workflowLaunchDefaults =
+  "Workflow launch defaults are mode-scoped: every run defaults to `concurrency = 4`; headless Pi `print`/`json` root launches additionally default to `totalAgents = 10_000`, shared across fresh physical child attempts made by the root, saved children and Fusion; `totalAgents` is unbounded in TUI/RPC. Every other undeclared workflow budget axis is unbounded.";
 
 describe("installed workflow documentation ownership", () => {
   it("publishes a reviewed topical inventory reachable from the workflow entry", () => {
@@ -71,6 +73,16 @@ describe("installed workflow documentation ownership", () => {
 
   it("routes machine-visible contract prose to the same public owners", () => {
     expect(read("extensions/workflows/tool/workflow-tool.ts")).toContain("docs/workflows/index.md");
+    for (const file of ["docs/workflows/budgets.md", "extensions/workflows/manifest.json"])
+      expect(read(file), file).toContain(workflowLaunchDefaults);
+    expect(read("extensions/workflows/manifest.json")).not.toContain(
+      "execution budgets are explicit-only and there are no package defaults",
+    );
+    expect(read("docs/workflows/authoring.md")).not.toContain("package defaults are the emergency policy");
+    expect(read("skills/locus-pi-workflow-create/references/design-and-build.md")).toContain(
+      "launch defaults apply; every other undeclared workflow budget axis is unbounded",
+    );
+    expect(read("skills/locus-pi-workflow-run/SKILL.md")).toContain("For a TUI/RPC");
     const replay = read("docs/workflows/replay.md");
     for (const field of ["timeoutMs", "maxTurns", "maxToolCalls", "returnContract"])
       expect(replay.split("## What is compared\n")[1]?.split("## Continuing a repaired workflow")[0]).toContain(field);

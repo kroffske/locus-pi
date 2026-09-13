@@ -216,8 +216,8 @@ activity—the durable journal is the activity record.
 
 ## Read the run header and budget lines
 
-Every journal opens with one runtime line naming all six budget axes, for
-example `[workflow:budget] applied concurrency=4 totalAgents=unbounded
+Every journal opens with one runtime line naming all six budget axes. For a TUI/RPC
+run with no budget overrides, for example: `[workflow:budget] applied concurrency=4 totalAgents=unbounded
 runtimeMs=unbounded timeoutMs=unbounded toolCalls=unbounded turns=unbounded`.
 `unbounded` means nobody declared that axis and nothing will stop the run on
 it; it is not an error, not a default to "fix", and not a hidden number.
