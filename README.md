@@ -19,6 +19,14 @@ Start a fresh Pi session, then inspect the installed workflows:
 /workflows list
 ```
 
+Pi loads the bundled skills automatically. To also install them for Codex and Claude Code, run inside Pi:
+
+```text
+/workflows skills sync --host all --scope user
+```
+
+This creates managed links to the installed package. See [skill installation](skills/README.md#install-for-codex-and-claude-code) for host and project scope options.
+
 Run the smallest live check:
 
 ```text
