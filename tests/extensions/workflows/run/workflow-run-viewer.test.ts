@@ -29,7 +29,6 @@ afterEach(() => {
 describe("workflow persisted evidence viewer", () => {
   it("reserves the active workflow widget beneath the focused run viewer", () => {
     const root = makeRoot();
-    // More runs than rows, so the frame is bounded by geometry rather than content.
     for (let index = 0; index < 25; index += 1) {
       writeJournal(root, `20260722-0101${String(index).padStart(2, "0")}-ab12`, []);
     }
@@ -58,7 +57,6 @@ describe("workflow persisted evidence viewer", () => {
     );
 
     const lines = viewer.render(80);
-    // Header, the single run, and the two footer rows: nothing padded up to 21.
     expect(lines).toHaveLength(4);
     expect(lines).not.toContain(" ".repeat(80));
   });
@@ -495,6 +493,8 @@ function createEvidenceRun(
     const destinations = store.childEvidenceDestinations(call.callId);
     const transcript = path.join(destinations.transcriptDir, "session.jsonl");
     const result = path.join(destinations.resultArtifactsDir, "result.json");
+    mkdirSync(destinations.transcriptDir, { recursive: true });
+    mkdirSync(destinations.resultArtifactsDir, { recursive: true });
     writeFileSync(
       transcript,
       `${JSON.stringify({ type: "session", id: `child-${call.callId}` })}\n${JSON.stringify({ type: "message", role: "assistant", text: call.answer })}\n`,

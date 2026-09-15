@@ -126,7 +126,7 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       // of a call that really executed, and the runtime forwards the readback onto the
       // `error` line for exactly that reason. Clearing there would erase the one piece of
       // evidence the run does own, so the executed value replaces the request instead.
-      if (line.executedModel === undefined) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+      if (line.executedModel === undefined) agentLiveStore.patchExecutionWithoutReadback(execution, "model", patch);
       else
         agentLiveStore.patchExecution(execution, {
           ...patch,
@@ -180,7 +180,7 @@ export function applyWorkflowJournalLineToAgentLiveStore(line: WorkflowJournalLi
       ...(line.durationMs !== undefined ? { elapsedMs: line.durationMs } : {}),
       ...(status !== "working" ? { currentTools: [] } : {}),
     };
-    if (neverExecuted) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+    if (neverExecuted) agentLiveStore.patchExecutionWithoutReadback(execution, "model", patch);
     else
       agentLiveStore.patchExecution(execution, {
         ...patch,

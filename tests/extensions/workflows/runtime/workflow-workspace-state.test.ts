@@ -123,6 +123,11 @@ describe("fenced output leases and atomic checkpoints", () => {
     };
     writeWorkflowRunGroupReport(input, lease);
     const readme = readFileSync(path.join(groupDir, "README.md"), "utf8");
+    expect(existsSync(path.join(groupDir, "children"))).toBe(false);
+    expect(existsSync(path.join(groupDir, "attempts"))).toBe(false);
+    expect(readme).not.toContain("[Child runs](children/)");
+    expect(readme).not.toContain("[Resume attempts](attempts/)");
+    expect(readme).not.toContain("[First run status](runtime/result.json)");
     const backlinkFile = path.join(output.absolutePath, ".workflow-runs.md");
     const backlink = readFileSync(backlinkFile, "utf8");
     expect(readme).toContain("# Workflow run group");

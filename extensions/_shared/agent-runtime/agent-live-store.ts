@@ -269,18 +269,15 @@ class AgentLiveStore {
   }
 
   /**
-   * Terminal patch for a row whose child never ran: applies `patch` AND drops the
-   * request-side `model`/`thinking` labels in the same update.
+   * Terminal patch when the host lacks execution readback. Missing model proof
+   * clears both request-side labels; missing thinking proof preserves the model.
    *
-   * A dedicated method rather than `patch({ model: undefined })` because
-   * `exactOptionalPropertyTypes` makes that a type error, and because "this row must
-   * show no model" is worth stating outright instead of leaving a reader to infer it
-   * from a spread of `undefined`. The row is seeded with a requested selector before
-   * the child exists; if nothing was ever built, that label is the request talking to
-   * itself and an operator reading the panel cannot tell it from a model that ran.
+   * This cannot use `patch({ model: undefined })` under exact optional types. The
+   * dedicated operation also keeps request intent distinguishable from execution.
    */
-  patchExecutionWithoutModel(
+  patchExecutionWithoutReadback(
     execution: AgentLiveExecutionHandle,
+    missing: "model" | "thinking",
     patch: Partial<Omit<AgentLiveRow, "id" | "model" | "thinking">>,
     now = Date.now(),
   ): AgentLiveRow | undefined {
@@ -298,7 +295,7 @@ class AgentLiveStore {
     const current = this.rows.get(rowId);
     if (current === undefined) return undefined;
     const cleared: AgentLiveRow = { ...current };
-    delete cleared.model;
+    if (missing === "model") delete cleared.model;
     delete cleared.thinking;
     this.rows.set(rowId, cleared);
     this.#emit();

@@ -21,6 +21,8 @@ Before authoring, inspect the request and supplied documents. If the purpose is 
 
 These are two independently authored workflows. The first produces the task specification and its review history. After the user examines it and asks to implement, author the second workflow against that actual artifact. At that point define initial slices, references to the specification and documentation directory, and the concrete completion outcome of each phase. The implementation queue may later be re-cut while preserving verified work and unmet requirements. Do not prebuild or automatically launch implementation merely because specification authoring finished. The workflow's own `.design.md` describes its graph; it is not the task specification.
 
+When using the packaged `task/plan` authoring stage, pass the complete accepted `task/draft` text as semantic input. Missing or blank input fails before any child starts and produces no `workflow.mjs`; never substitute a placeholder brief.
+
 ## Select the graph before loading details
 
 Read [the pattern index](references/INDEX.md), then only the selected card. Default to adaptive slices for substantive implementation: owner cut → implement one slice → review → addressed correction → recheck → owner re-cut. Choose a fixed graph for genuinely fixed work or an explicit request. Claude Code is not a control plane or a required dependency.

@@ -353,10 +353,6 @@ describe("npm public package boundary", () => {
     // Adaptive authoring replaces the omnibus manual with focused references and
     // adds a public authoring guide, two runnable source examples and style cards.
     // Error diagnostics add one shared writer and one shared diagnostic reference.
-    // Explicit-only budgets add one shared timer module, so a long deadline can run
-    // as a chain of representable waits instead of being refused by a policy ceiling.
-    // One more shared module answers "can this transport host session tools", so a
-    // shaped call on a route that cannot is refused before the child starts.
     // T-218 owner extractions (one packed module each, behavior unchanged):
     //   W2 source literals · W3 artifact format · W6 workspace + workspace state
     //   W4 journal event format · W16 progress-render + agent-observer
@@ -364,7 +360,8 @@ describe("npm public package boundary", () => {
     //   W5 run snapshot reader · W12 saved child · W8 agent contract/call/attempt · W9 agent output
     //   W13 resume + admission · W10 fusion · W14 finalization · W11 agent model
     // Seventeen topical workflow pages replace the old monolith with bookmark pointers.
-    expect(dryRun.files).toHaveLength(309);
+    // The public environment-variable reference documents optional local features.
+    expect(dryRun.files).toHaveLength(310);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -497,6 +494,11 @@ describe("npm public package boundary", () => {
     expect(plan).toContain('mode: "orchestration-only"');
     expect(plan).not.toContain("implement-plan.workflow.mjs");
     expect(packedPaths.has("skills/locus-pi-workflow-implement-task/SKILL.md")).toBe(false);
+  });
+
+  it("ships the public environment-variable reference", () => {
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+    expect(packedPaths.has("docs/environment-variables.md")).toBe(true);
   });
 
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {

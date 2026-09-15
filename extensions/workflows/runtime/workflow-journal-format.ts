@@ -282,7 +282,7 @@ export interface WorkflowJournalLine {
   executedModel?: string;
   /** With `executedModel`: a declared tier had no assignment and the child inherited the session model. */
   modelRoleFallback?: string;
-  /** Resolved thinking/reasoning level for agent live-row display. */
+  /** Child-session thinking/reasoning readback on terminal execution evidence. */
   thinking?: string;
   /** True on agent lines served from a recorded run instead of a fresh child.
    *  False on current terminal agent evidence means fresh execution. On terminal

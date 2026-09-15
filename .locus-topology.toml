@@ -205,3 +205,43 @@ ceiling = 620
 owner = "workflow run finalization"
 reason = "T-218 W14 (2026-09-12): the terminal precedence sequence (abort → evidence → handoff → terminal text → lease → report → result.json) moved whole; splitting it would scatter the precedence across two files."
 trigger = "Growth above 620 lines: move the RunWorkflowScriptResult declaration to the contract side; never split the sequence."
+
+[[exceptions]]
+path = "extensions/_shared/agent-runtime/agent-sdk-host.ts"
+rule = "code-lines"
+ceiling = 1672
+owner = "agent SDK session boundary"
+reason = "Eval integrity repair (2026-09-16): the existing child-session boundary now records host thinking readback and gates its adjacent HTML projection without inventing a second session owner."
+trigger = "Do not grow: the next evidence feature must extract the JSONL/HTML projection into a registered shared owner."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-artifacts.test.ts"
+rule = "code-lines"
+ceiling = 1129
+owner = "workflow artifact-store tests"
+reason = "Eval integrity repair (2026-09-16): one regression proves child evidence destinations stay lazy until a writer uses them."
+trigger = "Above 1129 lines, split persisted-index and child-evidence cases into a stable artifact test subdirectory."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-input.test.ts"
+rule = "code-lines"
+ceiling = 720
+owner = "workflow semantic-input tests"
+reason = "Eval integrity repair (2026-09-16): Package task/plan admission is proven for missing, empty and whitespace input with zero child calls and no published primary file."
+trigger = "Above 720 lines, split Package target admission from the generic string/items contract."
+
+[[exceptions]]
+path = "tests/extensions/workflows/runtime/workflow-model-tiers.test.ts"
+rule = "code-lines"
+ceiling = 1266
+owner = "workflow model-tier tests"
+reason = "Eval integrity repair (2026-09-16): parent-thinking inheritance, explicit override precedence and absent-readback honesty are covered at the workflow-to-SDK boundary."
+trigger = "Above 1266 lines, split executed model/thinking evidence from tier routing."
+
+[[exceptions]]
+path = "tests/shared/agent-runtime/agent-sdk-host-evidence.test.ts"
+rule = "code-lines"
+ceiling = 735
+owner = "agent SDK evidence tests"
+reason = "Eval integrity repair (2026-09-16): JSONL remains unconditional while HTML rendering is proven disabled by default and enabled only by LOCUS_PI_HTML_TRANSCRIPTS=1."
+trigger = "Above 735 lines, split readable-render policy from JSONL validation and result-artifact evidence."

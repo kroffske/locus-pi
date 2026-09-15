@@ -643,7 +643,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       // through `kind: "inherit"` — i.e. the call declared no tier, or declared one
       // that no layer assigns and the degradation was recorded.
       model: tier.kind === "resolved" ? tier.model : (ctx as { model?: unknown }).model,
-      ...(tier.kind === "resolved" && tier.thinking !== undefined ? { thinkingLevel: tier.thinking } : {}),
+      ...(tier.kind === "resolved" && tier.thinking !== undefined
+        ? { thinkingLevel: tier.thinking }
+        : tier.kind === "inherit" && liveModel?.thinking !== undefined
+          ? { thinkingLevel: liveModel.thinking }
+          : {}),
       live,
       onLiveExecution: (execution) => {
         liveExecution = execution;
@@ -848,16 +852,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
       ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),
       ...(worktreePath !== undefined ? { worktreePath } : {}),
-      // Display prefers a real readback over the request; the sentinel is evidence,
-      // not a selector, so it stays out of the row and only enters `executedModel`.
-      ...(executedModel !== undefined && executedModel !== EXECUTED_MODEL_UNAVAILABLE
-        ? { model: executedModel }
-        : liveModel?.model !== undefined
-          ? { model: liveModel.model }
-          : {}),
+      // The request lives on `agent_start`; result evidence contains only host readback.
+      ...(executedModel !== undefined && executedModel !== EXECUTED_MODEL_UNAVAILABLE ? { model: executedModel } : {}),
       ...(executedModel !== undefined ? { executedModel } : {}),
       ...(degradationConfirmed ? { modelRoleFallback: tier.fallback! } : {}),
-      ...(liveModel?.thinking !== undefined ? { thinking: liveModel.thinking } : {}),
+      ...(boundary.executedThinking !== undefined ? { thinking: boundary.executedThinking } : {}),
       ...(slotKey !== undefined ? { slotKey } : {}),
       ...(round !== undefined ? { round } : {}),
       ...(usage !== undefined ? { usage } : {}),
