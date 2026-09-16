@@ -540,6 +540,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir,
       now: () => "fixed",
+      promptEnv: { LOCUS_PI_HTML_TRANSCRIPTS: "1" },
       live: { rowId, label: "draft recon" },
     });
 
@@ -566,6 +567,32 @@ describe("agent SDK evidence surfacing", () => {
     assert.deepEqual(body.childTrace, result.childTrace);
   });
 
+  it.each([{}, { LOCUS_PI_HTML_TRANSCRIPTS: "0" }])(
+    "keeps JSONL and quietly skips HTML when automatic rendering is disabled (%j)",
+    async (promptEnv) => {
+      const req = request();
+      const reportsDir = path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports");
+      const executor = createAgentSdkSessionExecutor({
+        createSession: (async () => ({
+          session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed."), exportsHtml: true }),
+        })) as CreateAgentSessionFactory,
+        reportsDir,
+        now: () => "fixed",
+        promptEnv,
+      });
+
+      const result = await executor.run(req, new AbortController().signal);
+
+      assert.equal(result.status, "completed");
+      assert.equal(result.childTrace?.format, "pi-session-jsonl");
+      assert.equal(result.childTrace?.htmlPath, undefined);
+      assert.equal(
+        result.diagnostics.some((line) => line.startsWith("HTML transcript render")),
+        false,
+      );
+    },
+  );
+
   it.each([
     ["a host without the method", {}, "unavailable: the installed Pi host exposes no AgentSession.exportToHtml"],
     ["a renderer that throws", { exportsHtml: true, htmlExportError: "renderer refused" }, "failed: renderer refused"],
@@ -579,6 +606,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir: path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports"),
       now: () => "fixed",
+      promptEnv: { LOCUS_PI_HTML_TRANSCRIPTS: "1" },
     });
 
     const result = await executor.run(req, new AbortController().signal);

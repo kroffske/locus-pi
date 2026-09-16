@@ -605,8 +605,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       assertWorkflowArtifactComponent(callId, "callId");
       const transcriptDir = path.join(artifactsDir, "transcripts", callId);
       const resultArtifactsDir = path.join(artifactsDir, "results", callId);
-      ensureWorkflowDirectoryNoSymlink(artifactsDir, transcriptDir);
-      ensureWorkflowDirectoryNoSymlink(artifactsDir, resultArtifactsDir);
+      // Writers materialize these confined destinations on first successful write.
       return { transcriptDir, resultArtifactsDir, recordOperatorAskEvidence };
     },
     list() {

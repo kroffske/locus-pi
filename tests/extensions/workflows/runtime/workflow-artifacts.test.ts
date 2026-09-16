@@ -57,6 +57,17 @@ function runDir(root: string, runId: string): string {
 }
 
 describe("workflow run artifact store", () => {
+  it("returns child evidence destinations lazily", () => {
+    const root = project(),
+      id = "lazy-child-evidence";
+    const { transcriptDir, resultArtifactsDir } = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: id,
+      runDir: runDir(root, id),
+    }).childEvidenceDestinations("call-0001");
+    assert.deepEqual([existsSync(transcriptDir), existsSync(resultArtifactsDir)], [false, false]);
+  });
+
   it("refuses an unclaimed execution directory instead of creating a flat run", () => {
     const root = project();
     const id = "unclaimed-child";
@@ -498,7 +509,6 @@ describe("workflow run artifact store", () => {
       runId: sourceRunId,
       runDir: runDir(root, sourceRunId),
     });
-    // Past the 2 MiB ceiling this store used to enforce on every text artifact.
     const large = "L".repeat(3 * 1024 * 1024);
     const sourceRef = source.publishText("large.md", large);
     assert.equal(source.read(sourceRef).byteLength, 3 * 1024 * 1024);
@@ -585,9 +595,6 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, "projection-consumer"),
     });
 
-    // The projection in result.json is a display summary, not an admission list:
-    // an artifact it omitted is still resolvable through the source run's full
-    // verified index.
     assert.equal(current.consumeText(omittedRef).text, "omitted");
     assert.equal(current.consumeText(projectedRef).text, "projected");
   });

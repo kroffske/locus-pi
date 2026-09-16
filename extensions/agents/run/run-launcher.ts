@@ -126,7 +126,7 @@ export async function runAgentLiveTask(
     // row shows an operator a model that never ran and cannot be told apart from one
     // that ran and failed, so the labels go with the same model-free patch the host
     // uses for its own pre-execution exits.
-    agentLiveStore.patchExecutionWithoutModel(execution, {
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
       status: "error",
       errors: [tier.refusal],
       finalAnswer: tier.refusal,

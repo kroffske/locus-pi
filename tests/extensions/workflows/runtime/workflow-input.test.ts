@@ -96,6 +96,40 @@ function registerTool() {
 }
 
 describe("string-only workflow input", () => {
+  it.each([undefined, "", "  \n\t  "])(
+    "fails Package task/plan input %j at admission with zero child calls and no workflow source",
+    async (input) => {
+      const root = temporaryProject();
+      const harness = createHarness(root, { sessionId: "task-plan-required-input" });
+      let childCalls = 0;
+      const result = await runWorkflowScript({
+        pi: harness.pi,
+        ctx: harness.ctx,
+        signal: new AbortController().signal,
+        name: "task/plan",
+        createExecutor: () => ({
+          async run() {
+            childCalls += 1;
+            throw new Error("must not run");
+          },
+        }),
+        ...(input === undefined ? {} : { input }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe(
+        "task/plan requires the complete accepted draft as non-empty semantic input; no agent was started and no workflow.mjs was published.",
+      );
+      expect(childCalls).toBe(0);
+      expect(result.primaryFile).toBeUndefined();
+      expect(result.journal.some((line) => line.kind === "agent_start")).toBe(false);
+      expect(JSON.parse(readFileSync(result.resultPersistence.path, "utf8"))).toMatchObject({
+        ok: false,
+        error: expect.stringContaining("requires the complete accepted draft"),
+      });
+    },
+  );
+
   it("persists awaiting_operator beside the workflow's unchanged prepared result", async () => {
     const root = temporaryProject();
     writeWorkflow(

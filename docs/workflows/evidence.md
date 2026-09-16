@@ -36,14 +36,16 @@ terminal `agent_end` is emitted. A replayed call writes a new answer record with
 envelope because no child ran.
 
 Fresh transcript filenames carry the durable agent identity, bounded stage label,
-session petname, and timestamp. The sibling HTML render uses the same filename and
-replaces the host's generic title with `Agent transcript — <petname> · <stage>`
-when the export contains a title element. The completion digest names the shared
+session petname, and timestamp. The required JSONL is always exported. When
+[`LOCUS_PI_HTML_TRANSCRIPTS=1`](../environment-variables.md#locus_pi_html_transcripts),
+the sibling HTML render uses the same filename and replaces the host's generic
+title with `Agent transcript — <petname> · <stage>` when the export contains a
+title element. The completion digest names the shared
 `artifacts/transcripts/` directory once instead of printing every call path.
 Workflow child sessions use Pi's public file-backed session manager inside their
 run-scoped evidence directory, so they do not enter the operator session catalog
 and the host can still render HTML. The runtime explicitly exports each named
-child JSONL/HTML pair into that directory before disposal. The parent operator
+child JSONL and any enabled HTML render into that directory before disposal. The parent operator
 session and built-in `/export`
 remain host-owned; current Pi hosts materialize the session file only after an
 assistant turn, so a slash-only workflow session can require one ordinary turn
@@ -207,7 +209,7 @@ waiting child resolves the source item. `result.json` is never rewritten.
 ```
 .locus-pi/runs/<storageRootRunId>/
   README.md          — stable group navigation
-  outputs/           — first root README, documents, exact workflow-result.md prose
+  outputs/           — created on terminal projection; root README, documents, exact workflow-result.md prose
   runtime/
     script-<sha256>.workflow.mjs — Read-only bytes evaluated for this run
     journal.ndjson    — NDJSON lines: {ts, runId, kind, source?, phase?, message?, agent?, usage?, replayed?, ...}
@@ -219,12 +221,12 @@ waiting child resolves the source item. `result.json` is never rewritten.
     artifacts/
       index.json       — Canonical digest-bound inventory for this run
       answers/         — Exact automatic agent answers
-      transcripts/     — Fresh child Pi session JSONL, grouped by call id
-      results/         — Fresh child result envelopes, grouped by call id
+      transcripts/     — Created on first fresh child transcript; Pi session JSONL grouped by call id
+      results/         — Created on first fresh child result envelope, grouped by call id
       published/       — Text written through publishArtifact()/publishPrimaryArtifact()
       inputs/          — Verified copies consumed from prior runs, with source refs
-  children/<runId>/  — saved-child execution; owns the same outputs/ and runtime/ shape
-  attempts/<runId>/  — resume execution; owns the same outputs/ and runtime/ shape
+  children/<runId>/  — created on first saved child; owns the same optional outputs/ and runtime/ shape
+  attempts/<runId>/  — created on first resume; owns the same optional outputs/ and runtime/ shape
 ```
 
 Legacy top-level `.locus-pi/runs/<runId>/` evidence remains readable without
@@ -234,7 +236,8 @@ Files deliberately written by workflow agents are outside this tree, under the
 selected project-local workflow workspace. Fresh workflows default to
 `.locus-pi/workspaces/<generated-run-name>/`.
 
-`agent_end` carries `usage` (token/cost), the resolved `model`, and — for a shaped call —
+`agent_end` carries `usage` (token/cost), the child session's model and reasoning-effort
+readback when the host exposes them, and — for a shaped call —
 `schemaValidation` (with `source: "schema" | "script"` on a mismatch when the call declared
 `validate`; the `coercion` field appears only on journals written before the text transport
 was deleted), plus full answer/transcript/result artifact references when

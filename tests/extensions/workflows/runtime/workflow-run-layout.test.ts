@@ -145,7 +145,7 @@ describe("workflow workspace and run evidence", () => {
     const outputNames = readdirSync(workflowRunOutputsDir(workflowRunDir(root, result.runId))).sort();
     assert.deepEqual(outputNames, ["README.md", "workflow-result.md"]);
     assert.ok(!outputNames.includes("plan.md"));
-    assert.deepEqual(readdirSync(result.runDir).sort(), ["README.md", "attempts", "children", "outputs", "runtime"]);
+    assert.deepEqual(readdirSync(result.runDir).sort(), ["README.md", "outputs", "runtime"]);
     assert.ok(readdirSync(workflowRunRuntimeDir(result.runDir)).includes("journal.ndjson"));
     assert.match(result.runDir, /\.locus-pi\/runs\//u);
   });
@@ -256,11 +256,10 @@ describe("workflow workspace and run evidence", () => {
     assert.deepEqual(readdirSync(outside), []);
   });
 
-  it("creates only outputs and runtime for a safe run id", () => {
+  it("creates only runtime evidence for a safe run id", () => {
     const root = project();
-    const runId = "20260731-010203-abcd";
-    const runDir = ensureWorkflowRunDir(root, runId);
-    assert.deepEqual(readdirSync(runDir).sort(), ["outputs", "runtime"]);
+    const runDir = ensureWorkflowRunDir(root, "20260731-010203-abcd");
+    assert.deepEqual(readdirSync(runDir).sort(), ["runtime"]);
     assert.throws(() => ensureWorkflowRunDir(root, "../escape"), /Invalid workflow run id/u);
   });
 
@@ -520,6 +519,7 @@ describe("workflow workspace and run evidence", () => {
       signal: new AbortController().signal,
       name: "symlink-output",
       onRunStart: ({ runDir }) => {
+        mkdirSync(workflowRunOutputsDir(runDir));
         rmSync(workflowRunOutputsDir(runDir), { recursive: true });
         symlinkSync(elsewhere, workflowRunOutputsDir(runDir));
       },

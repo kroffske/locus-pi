@@ -38,6 +38,25 @@ function prelude(runId: string): WorkflowJournalLine {
 }
 
 describe("claimNewWorkflowRun", () => {
+  it("creates only mandatory runtime state until optional run containers are used", () => {
+    const root = temporaryProject();
+    const rootRunDir = ensureWorkflowRunDir(root, "lazy-group");
+
+    expect(existsSync(path.join(rootRunDir, "runtime"))).toBe(true);
+    expect(existsSync(path.join(rootRunDir, "outputs"))).toBe(false);
+    expect(existsSync(path.join(rootRunDir, "children"))).toBe(false);
+    expect(existsSync(path.join(rootRunDir, "attempts"))).toBe(false);
+
+    const childRunDir = ensureWorkflowRunDir(root, "lazy-child", {
+      storageRootRunId: "lazy-group",
+      kind: "child",
+    });
+    expect(existsSync(path.join(rootRunDir, "children"))).toBe(true);
+    expect(existsSync(path.join(rootRunDir, "attempts"))).toBe(false);
+    expect(existsSync(path.join(childRunDir, "runtime"))).toBe(true);
+    expect(existsSync(path.join(childRunDir, "outputs"))).toBe(false);
+  });
+
   it("preserves global uniqueness across root, child, attempt and group boundaries", () => {
     const root = temporaryProject();
     ensureWorkflowRunDir(root, "group-a");

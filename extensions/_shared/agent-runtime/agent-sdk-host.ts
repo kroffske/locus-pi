@@ -55,6 +55,9 @@ export const AGENT_SDK_UNAVAILABLE_DIAGNOSTIC = "agent-sdk-host:unavailable";
 /** Stable substring shared by AgentSdkUnavailableError messages. */
 export const AGENT_SDK_UNAVAILABLE_HINT = "Pi SDK host";
 
+/** Public opt-in for readable child-session renders. JSONL evidence is unconditional. */
+export const HTML_TRANSCRIPTS_ENV = "LOCUS_PI_HTML_TRANSCRIPTS";
+
 const DEFAULT_AGENT_SDK_ABORT_TIMEOUT_MS = 5_000;
 
 /** Raised when the installed Pi host cannot provide a usable `createAgentSession`. */
@@ -87,6 +90,8 @@ export interface SdkAgentSessionLike {
    * for. Structurally opaque: `modelSelectorFromModel` formats it.
    */
   readonly model?: unknown;
+  /** Current effective reasoning effort, as reported by the child session. */
+  readonly thinkingLevel?: ThinkingLevel;
   /** Pi conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
@@ -242,7 +247,7 @@ export interface AgentSdkSessionExecutorOptions {
   liveExecution?: AgentLiveExecutionHandle;
   /** Reports the one exact execution used by this run to callers that need post-boundary attribution. */
   onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
-  /** Optional explicit env for prompt-building; defaults to process.env. */
+  /** Optional explicit env for prompt-building and child evidence settings; defaults to process.env. */
   promptEnv?: NodeJS.ProcessEnv;
 }
 
@@ -338,6 +343,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
 /** Filled by the child-session run once a session exists; empty when none was created. */
 interface ExecutedModelObservation {
   executedModel?: string;
+  executedThinking?: ThinkingLevel;
   activeToolNames?: string[];
 }
 
@@ -384,6 +390,7 @@ async function runWithSdkSession(
   return {
     ...result,
     ...(observed.executedModel === undefined ? {} : { executedModel: observed.executedModel }),
+    ...(observed.executedThinking === undefined ? {} : { executedThinking: observed.executedThinking }),
     ...(observed.activeToolNames === undefined ? {} : { activeToolNames: observed.activeToolNames }),
   };
 }
@@ -418,7 +425,7 @@ async function runChildSession(
     // Clear the request-side display model: no session was ever built, so leaving the
     // selector on the row shows an operator a model that never ran (see the note on
     // the `createSession` failure paths below).
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", { status: "cancelled", finalAnswer: reason });
     return cancelledResult(request, reason);
   }
 
@@ -429,7 +436,11 @@ async function runChildSession(
   const turnBudgetMs = childTimeoutMs;
   if (turnBudgetMs !== undefined && (!Number.isSafeInteger(turnBudgetMs) || turnBudgetMs < 1)) {
     const reason = "Child timer budget cannot be represented by Node timers; supply a positive whole childTimeoutMs.";
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", finalAnswer: reason, errors: [reason] });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      finalAnswer: reason,
+      errors: [reason],
+    });
     return failedResult(request, reason, "run-policy-blocked", [reason]);
   }
 
@@ -523,7 +534,7 @@ async function runChildSession(
       // ran — the live panel is the surface they actually watch, and a failed row
       // reading "test/fast" is indistinguishable from one that ran on test/fast and
       // errored. Clear it: absent is honest, invented is not.
-      agentLiveStore.patchExecutionWithoutModel(execution, {
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
         status: "error",
         errors: [error.message],
         finalAnswer: error.message,
@@ -535,7 +546,11 @@ async function runChildSession(
       ]);
     }
     const reason = errorMessage(error);
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      errors: [reason],
+      finalAnswer: reason,
+    });
     // Catch-all: this branch also carries a bad model id, a rejected tool allowlist and any
     // option-assembly bug. None of those is transient, so none of them may be retried.
     return failedResult(request, reason, "unclassified", [...diagnostics, reason]);
@@ -554,14 +569,22 @@ async function runChildSession(
       if (activeToolNames !== undefined) observed.activeToolNames = activeToolNames;
     } catch (error) {
       const reason = `Active tool readback failed before child prompt: ${errorMessage(error)}`;
-      agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+        status: "error",
+        errors: [reason],
+        finalAnswer: reason,
+      });
       disposeQuietly(session);
       return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
     }
   }
   if (request.capabilityMode === "tool-free" && activeToolNames === undefined) {
     const reason = "Tool-free Fusion requires AgentSession.getActiveToolNames() before child prompt.";
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      errors: [reason],
+      finalAnswer: reason,
+    });
     disposeQuietly(session);
     return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
   }
@@ -571,7 +594,11 @@ async function runChildSession(
       : [];
   if (unexpectedToolFreeTools.length > 0) {
     const reason = `Tool-free Fusion child exposed active tools before prompt: ${unexpectedToolFreeTools.join(", ")}.`;
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      errors: [reason],
+      finalAnswer: reason,
+    });
     disposeQuietly(session);
     return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
   }
@@ -583,6 +610,7 @@ async function runChildSession(
   // put "executedModel" on a call that spent no tokens, which is the same
   // requested-vs-executed conflation this task exists to remove, one step later.
   const sessionModelSelector = modelSelectorFromModel(session.model) ?? EXECUTED_MODEL_UNAVAILABLE;
+  const sessionThinkingLevel = session.thinkingLevel;
   const requestedSelector = modelSelectorFromModel(model);
   let childOutputStats: AgentChildOutputStats | undefined;
   let childTrace: AgentChildTrace | undefined;
@@ -590,12 +618,20 @@ async function runChildSession(
   const preserveChildTrace = async (): Promise<AgentChildTrace | undefined> => {
     if (!childTraceAttempted) {
       childTraceAttempted = true;
-      childTrace = await exportEvidence(session, request, now, reportsDirOverride, diagnostics, {
-        ...(agentLiveStore.rowForExecution(execution)?.displayName === undefined
-          ? {}
-          : { displayName: agentLiveStore.rowForExecution(execution)!.displayName! }),
-        ...(liveLabel === undefined ? {} : { label: liveLabel }),
-      });
+      childTrace = await exportEvidence(
+        session,
+        request,
+        now,
+        reportsDirOverride,
+        diagnostics,
+        {
+          ...(agentLiveStore.rowForExecution(execution)?.displayName === undefined
+            ? {}
+            : { displayName: agentLiveStore.rowForExecution(execution)!.displayName! }),
+          ...(liveLabel === undefined ? {} : { label: liveLabel }),
+        },
+        promptEnv,
+      );
     }
     return childTrace;
   };
@@ -609,7 +645,9 @@ async function runChildSession(
    * of leaving an operator a terminal row indistinguishable from one that ran.
    */
   const patchTerminalRow = (patch: Partial<Omit<AgentLiveRow, "id" | "model" | "thinking">>): void => {
-    if (observed.executedModel === undefined) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+    if (observed.executedModel === undefined) agentLiveStore.patchExecutionWithoutReadback(execution, "model", patch);
+    else if (observed.executedThinking === undefined)
+      agentLiveStore.patchExecutionWithoutReadback(execution, "thinking", patch);
     else agentLiveStore.patchExecution(execution, patch);
   };
   try {
@@ -628,6 +666,7 @@ async function runChildSession(
       // reports nothing the row keeps its display value rather than showing the
       // `unavailable` sentinel, which is evidence and not a model name (D6/D7).
       ...(sessionModelSelector !== EXECUTED_MODEL_UNAVAILABLE ? { model: sessionModelSelector } : {}),
+      ...(sessionThinkingLevel !== undefined ? { thinking: sessionThinkingLevel } : {}),
     });
 
     // MUST guard the gap between session creation and prompting: an abort that
@@ -639,7 +678,7 @@ async function runChildSession(
       // Clear the label rather than leave the readback standing: the session was
       // BUILT on that model and never prompted, so a terminal row naming it claims an
       // execution that did not happen — the same conflation as echoing the request.
-      agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", { status: "cancelled", finalAnswer: reason });
       const preservedTrace = await preserveChildTrace();
       return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), preservedTrace);
     }
@@ -660,7 +699,7 @@ async function runChildSession(
       // Both values are in `reason`, which is where a mismatch belongs. The ROW gets
       // neither: the requested model did not run and the built-on model was never
       // prompted, so any label here names a model that executed nothing.
-      agentLiveStore.patchExecutionWithoutModel(execution, {
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
         status: "error",
         errors: [reason],
         finalAnswer: reason,
@@ -738,7 +777,10 @@ async function runChildSession(
       ledger,
       request.maxTurns,
     );
-    if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+    if (turn.promptAccepted) {
+      observed.executedModel = sessionModelSelector;
+      if (sessionThinkingLevel !== undefined) observed.executedThinking = sessionThinkingLevel;
+    }
     while (
       acceptance !== undefined &&
       turn.settlement === "completed" &&
@@ -774,7 +816,10 @@ async function runChildSession(
         ledger,
         request.maxTurns,
       );
-      if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+      if (turn.promptAccepted) {
+        observed.executedModel = sessionModelSelector;
+        if (sessionThinkingLevel !== undefined) observed.executedThinking = sessionThinkingLevel;
+      }
     }
     if (signal.aborted) turn = { ...turn, settlement: "aborted" };
 
@@ -788,7 +833,10 @@ async function runChildSession(
     // prompt is still in flight and no child event has ever arrived. A turn that was
     // dispatched and then timed out DID execute, which is why promotion sits here
     // rather than after the settlement branches.
-    if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+    if (turn.promptAccepted) {
+      observed.executedModel = sessionModelSelector;
+      if (sessionThinkingLevel !== undefined) observed.executedThinking = sessionThinkingLevel;
+    }
 
     if (
       turn.settlement === "aborted" ||
@@ -1349,6 +1397,7 @@ async function exportEvidence(
   reportsDirOverride: string | undefined,
   diagnostics: string[],
   identity: { displayName?: string; label?: string },
+  env: NodeJS.ProcessEnv | undefined,
 ): Promise<AgentChildTrace | undefined> {
   const reportsDir = reportsDirOverride ?? path.join(runtimeStateDir(request.projectRoot ?? process.cwd()), "reports");
   const stamp = sanitizeStamp(now());
@@ -1373,13 +1422,15 @@ async function exportEvidence(
       throw new Error(`exported JSONL session header does not match child ${session.sessionId}`);
     }
     diagnostics.push(`JSONL evidence exported: ${realExportedPath}`);
-    const htmlPath = await exportHtmlRender(
-      session,
-      realReportsDir,
-      realExportedPath,
-      diagnostics,
-      agentEvidenceTitle(request, identity),
-    );
+    const htmlPath = htmlTranscriptsEnabled(env)
+      ? await exportHtmlRender(
+          session,
+          realReportsDir,
+          realExportedPath,
+          diagnostics,
+          agentEvidenceTitle(request, identity),
+        )
+      : undefined;
     return {
       path: realExportedPath,
       format: "pi-session-jsonl",
@@ -1390,6 +1441,11 @@ async function exportEvidence(
     diagnostics.push(`JSONL export failed: ${errorMessage(error)}`);
     return undefined;
   }
+}
+
+/** Only the literal value `1` enables automatic HTML rendering. */
+export function htmlTranscriptsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[HTML_TRANSCRIPTS_ENV]?.trim() === "1";
 }
 
 /** Named warning prefix for every reason a session has no readable render. */

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext } from "../host/pi-api.js";
+import type { ExtensionAPI, ExtensionContext, ThinkingLevel } from "../host/pi-api.js";
 import { getProjectRoot, getSessionId, getWorkingDirectory } from "../host/pi-api.js";
 import type { AgentDefinition } from "./agents.js";
 import type { AgentFailureCause } from "./agent-failure-cause.js";
@@ -146,6 +146,7 @@ export interface AgentRunResult {
    * Never derived from the requested selector.
    */
   executedModel?: string;
+  executedThinking?: ThinkingLevel;
   /** Exact pre-prompt host readback. Absent means no live readback was available. */
   activeToolNames?: string[];
   evidence?: EvidenceEvaluation;
@@ -446,10 +447,9 @@ export function writeAgentRunResultArtifact(
     allowedTools: request.allowedTools,
     modelRole:
       request.modelRoleResolution === undefined ? undefined : modelRoleResolutionRecord(request.modelRoleResolution),
-    // What was asked for versus what ran, side by side and never conflated. The
-    // executed value comes from the host readback carried on the result; the
-    // fallback note comes from the request, because the caller knew it first.
+    // Requested and executed values stay distinct; execution comes from host readback.
     executedModel: result.executedModel,
+    executedThinking: result.executedThinking,
     capabilityMode: request.capabilityMode,
     activeToolNames: result.activeToolNames,
     // The note is written before the child exists and says "the child inherited the

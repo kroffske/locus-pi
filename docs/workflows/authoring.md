@@ -41,7 +41,9 @@ The group-only Package `task` namespace offers an editable two-stage handoff.
 handoffs, review bounds, concurrency, failure exits, and primary output. Copy or
 edit that full text, then pass it as semantic input to `task/plan`. That workflow
 designs, reviews, builds, checks, and publishes one concrete `workflow.mjs`.
-Neither stage runs the generated source.
+Neither stage runs the generated source. `task/plan` requires the complete accepted
+draft: missing or blank semantic input fails before any child starts and publishes
+no workflow source.
 
 New standard source omits `maxToolCalls` and `timeoutMs`: both are unbounded unless
 the author or operator explicitly supplies a fuse. Launch-mode defaults apply only

@@ -384,9 +384,8 @@ export function readWorkflowRunsDirectory(projectRoot: string): Dirent[] {
 /** Create the canonical run root. Throws before creation through an unsafe chain. */
 export function ensureWorkflowRunDir(projectRoot: string, runId: string, location?: WorkflowRunLocation): string {
   const runDir = ensureCanonicalRunDirectory(projectRoot, runId, location);
-  for (const dirname of [WORKFLOW_RUN_OUTPUTS_DIRNAME, WORKFLOW_RUN_RUNTIME_DIRNAME]) {
-    ensureWorkflowDirectoryNoSymlink(runDir, path.join(runDir, dirname));
-  }
+  // Runtime is mandatory; the terminal report writer creates optional outputs/.
+  ensureWorkflowDirectoryNoSymlink(runDir, path.join(runDir, WORKFLOW_RUN_RUNTIME_DIRNAME));
   return runDir;
 }
 

@@ -191,8 +191,9 @@ export interface WorkflowAgentResult {
   childTrace?: WorkflowAgentChildTrace;
   resultArtifact?: string;
   worktreePath?: string;
-  /** Display selector for the live row; see WorkflowJournalLine.model. */
+  /** Executed model selector read back from the child; absent when unavailable. */
   model?: string;
+  /** Executed reasoning effort read back from the child; absent when unavailable. */
   thinking?: string;
   /**
    * What the CHILD SESSION reported it ran on, read back from the host after the

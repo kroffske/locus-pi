@@ -67,6 +67,8 @@ the point:
 A frontmatter tier resolves its named role directly from the global user config
 at `~/.pi/agent/model-roles/config.json`. A model-less child checks only the
 `agent` role, then inherits the current session model when that role is unset.
+A child that inherits the model also receives the parent session's current
+reasoning effort; the host's unrelated default cannot silently replace it.
 A per-call `modelRole` also resolves only the role it names.
 `modelRoleResolution` continues to be recorded in the request capsule,
 artifacts, and live display.
@@ -91,8 +93,8 @@ the resolved model is what `createSession` receives.
 **Selector grammar.** A token containing `/` is a concrete `provider/id`; a
 slash-free token is a role name looked up in the roles table. A trailing
 `:off|minimal|low|medium|high|xhigh` is stripped before the registry lookup,
-then passed to the child session as `thinkingLevel` and retained on the live
-row. A concrete model or effort the installed Pi host cannot honor fails the
+then passed to the child session as `thinkingLevel`. An explicit selector or role
+effort outranks inherited parent effort. A concrete model or effort the installed Pi host cannot honor fails the
 child creation boundary rather than silently changing either value.
 
 **What executed, versus what was asked for.** `agent_start` is emitted before the
@@ -102,7 +104,9 @@ session after `createSession`. When the peer exposes no model the field records
 `unavailable`; it is never back-filled from the request. A readback that
 contradicts the resolved request fails the call with both values quoted, because
 a host that ignored the selection is exactly the failure this evidence exists to
-catch.
+catch. Terminal `thinking` evidence likewise comes from the child session's
+effective `thinkingLevel` after dispatch. When that readback is unavailable the
+terminal field is absent; requested or parent effort is not substituted.
 
 **Nothing is named as executed before the child is dispatched.** `executedModel`
 — and with it the recorded tier degradation — appears only once the child's first

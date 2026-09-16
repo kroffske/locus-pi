@@ -242,6 +242,19 @@ export function admitWorkflowRun(request: WorkflowRunAdmissionRequest): Workflow
     return { admitted: false, error: err instanceof Error ? err.message : String(err), target, ...state() };
   }
 
+  const missingTaskPlanInput =
+    target.source === "package" && target.kind === "name" && target.ref === "task/plan" && !opts.input?.trim();
+  if (missingTaskPlanInput) {
+    return {
+      admitted: false,
+      error:
+        "task/plan requires the complete accepted draft as non-empty semantic input; no agent was started and no workflow.mjs was published.",
+      target,
+      scriptIdentity,
+      ...state(),
+    };
+  }
+
   // --- 3. workspace identity + admission, then 4. launch binding -----------
   try {
     if (opts.recoverInterrupted !== undefined && typeof opts.recoverInterrupted !== "boolean")

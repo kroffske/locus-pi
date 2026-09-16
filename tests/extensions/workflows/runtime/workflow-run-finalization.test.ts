@@ -63,6 +63,7 @@ function answeringExecutor(): AgentExecutor {
 
 /** Turn `<runDir>/outputs` into a regular FILE, so every write under it fails. */
 function blockOutputsDirectory(runDir: string): void {
+  mkdirSync(path.join(runDir, "outputs"));
   rmSync(path.join(runDir, "outputs"), { recursive: true });
   writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
 }
@@ -327,6 +328,7 @@ describe("workflow run finalization", () => {
       // module returns { ok: false } instead of throwing, exactly as documented.
       // Planted once the run id exists and long before the report is written.
       onRunStart: ({ runDir }) => {
+        mkdirSync(path.join(runDir, "outputs"));
         rmSync(path.join(runDir, "outputs"), { recursive: true });
         writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
       },
@@ -399,6 +401,7 @@ describe("workflow run finalization", () => {
       signal: new AbortController().signal,
       name: "finalization-fallback",
       onRunStart: ({ runDir }) => {
+        mkdirSync(path.join(runDir, "outputs"));
         rmSync(path.join(runDir, "outputs"), { recursive: true });
         writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
         const journalPath = workflowJournalFile(runDir);

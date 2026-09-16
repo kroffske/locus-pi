@@ -61,10 +61,6 @@ export function writeWorkflowRunGroupReport(
   const groupDir = workflowRunDir(input.projectRoot, input.storageRootRunId);
   const readme = path.join(groupDir, "README.md");
   const marker = "<!-- locus-pi:workflow-run-group:v1 -->";
-  for (const directory of ["children", "attempts"]) {
-    assertWorkflowRootLease(lease);
-    ensureWorkflowDirectoryNoSymlink(groupDir, path.join(groupDir, directory));
-  }
   const workspaceHref = path.relative(groupDir, input.workspaceDir).split(path.sep).map(encodeURIComponent).join("/");
   const body = [
     marker,
@@ -74,12 +70,10 @@ export function writeWorkflowRunGroupReport(
     `Group: ${input.storageRootRunId}`,
     "",
     `- [Workspace working files](${workspaceHref}/).`,
-    "- [First run outputs](outputs/).",
-    "- [First run status](runtime/result.json) and [journal](runtime/journal.ndjson).",
-    "- [Child runs](children/).",
-    "- [Resume attempts](attempts/).",
+    "- [First run journal](runtime/journal.ndjson).",
     "",
-    "Each execution has its own runId, outputs/, and runtime/. Its runtime/result.json holds the current status; journal.ndjson shows unfinished execution.",
+    "The terminal runtime/result.json and optional outputs/, children/, and attempts/ directories appear only when the runtime writes that evidence.",
+    "Each execution has its own runId and runtime/. After completion, runtime/result.json holds the terminal status; journal.ndjson also shows unfinished execution.",
     "This page contains stable links, not a latest-status summary. Keep runtime/: history and resume depend on it.",
     "",
   ].join("\n");

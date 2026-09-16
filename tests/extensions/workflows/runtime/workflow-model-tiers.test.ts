@@ -26,7 +26,7 @@ import {
   type WorkflowAgentResult,
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
-import type { ModelLike } from "../../../../extensions/_shared/host/pi-api.js";
+import type { ModelLike, ThinkingLevel } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, type Harness } from "../../../test-harness.js";
 import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../../model-roles-fixture.js";
 
@@ -114,7 +114,7 @@ function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
       ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
       createSession: async (options) => {
         captured.push(options);
-        return { session: fakeSession(sessionModel, answer, options) };
+        return { session: fakeSession(sessionModel, answer, options.thinkingLevel, options) };
       },
       reportsDir,
       now: () => "fixed",
@@ -132,6 +132,7 @@ function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
 function fakeSession(
   model: unknown,
   answer = "tier answer",
+  thinkingLevel?: ThinkingLevel,
   options?: { customTools?: Array<{ name: string; execute: (...args: never[]) => unknown }> },
 ): SdkAgentSessionLike {
   const exportDir = mkdtempSync(path.join(tmpdir(), "locus-model-tiers-export-"));
@@ -143,6 +144,7 @@ function fakeSession(
     // Absent on purpose when the caller passes nothing: an older peer or a
     // structural mock exposes no model, and that must record as `unavailable`.
     ...(model !== undefined ? { model } : {}),
+    ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
     subscribe(fn) {
       listener = fn;
       return () => {
@@ -403,6 +405,45 @@ describe("the declared tier reaches the child session", () => {
     expect(result.status).toBe("completed");
     expect(result.modelRoleFallback).toBeUndefined();
     expect(probe.captured[0]?.model).toEqual(STRONG);
+  });
+
+  it("inherits the parent reasoning effort instead of falling through to the host default", async () => {
+    // The user's global/default route is deliberately low, while this live parent
+    // session is medium. A model-less agent declared no override, so both model and
+    // effort must inherit from the live parent as one contract.
+    const h = await harnessWithRoles({ default: "test/fast:low" });
+    h.pi.setThinkingLevel?.("medium");
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({ runId: "thinking-inherit", agentRunner: runner });
+
+    await expect(dsl.agent("work", { agent: "bare" })).resolves.toBe("tier answer");
+
+    expect(probe.captured[0]).toMatchObject({ model: STRONG, thinkingLevel: "medium" });
+    expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBe("medium");
+  });
+
+  it("keeps an explicit role reasoning override above the parent and journals the host readback", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast:high" });
+    h.pi.setThinkingLevel?.("medium");
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({ runId: "thinking-role", agentRunner: runner });
+
+    await expect(dsl.agent("work", { agent: "bare", modelRole: "smol" })).resolves.toBe("tier answer");
+
+    expect(probe.captured[0]).toMatchObject({ model: FAST, thinkingLevel: "high" });
+    expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBe("high");
   });
 
   it("resolves a declared role WITHOUT the purpose fallback chain", async () => {
@@ -969,6 +1010,36 @@ describe("executed-model evidence", () => {
     const end = getJournal().find((line) => line.kind === "agent_end");
     expect(end?.executedModel).toBe("unavailable");
     expect(end?.executedModel).not.toBe("test/fast");
+    expect(end?.model).toBeUndefined();
+  });
+
+  it("does not substitute requested thinking when the child exposes no thinking readback", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast:high" });
+    h.pi.setThinkingLevel?.("medium");
+    const captured: SdkCreateSessionOptionsLike[] = [];
+    const reportsDir = mkdtempSync(path.join(tmpdir(), "locus-thinking-unavailable-"));
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: (options) =>
+        createAgentSdkSessionExecutor({
+          ...(options.model === undefined ? {} : { model: options.model }),
+          ...(options.thinkingLevel === undefined ? {} : { thinkingLevel: options.thinkingLevel }),
+          createSession: async (sessionOptions) => {
+            captured.push(sessionOptions);
+            return { session: fakeSession(FAST, "tier answer", undefined, sessionOptions) };
+          },
+          reportsDir,
+          now: () => "fixed",
+        }),
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({ runId: "thinking-unavailable", agentRunner: runner });
+
+    await expect(dsl.agent("work", { agent: "bare", modelRole: "smol" })).resolves.toBe("tier answer");
+
+    expect(captured[0]?.thinkingLevel).toBe("high");
+    expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBeUndefined();
   });
 
   it("records the degradation on agent_end so a reader sees the quiet fallback", async () => {

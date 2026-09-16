@@ -7,7 +7,8 @@
    failure exits, and expected output. Copy and edit this text when needed.
 2. `task/plan` receives the complete accepted draft as semantic input. It designs,
    reviews, builds, and checks one concrete `workflow.mjs`, then publishes that
-   source as the final result.
+   source as the final result. Missing, empty, or whitespace-only input fails before
+   the first child starts and publishes no `workflow.mjs`.
 
 The second stage replaces the old generic implementation and template-rendering
 pipeline. Nothing executes the generated workflow automatically. Review the

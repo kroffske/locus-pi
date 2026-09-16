@@ -21,6 +21,7 @@ import { elapsedSinceStart, formatDuration } from "../../../extensions/_shared/a
 import { buildAgentSystemPrompt } from "../../../extensions/_shared/agent-runtime/agent-system-prompt.js";
 import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
+import type { ThinkingLevel } from "../../../extensions/_shared/host/pi-api.js";
 
 /**
  * INSURANCE, NOT PROOF.
@@ -97,6 +98,8 @@ interface FakeSessionConfig {
   events?: SdkAgentSessionEventLike[];
   /** What the host says this session runs on. Absent = an older peer or a structural mock. */
   model?: unknown;
+  /** What the host says this session actually used for reasoning. */
+  thinkingLevel?: ThinkingLevel;
   activeToolNames?: string[];
   exposesActiveToolNames?: boolean;
   onPrompt?: (text: string) => void;
@@ -116,6 +119,7 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
   const session: SdkAgentSessionLike = {
     sessionId: config.sessionId ?? "sdk-child",
     ...(config.model !== undefined ? { model: config.model } : {}),
+    ...(config.thinkingLevel !== undefined ? { thinkingLevel: config.thinkingLevel } : {}),
     ...(config.messages !== undefined ? { messages: config.messages } : {}),
     subscribe(fn) {
       listener = fn;
@@ -127,8 +131,7 @@ function fakeSession(config: FakeSessionConfig): FakeSession {
       config.onPrompt?.(text);
       if (config.promptError !== undefined) throw new Error(config.promptError);
       for (const event of config.events ?? []) listener?.(event);
-      // Drive the terminal event synchronously so `await ended` resolves, unless
-      // the fake is configured to never complete its turn.
+      // Drive the terminal event synchronously unless the fake never completes.
       if (config.neverEnds !== true) listener?.({ type: "agent_end", willRetry: false });
     },
     getSessionStats() {
@@ -2118,10 +2121,12 @@ describe("executed-model readback", () => {
       toolResults: 0,
       lastAssistantText: "done",
       model: FAST,
+      thinkingLevel: "medium",
     });
     let capturedOptions: SdkCreateSessionOptionsLike | undefined;
     const executor = createAgentSdkSessionExecutor({
       model: FAST,
+      thinkingLevel: "high",
       createSession: async (options) => {
         capturedOptions = options;
         return { session };
@@ -2135,7 +2140,9 @@ describe("executed-model readback", () => {
     expect(result.status).toBe("completed");
     // By value: `toBeTruthy()` would pass on any model at all.
     expect(capturedOptions?.model).toEqual(FAST);
+    expect(capturedOptions?.thinkingLevel).toBe("high");
     expect(result.executedModel).toBe("test/fast");
+    expect(result.executedThinking).toBe("medium");
   });
 
   it("fails closed when the session's model contradicts the requested one", async () => {
@@ -2363,11 +2370,7 @@ describe("executed-model readback", () => {
   });
 
   it("clears the row's requested model when the session was never created", async () => {
-    // Round-2 finding 3. A probe against the shipped code returned status `error` with
-    // no executedModel and the row still reading `model: "test/fast"` — a terminal row
-    // labelled with a model that never ran, indistinguishable to an operator from one
-    // that ran on test/fast and then errored. Absent is honest; the request echoed
-    // back is not.
+    // A terminal row must not retain a requested model that never ran.
     const executor = createAgentSdkSessionExecutor({
       model: FAST,
       createSession: async () => {
@@ -2407,8 +2410,7 @@ describe("executed-model readback", () => {
   });
 
   it("leaves the row's display value alone when the peer reports no model", async () => {
-    // `unavailable` is evidence, not a model name. It belongs in `executedModel`,
-    // never in a display field where it reads as a model called "unavailable".
+    // `unavailable` is evidence, not a display model name.
     const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done" });
     const executor = createAgentSdkSessionExecutor({
       model: FAST,
@@ -2425,13 +2427,7 @@ describe("executed-model readback", () => {
   });
 
   it("leaves no model on the row when the call fails closed on a mismatch", async () => {
-    // The mismatch refusal is precisely the case where the operator most needs the
-    // row to stop showing the model that did NOT run — and NEITHER value ran here.
-    // This assertion previously demanded the readback (`test/strong`) on the row,
-    // which was the same defect wearing the other value: the session was built on
-    // test/strong and refused before a single token, so labelling the row with it
-    // claims an execution that never happened. Both values are in the failure reason,
-    // which is where a mismatch belongs; the row shows none.
+    // A pre-prompt mismatch names both selectors in the error but shows neither as executed.
     const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done", model: STRONG });
     const executor = createAgentSdkSessionExecutor({
       model: FAST,
