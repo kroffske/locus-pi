@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
+import type {
+  SdkAgentSessionEventLike,
+  SdkAgentSessionLike,
+} from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
+import type { ThinkingLevel } from "../../../../extensions/_shared/host/pi-api.js";
 import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
@@ -277,5 +282,95 @@ describe("workflow evidence threading", () => {
 
     assert.match(rendered, /agent_end: reviewer completed/);
     assert.match(rendered, /missing expected runtime evidence/);
+  });
+});
+
+/**
+ * Replace the Pi SDK module itself, so the bridge's DEFAULT executor factory runs for
+ * real. The fake host honours what it is given; returns what `createAgentSession` got.
+ */
+function mockPiSdk(): Array<Record<string, unknown>> {
+  const sessionOptions: Array<Record<string, unknown>> = [];
+  vi.doMock("@earendil-works/pi-coding-agent", () => ({
+    getAgentDir: () => tmpdir(),
+    DefaultResourceLoader: class {
+      reload(): void {}
+    },
+    SessionManager: { create: () => ({ kind: "isolated-child-session" }) },
+    createAgentSession: async (options: Record<string, unknown>) => {
+      sessionOptions.push(options);
+      let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+      const session: SdkAgentSessionLike = {
+        sessionId: "default-executor-child",
+        ...(options.model === undefined ? {} : { model: options.model }),
+        ...(options.thinkingLevel === undefined ? {} : { thinkingLevel: options.thinkingLevel as ThinkingLevel }),
+        subscribe(fn) {
+          listener = fn;
+          return () => {
+            listener = undefined;
+          };
+        },
+        async prompt() {
+          listener?.({ type: "agent_end", willRetry: false });
+        },
+        getSessionStats: () => ({ sessionId: "default-executor-child", toolCalls: 0, toolResults: 0 }),
+        getLastAssistantText: () => "default answer",
+        exportToJsonl(outputPath) {
+          assert.ok(outputPath !== undefined, "the host names the evidence path");
+          writeFileSync(outputPath, `${JSON.stringify({ type: "session", id: "default-executor-child" })}\n`);
+          return outputPath;
+        },
+        dispose() {},
+      };
+      return { session };
+    },
+  }));
+  return sessionOptions;
+}
+
+describe("the default executor factory (no createExecutor injected)", () => {
+  afterEach(() => {
+    vi.doUnmock("@earendil-works/pi-coding-agent");
+  });
+
+  it("creates the child session on the requested model and writes its transcript to the run's evidence", async () => {
+    const h = createHarness(tempProject(), { sessionId: "wf-parent-default-executor" });
+    const sessionOptions = mockPiSdk();
+    const transcriptDir = mkdtempSync(path.join(tmpdir(), "locus-workflow-evidence-transcripts-"));
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      evidenceDestinations: () => ({
+        transcriptDir,
+        resultArtifactsDir: mkdtempSync(path.join(tmpdir(), "locus-workflow-evidence-results-")),
+        recordOperatorAskEvidence: () => {
+          throw new Error("this call asks the operator nothing");
+        },
+      }),
+    });
+
+    const result = await runner({ prompt: "work", model: "test/fast:high", callId: "call-0001" });
+
+    assert.equal(result.status, "completed");
+    assert.equal(sessionOptions.length, 1);
+    assert.deepEqual(sessionOptions[0]?.model, { provider: "test", id: "fast", name: "Test Fast" });
+    assert.equal(sessionOptions[0]?.thinkingLevel, "high");
+    assert.equal(path.dirname(result.childTrace?.path ?? ""), realpathSync(transcriptDir));
+  });
+
+  it("names no model to the host when neither the call nor the parent session declares one", async () => {
+    // The one field the bridge can hand over as a present-but-undefined key: the
+    // inherited parent model. The host must treat it exactly as an omitted one.
+    const h = createHarness(tempProject(), { sessionId: "wf-parent-no-model" });
+    assert.equal(h.ctx.model, undefined);
+    const sessionOptions = mockPiSdk();
+    const runner = createWorkflowAgentRunner({ pi: h.pi, ctx: h.ctx, signal: new AbortController().signal });
+
+    const result = await runner({ prompt: "work" });
+
+    assert.equal(result.status, "completed");
+    assert.equal(sessionOptions.length, 1);
+    assert.equal(Object.hasOwn(sessionOptions[0] ?? {}, "model"), false);
   });
 });

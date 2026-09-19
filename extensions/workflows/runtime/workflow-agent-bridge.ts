@@ -560,28 +560,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         : createAgentRunRequest(agent, childTask, requestInput);
 
     // 5. Build the executor via the injectable factory
-    const createExecutorFn =
-      options.createExecutor ??
-      ((o: {
-        model?: unknown;
-        thinkingLevel?: ThinkingLevel;
-        live?: AgentSdkSessionExecutorOptions["live"];
-        maxToolCalls?: number;
-        childTimeoutMs?: number;
-        cliRequestTimeoutMs?: number;
-        reportsDir?: string;
-        onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
-      }) =>
-        createAgentSdkSessionExecutor({
-          ...(o.model !== undefined ? { model: o.model } : {}),
-          ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
-          ...(o.live !== undefined ? { live: o.live } : {}),
-          ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
-          ...(o.childTimeoutMs !== undefined ? { childTimeoutMs: o.childTimeoutMs } : {}),
-          ...(o.cliRequestTimeoutMs !== undefined ? { cliRequestTimeoutMs: o.cliRequestTimeoutMs } : {}),
-          ...(o.reportsDir !== undefined ? { reportsDir: o.reportsDir } : {}),
-          ...(o.onLiveExecution !== undefined ? { onLiveExecution: o.onLiveExecution } : {}),
-        }));
+    const createExecutorFn = options.createExecutor ?? createAgentSdkSessionExecutor;
     const workflowParentRowId =
       options.workflowRunId !== undefined
         ? workflowAgentLiveRowId({
