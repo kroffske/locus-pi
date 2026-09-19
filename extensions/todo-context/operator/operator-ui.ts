@@ -208,6 +208,5 @@ export function todoHelpBlock(): OperatorBlock {
     subject: "Session todos help",
     primary: "Inspect or explicitly change session-backed todo state.",
     body: TODO_HELP.split(/\r?\n/u),
-    hint: ["/todos is a different surface: the Todos prompt shelf."],
   };
 }

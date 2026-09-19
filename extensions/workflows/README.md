@@ -43,7 +43,7 @@ The `workflow` tool is the structured execution surface for agents. It supports 
 - Explicit output directories must remain safe, project-relative paths.
 - Run evidence and the workflow workspace are separate ownership zones.
 - `.locus-pi/workflow-state/v1/<hash>/` is active lease and saved-child checkpoint state. A normal run can leave an empty state directory after releasing its temporary workspace lock.
-- `.locus-pi/plans/*.md` is owned by the `plan` extension and is not workflow workspace storage.
+- Loose `.locus-pi/plans/*.md` files are plan documents left by the removed `plan` extension; they are user data, not workflow workspace storage.
 
 ## Trust
 

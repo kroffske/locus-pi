@@ -328,6 +328,5 @@ describe("todo-context command surfaces and op errors", () => {
     const widget = h.widgets.get("todo") ?? "";
     expect(widget).toContain("[VIEW] Session todos help");
     expect(widget).toContain("Inspect or explicitly change session-backed todo state.");
-    expect(widget).toContain("/todos is a different surface: the Todos prompt shelf.");
   });
 });

@@ -53,13 +53,12 @@ Filtering is a loading boundary, not an installation boundary: the npm tarball a
 
 ## Beta extensions
 
-Three extensions ship at a beta tier. They are installed and loaded like every other entrypoint, and they register nothing — no tool, no command, no hook — until the project turns them on:
+Two extensions ship at a beta tier. They are installed and loaded like every other entrypoint, and they register nothing — no tool, no command, no hook — until the project turns them on:
 
-| Extension      | Commands                                                   | Tools                     |
-| -------------- | ---------------------------------------------------------- | ------------------------- |
-| `loop`         | `/loop`                                                    | `loop`                    |
-| `plan`         | `/plan`, `/mode`, `/goal`, `/goal-ai`, `/review`, `/todos` | `goal`                    |
-| `todo-context` | `/todo`                                                    | `todo_read`, `todo_write` |
+| Extension      | Commands | Tools                     |
+| -------------- | -------- | ------------------------- |
+| `loop`         | `/loop`  | `loop`                    |
+| `todo-context` | `/todo`  | `todo_read`, `todo_write` |
 
 The `Tier` column of the [extension reference](extensions.md) is the authoritative list; each manifest declares its own `tier`.
 
@@ -74,7 +73,7 @@ Turn one on for the project by naming it in `.locus-pi/config.json`, next to the
 Or for a single session, without writing a file:
 
 ```bash
-LOCUS_PI_BETA=loop,plan pi
+LOCUS_PI_BETA=loop,todo-context pi
 ```
 
 Either source is enough, and `all` (or `*`) in either one enables every beta extension. **Restart Pi after changing either**: extensions register their surfaces once, when Pi loads them.

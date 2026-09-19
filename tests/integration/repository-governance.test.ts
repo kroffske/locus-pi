@@ -37,7 +37,7 @@ describe("repository pull-request policy", () => {
       evaluatePullRequestPolicy({
         baseRef: "dev",
         headRef: "dev",
-        changedFiles: ["extensions/plan/index.ts"],
+        changedFiles: ["extensions/workflows/index.ts"],
         baseVersion: "0.2.0",
         headVersion: "0.2.0",
         headChangelog: releaseHeading,

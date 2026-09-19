@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { registerLoop } from "../../../extensions/loop/index.js";
-import { registerPlan } from "../../../extensions/plan/index.js";
+import { createOrReplaceGoalState } from "../../../extensions/_shared/project/goal-mode.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
@@ -132,9 +132,8 @@ describe("loop command surfaces", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-goal-focus-"));
     try {
       const h = createHarness(projectRoot);
-      registerPlan(h.pi);
       registerLoop(h.pi);
-      await runTool(h, "goal", { op: "create", objective: "Ship the bounded loop focus" });
+      await createOrReplaceGoalState(projectRoot, h.pi, "Ship the bounded loop focus");
 
       await h.commands.get("loop")!.handler("once goal tighten the release proof", h.ctx);
 

@@ -55,15 +55,6 @@
       "ownership": "compat-wrapper"
     },
     {
-      "id": "plan",
-      "tools": ["goal"],
-      "commands": ["plan", "mode", "goal", "goal-ai", "review", "todos"],
-      "hooks": ["session_start", "before_agent_start", "input"],
-      "risk": "high",
-      "tier": "beta",
-      "ownership": "locus-specific"
-    },
-    {
       "id": "status-line",
       "tools": [],
       "commands": [],

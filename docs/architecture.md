@@ -68,11 +68,11 @@ Local runtime state is intentionally outside the public source surface and ignor
 
 - `.locus-pi/runs/<runId>/` — workflow outputs and machine evidence;
 - `.locus-pi/workspaces/<generated-run-name>/` — workflow-authored working files, including task drafts, generated workflows, review files, and implementation history;
-- `.locus-pi/plans/<plan-slug>.md` — checkout-local documents authored through `/plan`; legacy home files are migration input only;
+- `.locus-pi/plans/<run-name>/` — legacy workflow workspaces; an existing one stays bound in place, and new named workspaces go to `.locus-pi/workspaces/`;
 - `.locus-pi/workflow-state/v1/<hash>/` — active workspace leases and saved-child checkpoints; the directory may be empty after a lease is released;
 - `.locus-pi/fusion/config.json` — project-local Fusion configuration;
 - `.locus-pi/config.json` — project-local settings the package reads at load time; currently only the `beta` opt-in list described in [getting started](getting-started.md#beta-extensions). It is the one file here a project may want to commit;
-- `.locus/runtime/` — session, artifact, and diagnostic state used by Locus extensions; the beta `plan` extension owns its `goal/`, `mode/` and `prompts/` trees and the beta `loop` extension its `goal/` and `loop/` trees, so none of those four appears until the owning extension is enabled;
+- `.locus/runtime/` — session, artifact, and diagnostic state used by Locus extensions; the beta `loop` extension owns its `goal/` and `loop/` trees, so neither appears until it is enabled;
 - `.tasks/` — optional local task state and explicit bridges;
 - an explicit project-relative output directory — an optional operator override for workflow-owned working files.
 

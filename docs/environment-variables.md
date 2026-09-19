@@ -9,7 +9,7 @@ Enables beta extensions for the current Pi process. Use a comma-separated list
 of beta extension ids, for example:
 
 ```bash
-LOCUS_PI_BETA=loop,plan pi
+LOCUS_PI_BETA=loop,todo-context pi
 ```
 
 Project `.locus-pi/config.json` remains the persistent project-level mechanism.

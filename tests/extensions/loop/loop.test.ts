@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { registerLoop } from "../../../extensions/loop/index.js";
-import { registerPlan } from "../../../extensions/plan/index.js";
+import { completeGoalState, createOrReplaceGoalState } from "../../../extensions/_shared/project/goal-mode.js";
 import { ensureWorkflowRunDir } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowJournalFile } from "../../../extensions/workflows/runtime/workflow-run-layout.js";
 import { workflowResultFile } from "../../../extensions/workflows/runtime/workflow-result.js";
@@ -72,14 +72,10 @@ describe("loop bounded continuation runtime", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-status-compact-"));
     try {
       const h = createHarness(projectRoot);
-      registerPlan(h.pi);
       registerLoop(h.pi);
 
-      const created = await runTool(h, "goal", {
-        op: "create",
-        objective: "Keep loop status compact at eighty columns",
-      });
-      expect(created.isError).not.toBe(true);
+      const created = await createOrReplaceGoalState(projectRoot, h.pi, "Keep loop status compact at eighty columns");
+      expect(created.error).toBeUndefined();
 
       const runId = "20260618-023148-6c50-extra-long-run-id-that-must-not-wrap";
       const runDir = ensureWorkflowRunDir(projectRoot, runId);
@@ -122,9 +118,8 @@ describe("loop bounded continuation runtime", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-active-"));
     try {
       const h = createHarness(projectRoot, { sessionId: "loop-session" });
-      registerPlan(h.pi);
       registerLoop(h.pi);
-      await runTool(h, "goal", { op: "create", objective: "Complete two bounded steps" });
+      await createOrReplaceGoalState(projectRoot, h.pi, "Complete two bounded steps");
 
       const started = await runTool(h, "loop", {
         action: "until",
@@ -177,11 +172,10 @@ describe("loop bounded continuation runtime", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-goal-"));
     try {
       const h = createHarness(projectRoot);
-      registerPlan(h.pi);
       registerLoop(h.pi);
 
-      const created = await runTool(h, "goal", { op: "create", objective: "Ship the loop wrapper" });
-      expect(created.isError).not.toBe(true);
+      const created = await createOrReplaceGoalState(projectRoot, h.pi, "Ship the loop wrapper");
+      expect(created.error).toBeUndefined();
 
       const status = await runTool(h, "loop", { action: "status" });
       expect(status.isError).not.toBe(true);
@@ -225,11 +219,10 @@ describe("loop bounded continuation runtime", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-goal-metadata-"));
     try {
       const h = createHarness(projectRoot);
-      registerPlan(h.pi);
       registerLoop(h.pi);
 
-      const created = await runTool(h, "goal", { op: "create", objective: "Ship the loop wrapper" });
-      expect(created.isError).not.toBe(true);
+      const created = await createOrReplaceGoalState(projectRoot, h.pi, "Ship the loop wrapper");
+      expect(created.error).toBeUndefined();
 
       const result = await runTool(h, "loop", { action: "once", source: "goal" });
       const details = result.details as
@@ -287,11 +280,10 @@ describe("loop bounded continuation runtime", () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "locus-loop-blocked-"));
     try {
       const h = createHarness(projectRoot);
-      registerPlan(h.pi);
       registerLoop(h.pi);
 
-      await runTool(h, "goal", { op: "create", objective: "Retire the goal source" });
-      await runTool(h, "goal", { op: "complete" });
+      await createOrReplaceGoalState(projectRoot, h.pi, "Retire the goal source");
+      await completeGoalState(projectRoot, h.pi);
 
       const status = await runTool(h, "loop", { action: "status" });
       expect(status.isError).not.toBe(true);
@@ -412,9 +404,8 @@ describe("loop bounded continuation runtime", () => {
         expect(prefill).toBe("goal ");
         return "goal verify the release proof" as never;
       };
-      registerPlan(h.pi);
       registerLoop(h.pi);
-      await runTool(h, "goal", { op: "create", objective: "Ship the bounded loop input" });
+      await createOrReplaceGoalState(projectRoot, h.pi, "Ship the bounded loop input");
 
       await h.commands.get("loop")!.handler("", h.ctx);
 
@@ -436,9 +427,8 @@ describe("loop bounded continuation runtime", () => {
     try {
       const h = createHarness(projectRoot);
       h.ctx.hasUI = true;
-      registerPlan(h.pi);
       registerLoop(h.pi);
-      await runTool(h, "goal", { op: "create", objective: "Repair invalid loop input" });
+      await createOrReplaceGoalState(projectRoot, h.pi, "Repair invalid loop input");
       const editor = vi.fn().mockResolvedValueOnce("archive stale").mockResolvedValueOnce("goal corrected focus");
       h.ctx.ui.editor = editor as never;
 
