@@ -161,10 +161,12 @@ describe("agent task tool execution", () => {
     const row = [...agentLiveStore.rows.values()].at(-1);
     expect(row).toMatchObject({
       model: "openai/gpt-5.5",
-      thinking: "high",
       status: "done",
       finalAnswer: "  done\nwith details\n",
     });
+    // The parent's `high` seeds the row as a request-side label, but this child session reads
+    // no effort back, so the finished row does not present `high` as what ran.
+    expect(row).not.toHaveProperty("thinking");
   });
 
   it("treats JSON-looking child output as ordinary text", async () => {

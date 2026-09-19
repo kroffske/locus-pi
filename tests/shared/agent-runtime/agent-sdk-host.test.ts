@@ -17,7 +17,12 @@ import {
   agentLiveStore,
   type AgentLiveExecutionHandle,
 } from "../../../extensions/_shared/agent-runtime/agent-live-store.js";
-import { elapsedSinceStart, formatDuration } from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
+import {
+  compactWorkflowParentRows,
+  elapsedSinceStart,
+  formatDuration,
+  formatModelBadge,
+} from "../../../extensions/_shared/agent-runtime/agent-live-panel.js";
 import { buildAgentSystemPrompt } from "../../../extensions/_shared/agent-runtime/agent-system-prompt.js";
 import type { AgentRunRequest } from "../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type { AgentDefinition } from "../../../extensions/_shared/agent-runtime/agents.js";
@@ -438,13 +443,13 @@ describe("agent SDK session executor (insurance, not proof)", () => {
         status: "done",
         activityState: "completed",
         model: "test/strong",
-        thinking: "high",
         currentPath: "/repo",
         childSessionId: "sdk-child",
         finalAnswer: "done",
         isolated: true,
         noMcp: true,
       });
+      expect(row).not.toHaveProperty("thinking"); // `high` was requested; this session read none back
       expect(row?.stepCount).toBeGreaterThanOrEqual(2);
     } finally {
       agentLiveStore.reset();
@@ -2348,25 +2353,37 @@ describe("executed-model readback", () => {
     expect(result.executedModel).not.toBe("test/fast");
   });
 
-  // The live row is where an operator actually watches a run. It is built BEFORE the
-  // child exists, from a request-side display value, so without a patch it shows the
-  // requested selector for the whole run — the "requested presented as executed"
-  // surface this task exists to remove, in the most-read place.
-  it("patches the live row with the readback so the row shows what ran", async () => {
-    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done", model: FAST });
+  // A workflow anchor collapses onto its SDK child, whose badge an operator then reads for the
+  // whole agent. The row opens on request values (`test/strong`, `high`) unlike the session's;
+  // every terminal path after a completed turn keeps only readback — the session's model and
+  // effort, or the display model (`unavailable` names no model, D6/D7), NO effort and no error.
+  const terminalPaths = [
+    ["done", "done", {}],
+    ["unparseable-answer", "error", { lastAssistantText: " " }],
+    ["provider-error", "error", { messages: [{ role: "assistant", content: [], stopReason: "error" }] }],
+  ] as const;
+  it.each(
+    terminalPaths.flatMap(([path, status, turn]) => [
+      [path, "fast medium", status, turn, { model: FAST, thinkingLevel: "medium" as const }, "test/fast", "medium"],
+      [path, "strong", status, turn, {}, "test/strong", undefined],
+    ]),
+  )("badges a %s row from readback: %s", async (_path, badge, status, turn, readback, model, thinking) => {
+    agentLiveStore.reset();
+    const anchor = agentLiveStore.begin({ id: "workflow:run:w:step:x", label: "anchor", model: "test/strong" });
+    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done", ...turn, ...readback });
     const executor = createAgentSdkSessionExecutor({
       model: FAST,
       createSession: async () => ({ session }),
       reportsDir: tmpReportsDir(),
       now: () => "fixed",
-      // The row opens on a DIFFERENT value, so a passing assertion cannot be
-      // satisfied by the row having been right all along.
-      live: { rowId: "readback-row", label: "readback", model: "test/strong" },
+      live: { rowId: "row", parentRowId: anchor.id, label: "child", model: "test/strong", thinking: "high" },
     });
 
     await executor.run(request(), new AbortController().signal);
 
-    expect(agentLiveStore.rows.get("readback-row")).toMatchObject({ model: "test/fast" });
+    const row = agentLiveStore.rows.get("row");
+    expect([row?.status, row?.model, row?.thinking]).toEqual([status, model, thinking]);
+    expect(compactWorkflowParentRows([...agentLiveStore.rows.values()]).map(formatModelBadge)).toEqual([badge]);
   });
 
   it("clears the row's requested model when the session was never created", async () => {
@@ -2407,23 +2424,6 @@ describe("executed-model readback", () => {
     expect(retained?.startsWith("x".repeat(32_000))).toBe(true);
     expect(retained).toContain("… 125 additional request character(s) omitted");
     expect(retained?.length).toBeLessThan(32_125);
-  });
-
-  it("leaves the row's display value alone when the peer reports no model", async () => {
-    // `unavailable` is evidence, not a display model name.
-    const { session } = fakeSession({ toolCalls: 0, toolResults: 0, lastAssistantText: "done" });
-    const executor = createAgentSdkSessionExecutor({
-      model: FAST,
-      createSession: async () => ({ session }),
-      reportsDir: tmpReportsDir(),
-      now: () => "fixed",
-      live: { rowId: "no-readback-row", label: "no readback", model: "test/fast" },
-    });
-
-    const result = await executor.run(request(), new AbortController().signal);
-
-    expect(result.executedModel).toBe("unavailable");
-    expect(agentLiveStore.rows.get("no-readback-row")).toMatchObject({ model: "test/fast" });
   });
 
   it("leaves no model on the row when the call fails closed on a mismatch", async () => {
