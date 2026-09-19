@@ -361,7 +361,7 @@ describe("npm public package boundary", () => {
     //   W13 resume + admission · W10 fusion · W14 finalization · W11 agent model
     // Seventeen topical workflow pages replace the old monolith with bookmark pointers.
     // The public environment-variable reference documents optional local features.
-    expect(dryRun.files).toHaveLength(310);
+    expect(dryRun.files).toHaveLength(259);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -378,9 +378,9 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships nine active entrypoints, their manifests, and complete local imports", () => {
+  it("ships six active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
-    expect(pkg.pi.extensions).toHaveLength(9);
+    expect(pkg.pi.extensions).toHaveLength(6);
 
     for (const entrypoint of pkg.pi.extensions) {
       const normalizedEntrypoint = entrypoint.replace(/^\.\//, "");

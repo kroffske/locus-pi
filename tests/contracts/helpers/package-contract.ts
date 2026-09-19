@@ -17,8 +17,6 @@ export interface PackageJson {
 export interface ExtensionManifest {
   id: string;
   agent: { name: string; description: string };
-  /** `default` registers on load; `beta` registers nothing until the project enables the id. */
-  tier: "default" | "beta";
   ownershipStatus: string;
   runtimeRequirements: string[];
   stateUsed: string[];
@@ -54,7 +52,6 @@ export interface PublicCatalogs {
     commands: string[];
     hooks: string[];
     risk: string;
-    tier: string;
     ownership: string;
   }>;
   workflows: Array<{ name: string; namespace: string }>;

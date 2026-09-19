@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { checkExtensionLayers } from "../../scripts/check-extension-layers.js";
 
+/** Where the registry and facade cases plant violations: the one feature that reads workflow runs from outside. */
+const CROSS_FEATURE_READER = "extensions/agents/index.ts";
 const fixtureRoots: string[] = [];
 
 afterEach(async () => {
@@ -45,7 +47,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a registry symbol named outside its owner", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nvoid Symbol.for("locus-pi.agent-live-store.v5");\n',
       "utf8",
     );
@@ -67,7 +69,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import that bypasses the read facade", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-journal.js";\n',
       "utf8",
     );
@@ -78,7 +80,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import of the journal event format", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-journal-format.js";\n',
       "utf8",
     );
@@ -89,7 +91,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import of the persisted result envelope", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-result.js";\n',
       "utf8",
     );
@@ -100,7 +102,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import of the persisted run snapshot reader", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-run-snapshot.js";\n',
       "utf8",
     );
@@ -111,7 +113,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import of the resume authority", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-run-resume.js";\n',
       "utf8",
     );
@@ -122,7 +124,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import of the ordered run admission", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-run-admission.js";\n',
       "utf8",
     );
@@ -133,7 +135,7 @@ describe("extension layer checker negative rules", () => {
   it("rejects a cross-feature import of the workflow live projection", async () => {
     const root = await extensionFixture();
     await appendFile(
-      path.join(root, "extensions/loop/index.ts"),
+      path.join(root, CROSS_FEATURE_READER),
       '\nimport "../workflows/runtime/workflow-live.js";\n',
       "utf8",
     );

@@ -24,7 +24,6 @@ describe("extension reference contract", () => {
         commands: manifest.provides.commands,
         hooks: manifest.provides.hooks,
         risk: manifest.risk,
-        tier: manifest.tier,
         ownership: manifest.ownershipStatus,
       })),
     );
@@ -39,11 +38,7 @@ describe("extension reference contract", () => {
 
   it("keeps the documented feature dependency graph equal to the source imports", () => {
     const sourceGraph = featureDependencyGraph(publicCatalogs.extensions.map(({ id }) => id));
-    expect([...sourceGraph].filter(([, dependencies]) => dependencies.length > 0)).toEqual([
-      ["agents", ["workflows"]],
-      ["loop", ["workflows"]],
-    ]);
+    expect([...sourceGraph].filter(([, dependencies]) => dependencies.length > 0)).toEqual([["agents", ["workflows"]]]);
     expect(extensionDocs).toContain("`agents → workflows`");
-    expect(extensionDocs).toContain("`loop → workflows/run/run-read.ts`");
   });
 });

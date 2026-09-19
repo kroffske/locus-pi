@@ -7,12 +7,12 @@
  * Workflow root runs persist under `.locus-pi/runs/<storageRootRunId>/`, with
  * saved children and attempts below fixed nested directories. The journal owner
  * also owns the append sink; its sibling workflow-live.ts owns the
- * journal-to-live-row projection and the live-row retention bound. Two consumers
- * outside this extension only ever needed to READ a run — the agent drill's round
- * submenu and the loop's continuation source — yet both reached straight into
- * those modules and so held a handle on the write side too. This file is the
- * narrow surface those consumers get instead: read operations and the types they
- * return, nothing else. No sink, no append, no retention, no live-row mutation.
+ * journal-to-live-row projection and the live-row retention bound. Code outside
+ * this extension — today the agent drill's round submenu — only ever needs to
+ * READ a run, yet reaching straight into those modules would hand it the write
+ * side too. This file is the narrow surface such a consumer gets instead: read
+ * operations and the types they return, nothing else. No sink, no append, no
+ * retention, no live-row mutation.
  * `check:layers` declares the persisted-run owners feature-internal to
  * `extensions/workflows/` — the journal and its event format, the result
  * persistence-and-readback owner, the snapshot reader, the resume authority, the

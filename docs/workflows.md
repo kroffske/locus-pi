@@ -85,7 +85,7 @@ Open the group README: it links the original launch, workspace, saved children, 
   attempts/<runId>/         separate outputs/ and runtime/ for each resume attempt
 ```
 
-Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent root launches receive different groups even in one session; resume uses the original workspace but writes its own receipt. The workflow workspace and run-evidence directory must never resolve to the same directory. `.locus-pi/plans/*.md` belongs to the `plan` extension and contains authored plan documents, not workflow workspaces.
+Workflow-owned working files live separately under a unique `.locus-pi/workspaces/<generated-run-name>/` directory by default or in an explicit confined output directory. Independent root launches receive different groups even in one session; resume uses the original workspace but writes its own receipt. The workflow workspace and run-evidence directory must never resolve to the same directory. Loose `.locus-pi/plans/*.md` files are plan documents left by the removed `plan` extension: user data, not workflow workspaces.
 
 The workflow workspace is the durable location for handoffs, final results,
 review evidence, and explicit resume inputs. Keep disposable environments,

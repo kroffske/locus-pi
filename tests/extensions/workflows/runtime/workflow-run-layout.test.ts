@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { readLoopStatus } from "../../../../extensions/loop/loop-continuation.js";
 import { buildRunDetailBlock } from "../../../../extensions/workflows/run/run-evidence.js";
 import { WorkflowRunViewer } from "../../../../extensions/workflows/run/run-viewer.js";
 import { composeWorkflowChildTask } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
@@ -654,7 +653,7 @@ describe("grouped run lookup", () => {
     assert.deepEqual(resolveWorkflowRunId(root, childId), { status: "resolved", runId: childId });
   });
 
-  it("refuses latest selection and loop inference when timestamps cannot order root runs", async () => {
+  it("refuses latest selection when timestamps cannot order root runs", () => {
     let tied:
       | {
           root: string;
@@ -691,17 +690,6 @@ describe("grouped run lookup", () => {
       matched: 2,
       candidates: tied.runIds,
     });
-    const loopStatus = await readLoopStatus(tied.root);
-    assert.equal(loopStatus.mode, "blocked");
-    assert.deepEqual(
-      loopStatus.sources.find((source) => source.source === "workflow"),
-      {
-        source: "workflow",
-        availability: "blocked",
-        reason: "latest workflow run is ambiguous across 2 executions; use an exact runId",
-      },
-    );
-    assert.equal(loopStatus.recommendedSourceId, undefined);
   });
 
   it("requires storageRootRunId only for nested result envelopes", () => {
