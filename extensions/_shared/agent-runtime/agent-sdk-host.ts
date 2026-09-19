@@ -636,7 +636,7 @@ async function runChildSession(
     return childTrace;
   };
   /**
-   * Terminal row patch that may only leave a model on the row once one executed.
+   * Terminal row patch: a model stays only once one executed, an effort only once read back.
    *
    * `observed.executedModel` is this file's single proof of execution, so the row and
    * the result are held to the same evidence: a run that ends before the child was
@@ -898,7 +898,7 @@ async function runChildSession(
     const providerFailure = assistantProviderFailure(session.messages);
     if (providerFailure !== undefined) {
       const currentErrors = agentLiveStore.rowForExecution(execution)?.errors ?? [];
-      agentLiveStore.patchExecution(execution, {
+      patchTerminalRow({
         status: "error",
         childSessionId: childSession.id,
         errors: unique([...currentErrors, providerFailure]),
@@ -926,7 +926,7 @@ async function runChildSession(
     }
     const parsed = parseAgentText(text ?? "");
     if (!parsed.ok) {
-      agentLiveStore.patchExecution(execution, {
+      patchTerminalRow({
         status: "error",
         childSessionId: childSession.id,
         finalAnswer: parsed.reason,
@@ -953,7 +953,7 @@ async function runChildSession(
       status: "completed",
     };
     const evidence = evaluateEvidence(evidenceInput);
-    agentLiveStore.patchExecution(execution, {
+    patchTerminalRow({
       status: "done",
       childSessionId: childSession.id,
       finalAnswer: parsed.text,
