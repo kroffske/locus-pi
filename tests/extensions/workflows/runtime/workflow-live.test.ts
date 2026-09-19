@@ -20,6 +20,7 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import * as runner from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import workflows from "../../../../extensions/workflows/index.js";
+import { renderAgentLiveRowsText } from "../../../../extensions/workflows/operator/progress-widget.js";
 import { createHarness, emit } from "../../../test-harness.js";
 
 afterEach(() => {
@@ -273,54 +274,72 @@ describe("completed workflow live-row retention", () => {
     expect(workflowLiveExecutionCount()).toBe(0);
   });
 
-  it("does not mutate or finalize a same-key replacement created by a terminal listener", () => {
-    const start: WorkflowJournalLine = {
-      ts: "start-a",
-      runId: "listener-replacement",
-      kind: "agent_start",
-      callId: "call-0001",
-      agent: "reviewer",
-      label: "review",
-    };
-    const error: WorkflowJournalLine = {
-      ...start,
-      ts: "error-a",
-      kind: "error",
-      message: "execution A failed",
-    };
-    applyWorkflowJournalLineToAgentLiveStore(start);
-    let replacementBytes = "";
-    let replaced = false;
-    const replaceOnTerminal = () => {
-      if (replaced) return;
-      replaced = true;
-      applyWorkflowJournalLineToAgentLiveStore({ ...start, ts: "start-b" });
-      const replacement = agentLiveStore.captureExecutionAuthority(workflowAgentLiveRowId(start));
-      if (replacement === undefined) throw new Error("Expected replacement execution.");
-      agentLiveStore.patchExecution(replacement, {
-        status: "working",
-        finalAnswer: "B sentinel",
-        errors: ["B sentinel error"],
-        tokenCount: { input: 8, output: 3 },
-      });
-      replacementBytes = JSON.stringify(agentLiveStore.rowForExecution(replacement));
-    };
-    agentLiveStore.emitter.on("change", replaceOnTerminal);
-    try {
-      applyWorkflowJournalLineToAgentLiveStore(error);
-    } finally {
-      agentLiveStore.emitter.off("change", replaceOnTerminal);
-    }
+  it.each([
+    ["no execution readback", {}],
+    ["an executed model without thinking readback", { model: "test/fast", executedModel: "test/fast" }],
+  ] as const)(
+    "does not mutate or finalize a same-key replacement created by a terminal listener (%s)",
+    (_, readback) => {
+      const identity = {
+        runId: "listener-replacement",
+        callId: "call-0001",
+        agent: "reviewer",
+        label: "review",
+      } as const;
+      // Both executions carry request labels, so a label-clearing write through A's stale
+      // authority would visibly strip B's.
+      const start: WorkflowJournalLine = {
+        ...identity,
+        ts: "start-a",
+        kind: "agent_start",
+        model: "test/fast",
+        thinking: "high",
+      };
+      const error: WorkflowJournalLine = {
+        ...identity,
+        ts: "error-a",
+        kind: "error",
+        message: "A failed",
+        ...readback,
+      };
+      applyWorkflowJournalLineToAgentLiveStore(start);
+      let replacementBytes = "";
+      let replaced = false;
+      const replaceOnTerminal = () => {
+        if (replaced) return;
+        replaced = true;
+        applyWorkflowJournalLineToAgentLiveStore({ ...start, ts: "start-b" });
+        const replacement = agentLiveStore.captureExecutionAuthority(workflowAgentLiveRowId(start));
+        if (replacement === undefined) throw new Error("Expected replacement execution.");
+        agentLiveStore.patchExecution(replacement, {
+          status: "working",
+          finalAnswer: "B sentinel",
+          errors: ["B sentinel error"],
+          tokenCount: { input: 8, output: 3 },
+        });
+        replacementBytes = JSON.stringify(agentLiveStore.rowForExecution(replacement));
+      };
+      agentLiveStore.emitter.on("change", replaceOnTerminal);
+      try {
+        applyWorkflowJournalLineToAgentLiveStore(error);
+      } finally {
+        agentLiveStore.emitter.off("change", replaceOnTerminal);
+      }
 
-    const replacement = agentLiveStore.captureExecutionAuthority(workflowAgentLiveRowId(start));
-    expect(replaced).toBe(true);
-    expect(JSON.stringify(replacement === undefined ? undefined : agentLiveStore.rowForExecution(replacement))).toBe(
-      replacementBytes,
-    );
-    expect(workflowLiveExecutionCount()).toBe(1);
-    applyWorkflowJournalLineToAgentLiveStore({ ...error, ts: "error-b", message: "execution B failed" });
-    expect(workflowLiveExecutionCount()).toBe(0);
-  });
+      const replacement = agentLiveStore.captureExecutionAuthority(workflowAgentLiveRowId(start));
+      expect(replaced).toBe(true);
+      expect(JSON.stringify(replacement === undefined ? undefined : agentLiveStore.rowForExecution(replacement))).toBe(
+        replacementBytes,
+      );
+      expect(replacement === undefined ? undefined : agentLiveStore.rowForExecution(replacement)).toMatchObject({
+        model: "test/fast",
+        thinking: "high",
+      });
+      expect(workflowLiveExecutionCount()).toBe(1);
+      applyWorkflowJournalLineToAgentLiveStore({ ...error, ts: "error-b", message: "execution B failed" });
+      expect(workflowLiveExecutionCount()).toBe(0);
+    },
+  );
 
   it.each([
     ["completed", "done", 0],
@@ -542,141 +561,113 @@ describe("completed workflow live-row retention", () => {
 });
 
 /**
- * W7 at the workflow live row, which is built from journal lines rather than by the
- * SDK host.
+ * W7 and F-02 at the workflow live row, which is built from journal lines rather than
+ * by the SDK host.
  *
- * `agent_start` carries the REQUESTED selector by documented design — it is written
- * before the bridge resolves anything — and `agent_end` for a refused call carries no
- * `model` to replace it. Without a rule here, a workflow stage whose tier was refused
- * ends as a terminal row labelled with a model that never ran.
+ * `agent_start` carries the REQUESTED selector and effort by documented design — it is
+ * written before the bridge resolves anything. A terminal line replaces them only with
+ * host readback. Without these rules a stage whose tier was refused ends labelled with a
+ * model that never ran, and a stage whose host named no effort ends labelled with the
+ * effort it was asked for.
  */
 describe("workflow live rows and the model that executed", () => {
   const runId = "20260729-000001-tier-refusal";
+  // A terminal line carries the call identity plus readback, never the request.
+  const identity = { runId, callId: "call-0001", agent: "reviewer", label: "review" } as const;
   const started: WorkflowJournalLine = {
+    ...identity,
     ts: "start",
-    runId,
     kind: "agent_start",
-    callId: "call-0001",
-    agent: "reviewer",
-    label: "review",
     model: "no-such-provider/no-such-model",
     requestedModel: "no-such-provider/no-such-model",
     modelRole: "smol",
     thinking: "high",
   };
 
-  it("drops the requested selector when the call failed without executing", () => {
+  /**
+   * No `executedModel`, so no child: the tier was refused before a child existed, a
+   * workflow `error` ended a call that never reached `agent_end`, or a resumed run served
+   * the recorded answer. The replay is the easiest to get wrong — it reads `done`, the one
+   * status nobody re-reads, on a row that spent no tokens.
+   */
+  it.each([
+    ["failed agent_end", { kind: "agent_end", status: "failed" }, "error", ""],
+    [
+      "run-level error",
+      { kind: "error", message: "Workflow agent bridge refused the declared tier." },
+      "error",
+      "refused",
+    ],
+    ["REPLAYED completion", { kind: "agent_end", status: "completed", replayed: true }, "done", ""],
+  ] as const)("drops both requested labels on a %s without an executed model", (_, end, status, error) => {
     applyWorkflowJournalLineToAgentLiveStore(started);
     const id = workflowAgentLiveRowId(started);
     expect(agentLiveStore.rows.get(id)?.model).toBe("no-such-provider/no-such-model");
 
-    applyWorkflowJournalLineToAgentLiveStore({
-      ...started,
-      ts: "end",
-      kind: "agent_end",
-      status: "failed",
-      // No executedModel: the tier was refused before any child existed.
-    });
+    applyWorkflowJournalLineToAgentLiveStore({ ...identity, ts: "end", ...end });
 
     const row = agentLiveStore.rows.get(id);
-    expect(row?.status).toBe("error");
+    expect(row?.status).toBe(status);
+    expect(row?.errors.join("\n")).toContain(error);
     expect(row?.model).toBeUndefined();
     expect(row?.thinking).toBeUndefined();
   });
 
-  it("drops the requested selector on a run-level error line for the same call", () => {
-    // The other terminal line shape: a workflow `error` for a call that never reached
-    // `agent_end`. Same rule — nothing reported an executed model, so nothing may be
-    // labelled as having run.
-    applyWorkflowJournalLineToAgentLiveStore(started);
-    const id = workflowAgentLiveRowId(started);
+  /**
+   * The child RAN on `test/fast` for a `test/fast:high` request, so its readback replaces
+   * the request — also on an `error` line, where a validator or artifact writer failed
+   * after the child answered and clearing would erase the one evidence the run owns. A
+   * peer that reported `unavailable` still ran: the row keeps its display model. An effort
+   * the host did not read back is not shown as the one that ran (F-02); missing readback
+   * is an allowed mode, so status and errors are exactly what the line says. A failed or
+   * cancelled anchor stays visible beside its executor child after compaction, a
+   * completed one collapses onto it.
+   */
+  const ran = { model: "test/fast", executedModel: "test/fast" } as const;
+  it.each([
+    ["completed agent_end", { kind: "agent_end", status: "completed", ...ran }, "done", [], undefined],
+    [
+      "failed agent_end",
+      { kind: "agent_end", status: "failed", message: "failed", ...ran },
+      "error",
+      ["failed"],
+      undefined,
+    ],
+    [
+      "cancelled agent_end",
+      { kind: "agent_end", status: "cancelled", message: "stop", ...ran },
+      "cancelled",
+      ["stop"],
+      undefined,
+    ],
+    ["error line", { kind: "error", source: "script", message: "threw", ...ran }, "error", ["threw"], undefined],
+    ["error line with effort", { kind: "error", message: "threw", ...ran, thinking: "low" }, "error", ["threw"], "low"],
+    [
+      "unavailable readback",
+      { kind: "agent_end", status: "failed", executedModel: "unavailable" },
+      "error",
+      [],
+      undefined,
+    ],
+  ] as const)("projects only read-back labels on a %s", (_, end, status, errors, thinking) => {
+    const start: WorkflowJournalLine = { ...started, model: "test/fast", requestedModel: "test/fast" };
+    applyWorkflowJournalLineToAgentLiveStore(start);
+    const id = workflowAgentLiveRowId(start);
+    // An executor child makes the anchor a parent; the child's own labels belong to the SDK host.
+    agentLiveStore.begin({ id: `workflow-agent:${runId}:child`, parentRowId: id, label: "child" });
+    expect(agentLiveStore.rows.get(id)).toMatchObject({ model: "test/fast", thinking: "high" }); // the request
 
-    applyWorkflowJournalLineToAgentLiveStore({
-      ...started,
-      ts: "error",
-      kind: "error",
-      message: "Workflow agent bridge refused the declared tier.",
-    });
-
-    const row = agentLiveStore.rows.get(id);
-    expect(row?.status).toBe("error");
-    expect(row?.errors.join("\n")).toContain("refused the declared tier");
-    expect(row?.model).toBeUndefined();
-  });
-
-  it("drops the requested selector on a REPLAYED completion, where no child ran at all", () => {
-    // The status is `completed` and the row will read `done`, which is exactly why this
-    // case is the easiest one to get wrong: a resumed run serves the recorded answer
-    // without creating a child, so `agent_end` carries neither `model` nor
-    // `executedModel`. Leaving the `agent_start` request standing would label a row
-    // that spent no tokens with the model the operator asked for — a request presented
-    // as a result on the one status nobody re-reads.
-    applyWorkflowJournalLineToAgentLiveStore(started);
-    const id = workflowAgentLiveRowId(started);
-    expect(agentLiveStore.rows.get(id)?.model).toBe("no-such-provider/no-such-model");
-
-    applyWorkflowJournalLineToAgentLiveStore({
-      ts: "end",
-      runId,
-      kind: "agent_end",
-      callId: "call-0001",
-      agent: "reviewer",
-      label: "review",
-      status: "completed",
-      replayed: true,
-    });
-
-    const row = agentLiveStore.rows.get(id);
-    expect(row?.status).toBe("done");
-    expect(row?.model).toBeUndefined();
-    expect(row?.thinking).toBeUndefined();
-  });
-
-  it("keeps the label on an error line that reports what executed", () => {
-    // The counter-case for the `error` shape: a script validator or artifact writer
-    // that fails AFTER the child answered ends the call on an `error` line, and the
-    // runtime forwards the readback onto it. That line must replace the requested
-    // selector with what ran, not clear the row as if nothing had.
-    applyWorkflowJournalLineToAgentLiveStore(started);
-    const id = workflowAgentLiveRowId(started);
-
-    applyWorkflowJournalLineToAgentLiveStore({
-      ...started,
-      ts: "error",
-      kind: "error",
-      source: "script",
-      message: "validator exploded after the child had already answered",
-      model: "test/fast",
-      executedModel: "test/fast",
-      thinking: "low",
-    });
+    applyWorkflowJournalLineToAgentLiveStore({ ...identity, ts: "end", ...end });
 
     const row = agentLiveStore.rows.get(id);
-    expect(row?.status).toBe("error");
-    expect(row?.model).toBe("test/fast");
-    expect(row?.thinking).toBe("low");
-  });
-
-  it("keeps the label on a failure that did execute, including an unavailable readback", () => {
-    // The counter-case, so the rule above cannot be satisfied by blanking every failed
-    // row: a child that ran and then failed HAS a model to name, and a peer that
-    // reported nothing still ran — `unavailable` is recorded as evidence while the
-    // row keeps the display value it had.
-    applyWorkflowJournalLineToAgentLiveStore(started);
-    const id = workflowAgentLiveRowId(started);
-
-    applyWorkflowJournalLineToAgentLiveStore({
-      ...started,
-      ts: "end",
-      kind: "agent_end",
-      status: "failed",
-      model: "test/fast",
-      executedModel: "unavailable",
-    });
-
-    const row = agentLiveStore.rows.get(id);
-    expect(row?.status).toBe("error");
-    expect(row?.model).toBe("test/fast");
+    expect(row).toMatchObject({ status, model: "test/fast", errors });
+    expect(row?.thinking).toBe(thinking);
+    // The badge the operator reads on the anchor itself, when compaction leaves it visible.
+    const anchorLine = renderAgentLiveRowsText()
+      .split("\n")
+      .find((line) => line.includes(" review "));
+    expect(anchorLine === undefined).toBe(status === "done");
+    expect(anchorLine ?? "").not.toContain("high");
   });
 });
 

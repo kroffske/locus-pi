@@ -270,15 +270,15 @@ class AgentLiveStore {
 
   /**
    * Terminal patch when the host lacks execution readback. Missing model proof
-   * clears both request-side labels; missing thinking proof preserves the model.
+   * clears both request-side labels; missing thinking proof keeps the model, which
+   * `patch` may replace with its readback.
    *
-   * This cannot use `patch({ model: undefined })` under exact optional types. The
-   * dedicated operation also keeps request intent distinguishable from execution.
+   * Exact optional types rule out `patch({ model: undefined })`; this also keeps request intent apart from execution.
    */
-  patchExecutionWithoutReadback(
+  patchExecutionWithoutReadback<Missing extends "model" | "thinking">(
     execution: AgentLiveExecutionHandle,
-    missing: "model" | "thinking",
-    patch: Partial<Omit<AgentLiveRow, "id" | "model" | "thinking">>,
+    missing: Missing,
+    patch: Partial<Omit<AgentLiveRow, "id" | "thinking" | (Missing extends "model" ? "model" : never)>>,
     now = Date.now(),
   ): AgentLiveRow | undefined {
     const rowId = this.#currentExecutionRowId(execution);
