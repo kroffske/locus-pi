@@ -86,11 +86,10 @@ function tieredProject(): string {
   return root;
 }
 
+type ExecutorOptions = Parameters<NonNullable<Parameters<typeof createWorkflowAgentRunner>[0]["createExecutor"]>>[0];
+
 interface SdkProbe {
-  createExecutor: (o: {
-    model?: unknown;
-    thinkingLevel?: SdkCreateSessionOptionsLike["thinkingLevel"];
-  }) => AgentExecutor;
+  createExecutor: (o: ExecutorOptions) => AgentExecutor;
   /** Every `createSession` call, in order. Length 0 proves no child was ever spawned. */
   captured: SdkCreateSessionOptionsLike[];
 }
@@ -100,21 +99,20 @@ interface SdkProbe {
  *
  * `createAgentSdkSessionExecutor` is the real one, so a passing assertion covers the
  * whole path bridge → boundary → executor → `createSession`, not just the bridge's
- * intention.
+ * intention. `readsBackThinking: false` is a peer whose session names no effort.
  */
-function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
+function sdkProbe(sessionModel?: unknown, answer = "tier answer", readsBackThinking = true): SdkProbe {
   const captured: SdkCreateSessionOptionsLike[] = [];
   const reportsDir = mkdtempSync(path.join(tmpdir(), "locus-model-tiers-reports-"));
-  const createExecutor = (o: {
-    model?: unknown;
-    thinkingLevel?: SdkCreateSessionOptionsLike["thinkingLevel"];
-  }): AgentExecutor =>
+  const createExecutor = (o: ExecutorOptions): AgentExecutor =>
     createAgentSdkSessionExecutor({
       ...(o.model !== undefined ? { model: o.model } : {}),
       ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
+      ...(o.live !== undefined ? { live: o.live } : {}),
       createSession: async (options) => {
         captured.push(options);
-        return { session: fakeSession(sessionModel, answer, options.thinkingLevel, options) };
+        const thinking = readsBackThinking ? options.thinkingLevel : undefined;
+        return { session: fakeSession(sessionModel, answer, thinking, options) };
       },
       reportsDir,
       now: () => "fixed",
@@ -1014,32 +1012,32 @@ describe("executed-model evidence", () => {
   });
 
   it("does not substitute requested thinking when the child exposes no thinking readback", async () => {
-    const h = await harnessWithRoles({ smol: "test/fast:high" });
+    const h = await harnessWithRoles();
     h.pi.setThinkingLevel?.("medium");
-    const captured: SdkCreateSessionOptionsLike[] = [];
-    const reportsDir = mkdtempSync(path.join(tmpdir(), "locus-thinking-unavailable-"));
+    const probe = sdkProbe(FAST, "tier answer", false);
+    const runId = "thinking-unavailable";
     const runner = createWorkflowAgentRunner({
       pi: h.pi,
       ctx: h.ctx,
       signal: new AbortController().signal,
-      createExecutor: (options) =>
-        createAgentSdkSessionExecutor({
-          ...(options.model === undefined ? {} : { model: options.model }),
-          ...(options.thinkingLevel === undefined ? {} : { thinkingLevel: options.thinkingLevel }),
-          createSession: async (sessionOptions) => {
-            captured.push(sessionOptions);
-            return { session: fakeSession(FAST, "tier answer", undefined, sessionOptions) };
-          },
-          reportsDir,
-          now: () => "fixed",
-        }),
+      createExecutor: probe.createExecutor,
+      workflowRunId: runId,
     });
-    const { dsl, getJournal } = createWorkflowRuntime({ runId: "thinking-unavailable", agentRunner: runner });
+    // Projected line by line as the workflow tool does, so the executor row sits under its anchor.
+    const onEvent = (line: WorkflowJournalLine) => applyWorkflowJournalLineToAgentLiveStore(line);
+    const { dsl, getJournal } = createWorkflowRuntime({ runId, agentRunner: runner, onEvent });
 
-    await expect(dsl.agent("work", { agent: "bare", modelRole: "smol" })).resolves.toBe("tier answer");
+    await expect(dsl.agent("work", { agent: "bare", model: "test/fast:high" })).resolves.toBe("tier answer");
 
-    expect(captured[0]?.thinkingLevel).toBe("high");
+    expect(probe.captured[0]?.thinkingLevel).toBe("high");
+    const start = getJournal().find((line) => line.kind === "agent_start")!;
+    expect(start.thinking).toBe("high"); // the request, seeded onto the anchor
     expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBeUndefined();
+    const anchor = agentLiveStore.rows.get(workflowAgentLiveRowId(start));
+    expect(anchor).toMatchObject({ status: "done", model: "test/fast" });
+    expect(anchor?.thinking).toBeUndefined();
+    // The anchor is a real parent: the SDK host's executor row ran under it.
+    expect([...agentLiveStore.rows.values()].some((row) => row.parentRowId === anchor?.id)).toBe(true);
   });
 
   it("records the degradation on agent_end so a reader sees the quiet fallback", async () => {
@@ -1073,20 +1071,21 @@ describe("executed-model evidence", () => {
    * because the defect needed both halves to be visible.
    */
   it("keeps the readback on the error line when a script validator throws after the child ran", async () => {
-    const h = await harnessWithRoles({ smol: "test/fast" });
-    const probe = sdkProbe(FAST, '{"count":3}');
+    const h = await harnessWithRoles();
+    const probe = sdkProbe(FAST, '{"count":3}', false);
     const runner = createWorkflowAgentRunner({
       pi: h.pi,
       ctx: h.ctx,
       signal: new AbortController().signal,
       createExecutor: probe.createExecutor,
+      workflowRunId: "tier-validator-threw",
     });
     const { dsl, getJournal } = createWorkflowRuntime({ runId: "tier-validator-threw", agentRunner: runner });
 
     await expect(
       (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("cheap work", {
         agent: "bare",
-        modelRole: "smol",
+        model: "test/fast:high",
         schema: COUNT_SCHEMA,
         validate: () => {
           throw new Error("validator exploded after the child had already answered");
@@ -1103,8 +1102,9 @@ describe("executed-model evidence", () => {
     for (const line of journal) applyWorkflowJournalLineToAgentLiveStore(line);
     const start = journal.find((line) => line.kind === "agent_start")!;
     const row = agentLiveStore.rows.get(workflowAgentLiveRowId(start));
-    expect(row?.status).toBe("error");
-    expect(row?.model).toBe("test/fast");
+    expect(row).toMatchObject({ status: "error", model: "test/fast" });
+    expect(row?.thinking).toBeUndefined(); // the requested `high` was never read back
+    expect([...agentLiveStore.rows.values()].some((child) => child.parentRowId === row?.id)).toBe(true);
   });
 
   it("round-trips usage on the sole error line when a validator throws after execution", async () => {
