@@ -39,25 +39,25 @@ describe("MemorySessionStore", () => {
 
     store.appendEntry(session.id, { type: "message", payload: { role: "user", content: "Build runtime" } });
     store.appendEntry(session.id, { type: "custom_message", payload: { role: "assistant", content: "Reading files" } });
-    store.appendEntry(session.id, { type: "todo_write", payload: { phases: [{ name: "Execution", tasks: [] }] } });
+    store.appendEntry(session.id, { type: "artifact", payload: { path: "artifacts/runtime.md", kind: "markdown" } });
 
     expect(store.listEntries({ sessionId: session.id }).map((entry) => entry.type)).toEqual([
       "session_init",
       "message",
       "custom_message",
-      "todo_write",
+      "artifact",
     ]);
     expect(store.listEntries({ sessionId: session.id, limit: 2 }).map((entry) => entry.type)).toEqual([
       "custom_message",
-      "todo_write",
+      "artifact",
     ]);
     expect(store.latestEntry(session.id, "message")).toMatchObject({
       type: "message",
       payload: { role: "user", content: "Build runtime" },
     });
-    expect(store.latestEntry(session.id, "todo_write")).toMatchObject({
-      type: "todo_write",
-      payload: { phases: [{ name: "Execution", tasks: [] }] },
+    expect(store.latestEntry(session.id, "artifact")).toMatchObject({
+      type: "artifact",
+      payload: { path: "artifacts/runtime.md", kind: "markdown" },
     });
   });
 
@@ -119,20 +119,20 @@ describe("MemorySessionStore", () => {
       ok: false,
       errors: ["payload.content must be a non-empty string"],
     });
-    expect(() =>
-      store.appendEntry(session.id, { type: "todo_write", payload: { phases: "not-list" } as never }),
-    ).toThrow("payload.phases must be an array");
+    expect(() => store.appendEntry(session.id, { type: "artifact", payload: { path: "" } })).toThrow(
+      "payload.path must be a non-empty string",
+    );
   });
 
   it("converts Pi custom entries into session entries and back", () => {
-    const todoInput = sessionEntryInputFromPiCustomEntry({
-      type: "todo_write",
-      data: { phases: [{ name: "Execution", tasks: [] }] },
+    const artifactInput = sessionEntryInputFromPiCustomEntry({
+      type: "artifact",
+      data: { path: "artifacts/runtime.md", kind: "markdown" },
       timestamp: now(),
     });
-    expect(todoInput).toEqual({
-      type: "todo_write",
-      payload: { phases: [{ name: "Execution", tasks: [] }] },
+    expect(artifactInput).toEqual({
+      type: "artifact",
+      payload: { path: "artifacts/runtime.md", kind: "markdown" },
     });
 
     const unknownInput = sessionEntryInputFromPiCustomEntry({
