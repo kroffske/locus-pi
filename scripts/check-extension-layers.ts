@@ -2,7 +2,7 @@
  * check-extension-layers.ts — the steady-state ownership guardrail for
  * `extensions/_shared` and selected cross-feature boundaries.
  *
- * The shared tree has six named layers. This gate keeps their current contract
+ * The shared tree has five named layers. This gate keeps their current contract
  * explicit and mechanically enforced:
  *
  *   1. No upward import. Shared code may not import feature code.
@@ -41,7 +41,7 @@ import ts from "typescript";
 // Ledger: shared layers
 // ---------------------------------------------------------------------------
 
-type SharedLayer = "host" | "operator" | "runtime" | "model" | "project" | "agent-runtime";
+type SharedLayer = "host" | "operator" | "runtime" | "model" | "agent-runtime";
 
 /**
  * Rank is the only thing rule 2 compares, EXCEPT for `operator`, which is
@@ -55,8 +55,7 @@ const LAYER_RANK: Record<SharedLayer, number> = {
   operator: 1,
   runtime: 2,
   model: 2,
-  project: 3,
-  "agent-runtime": 4,
+  "agent-runtime": 3,
 };
 
 const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
@@ -70,14 +69,6 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
     "render-profile",
     "render-scheduler",
     "safe-output",
-    /**
-     * `beta-gate` belongs to the lowest layer on purpose: a beta entrypoint calls it as
-     * its first statement, before it constructs anything, so it may depend on nothing
-     * but `node:` builtins. It duplicates the `.locus-pi` directory name rather than
-     * importing `workflows/runtime/workflow-run-layout.ts`, because rule 1 forbids a
-     * shared module from reaching into a feature directory.
-     */
-    "beta-gate",
   ],
   operator: [
     "command-ui",
@@ -97,7 +88,6 @@ const SHARED_LAYER_MEMBERS: Record<SharedLayer, readonly string[]> = {
    *  layer either of them can reach. */
   runtime: ["session-core", "artifacts", "event-bus", "runtime-capabilities", "long-timer"],
   model: ["model-settings", "live-model-display", "workflow-model-resolve", "session-tool-transport"],
-  project: ["goal-mode", "prompt-command-store", "tasks-store"],
   "agent-runtime": [
     "agents",
     "agent-context-extras",
@@ -285,7 +275,6 @@ const REGISTRIES: readonly RegistryEntry[] = [
   { symbol: "locus-pi.workflow-background-runs.v1", owner: "extensions/workflows/run/background-run-registry.ts" },
   { symbol: "locus-pi.active-agent-session-viewers.v1", owner: "extensions/agents/fleet/session-viewer.ts" },
   { symbol: "locus-pi.viewer-external-rows.v1", owner: "extensions/_shared/operator/viewer-geometry.ts" },
-  { symbol: "locus-pi.beta-config-warnings.v1", owner: "extensions/_shared/host/beta-gate.ts" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -304,11 +293,6 @@ const MUTABLE_MODULE_STATE: readonly MutableStateEntry[] = [
     file: "extensions/agents/catalog/catalog.ts",
     binding: "agentCatalog",
     note: "the resolved agent catalog; agents/catalog/catalog.ts#refreshAgents is the only writer and rebuilds it from disk on every discovery pass.",
-  },
-  {
-    file: "extensions/todo-context/state/phase-store.ts",
-    binding: "todoStateCache",
-    note: "a cache and fallback in front of the durable session store; todo-context/state/phase-store.ts is the only writer.",
   },
   {
     file: "extensions/ast-structural-edit/ast-engine.ts",

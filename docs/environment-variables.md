@@ -3,19 +3,6 @@
 `locus-pi` keeps operator environment controls narrow. Set these before starting
 Pi; restart the Pi process after changing them.
 
-## `LOCUS_PI_BETA`
-
-Enables beta extensions for the current Pi process. Use a comma-separated list
-of beta extension ids, for example:
-
-```bash
-LOCUS_PI_BETA=loop,todo-context pi
-```
-
-Project `.locus-pi/config.json` remains the persistent project-level mechanism.
-See [beta extensions](getting-started.md#beta-extensions) for precedence and the
-complete extension list.
-
 ## `LOCUS_PI_HTML_TRANSCRIPTS`
 
 Controls automatic readable HTML renders for child-agent transcripts created by

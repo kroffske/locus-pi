@@ -4,7 +4,6 @@ import path from "node:path";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import agents from "../../extensions/agents/index.js";
-import { registerLoop } from "../../extensions/loop/index.js";
 import model from "../../extensions/model/index.js";
 import workflows from "../../extensions/workflows/index.js";
 import type { ExtensionCommandContext } from "../../extensions/_shared/host/pi-api.js";
@@ -51,12 +50,12 @@ describe("command UI lifecycle", () => {
   it("clears transient widgets and statuses when an unrelated slash command is entered", async () => {
     const h = createHarness();
     agents(h.pi);
-    registerLoop(h.pi);
+    model(h.pi);
 
     await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
     h.ctx.ui.setStatus("agents", "stale agent status");
 
-    await emit(h, "input", { text: "/loop status" });
+    await emit(h, "input", { text: "/model-roles" });
 
     expect(h.widgetPayloads.get("agents")).toBeUndefined();
     expect(h.widgets.get("agents")).toBe("");
@@ -101,11 +100,11 @@ describe("command UI lifecycle", () => {
   it("does not clear explicitly persistent command status surfaces", async () => {
     const h = createHarness();
     model(h.pi);
-    registerLoop(h.pi);
+    agents(h.pi);
 
     h.ctx.ui.setStatus("model-roles", "Model roles: DEFAULT=test/fast");
 
-    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
+    await h.commands.get("agent")!.handler("list", h.ctx as ExtensionCommandContext);
 
     expect(h.statuses.get("model-roles")).toBe("Model roles: DEFAULT=test/fast");
   });

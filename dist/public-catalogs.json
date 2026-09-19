@@ -15,7 +15,6 @@
       ],
       "hooks": ["session_start", "session_shutdown", "before_agent_start", "input"],
       "risk": "high",
-      "tier": "default",
       "ownership": "locus-specific"
     },
     {
@@ -24,7 +23,6 @@
       "commands": [],
       "hooks": [],
       "risk": "medium",
-      "tier": "default",
       "ownership": "compat-wrapper"
     },
     {
@@ -33,16 +31,6 @@
       "commands": [],
       "hooks": [],
       "risk": "high",
-      "tier": "default",
-      "ownership": "compat-wrapper"
-    },
-    {
-      "id": "loop",
-      "tools": ["loop"],
-      "commands": ["loop"],
-      "hooks": ["agent_settled", "input"],
-      "risk": "medium",
-      "tier": "beta",
       "ownership": "compat-wrapper"
     },
     {
@@ -51,7 +39,6 @@
       "commands": ["model-roles", "effort"],
       "hooks": ["session_start", "input"],
       "risk": "medium",
-      "tier": "default",
       "ownership": "compat-wrapper"
     },
     {
@@ -60,17 +47,7 @@
       "commands": [],
       "hooks": ["session_start", "session_before_compact", "session_compact", "session_shutdown"],
       "risk": "low",
-      "tier": "default",
       "ownership": "locus-specific"
-    },
-    {
-      "id": "todo-context",
-      "tools": ["todo_read", "todo_write"],
-      "commands": ["todo"],
-      "hooks": ["agent_settled", "input"],
-      "risk": "high",
-      "tier": "beta",
-      "ownership": "compat-wrapper"
     },
     {
       "id": "workflows",
@@ -78,7 +55,6 @@
       "commands": ["workflows", "workflow-stop", "fusion"],
       "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled"],
       "risk": "critical",
-      "tier": "default",
       "ownership": "locus-specific"
     }
   ],

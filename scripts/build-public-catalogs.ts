@@ -66,8 +66,7 @@ const NUMBER_WORDS = [
 
 /**
  * One activated extension, projected from its manifest. `ownership` is the manifest
- * `ownershipStatus`, and `tier` is `default` or `beta` — a beta entrypoint is activated by
- * `package.json#pi.extensions` like any other and registers nothing until the project enables it.
+ * `ownershipStatus`.
  */
 export interface ExtensionCatalogEntry {
   id: string;
@@ -75,7 +74,6 @@ export interface ExtensionCatalogEntry {
   commands: string[];
   hooks: string[];
   risk: string;
-  tier: string;
   ownership: string;
 }
 
@@ -223,7 +221,6 @@ export function publicCatalogs(
     commands: stringArrayField(entry, "provides", "commands"),
     hooks: stringArrayField(entry, "provides", "hooks"),
     risk: stringField(entry, "risk"),
-    tier: stringField(entry, "tier"),
     ownership: stringField(entry, "ownershipStatus"),
   }));
 
@@ -276,15 +273,14 @@ function extensionTableFragment({ catalogs, manuals }: CatalogSources, docFile: 
       codeList(entry.commands),
       codeList(entry.hooks),
       cell(entry.risk),
-      cell(entry.tier),
       `[${code(manual)}](${relativeLink(docFile, manual)})`,
     ]);
   });
   return [
     GENERATED_NOTICE,
     "",
-    row(["Extension", "Tools", "Commands", "Hooks", "Risk", "Tier", "Manual"]),
-    row(["---", "---", "---", "---", "---", "---", "---"]),
+    row(["Extension", "Tools", "Commands", "Hooks", "Risk", "Manual"]),
+    row(["---", "---", "---", "---", "---", "---"]),
     ...rows,
   ].join("\n");
 }

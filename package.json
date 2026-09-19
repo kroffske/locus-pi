@@ -30,10 +30,8 @@
       "./extensions/agents/index.ts",
       "./extensions/ask-user-question/index.ts",
       "./extensions/ast-structural-edit/index.ts",
-      "./extensions/loop/index.ts",
       "./extensions/model/index.ts",
       "./extensions/status-line/index.ts",
-      "./extensions/todo-context/index.ts",
       "./extensions/workflows/index.ts"
     ],
     "skills": [
