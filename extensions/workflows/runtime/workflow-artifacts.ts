@@ -36,6 +36,7 @@ import {
 } from "./workflow-artifact-format.js";
 import {
   assertWorkflowRunDir,
+  assertWorkflowRunDirectoryPath,
   ensureWorkflowDirectoryNoSymlink,
   assertWorkflowRunId,
   readWorkflowRunFile,
@@ -402,7 +403,6 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     name: string;
     kind: WorkflowArtifactKind;
     mediaType: string;
-    sourcePath: string;
     relativePath: string;
     callId: string;
     provenance: WorkflowArtifactProvenance;
@@ -605,7 +605,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       assertWorkflowArtifactComponent(callId, "callId");
       const transcriptDir = path.join(artifactsDir, "transcripts", callId);
       const resultArtifactsDir = path.join(artifactsDir, "results", callId);
-      // Writers materialize these confined destinations on first successful write.
+      for (const dir of [transcriptDir, resultArtifactsDir]) assertWorkflowRunDirectoryPath(runDir, dir, false);
       return { transcriptDir, resultArtifactsDir, recordOperatorAskEvidence };
     },
     list() {

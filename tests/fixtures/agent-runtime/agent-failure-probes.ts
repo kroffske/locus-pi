@@ -115,13 +115,13 @@ export function tmpReportsDir(): string {
 
 export async function runHost(
   config: FakeSessionConfig,
-  options: { childTimeoutMs?: number; maxToolCalls?: number; aborted?: boolean } = {},
+  options: { childTimeoutMs?: number; maxToolCalls?: number; aborted?: boolean; reportsDir?: string } = {},
 ) {
   const session = fakeSession(config);
   const createSession: CreateAgentSessionFactory = async () => ({ session });
   const executor = createAgentSdkSessionExecutor({
     createSession,
-    reportsDir: tmpReportsDir(),
+    reportsDir: options.reportsDir ?? tmpReportsDir(),
     now: () => "fixed",
     ...(options.childTimeoutMs !== undefined ? { childTimeoutMs: options.childTimeoutMs } : {}),
     ...(options.maxToolCalls !== undefined ? { maxToolCalls: options.maxToolCalls } : {}),

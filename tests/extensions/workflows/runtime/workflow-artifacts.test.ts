@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -14,7 +15,11 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it, vi } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
+import {
+  writeAgentRunResultArtifact,
+  type AgentExecutor,
+  type AgentRunRequest,
+} from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowArtifactStore,
   readWorkflowArtifactIndex,
@@ -35,6 +40,7 @@ import {
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import { hostRequest, runHost } from "../../../fixtures/agent-runtime/agent-failure-probes.js";
 import { createHarness } from "../../../test-harness.js";
 
 const roots: string[] = [];
@@ -66,6 +72,29 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, id),
     }).childEvidenceDestinations("call-0001");
     assert.deepEqual([existsSync(transcriptDir), existsSync(resultArtifactsDir)], [false, false]);
+  });
+
+  it.each([
+    ["transcripts", "parent"],
+    ["transcripts", "leaf"],
+    ["results", "parent"],
+    ["results", "leaf"],
+  ] as const)("writes no %s evidence through a pre-existing %s symlink", async (zone, link) => {
+    const root = project(),
+      outside = project(),
+      id = `linked-${zone}-${link}`;
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
+    const parent = path.join(store.artifactsDir, zone);
+    if (link === "leaf") mkdirSync(parent);
+    symlinkSync(outside, link === "parent" ? parent : path.join(parent, "call-0001"));
+    // The bridge's order: request destinations, real SDK transcript export, real result envelope.
+    const refusal = await (async () => {
+      const destinations = store.childEvidenceDestinations("call-0001");
+      const result = await runHost({ lastAssistantText: "answer" }, { reportsDir: destinations.transcriptDir });
+      writeAgentRunResultArtifact(root, hostRequest(), result, destinations.resultArtifactsDir);
+    })().catch((error: unknown) => error);
+    assert.deepEqual(readdirSync(outside, { recursive: true }), [], "zero outside writes, not merely a late error");
+    assert.match(String(refusal), /Workflow run directory is unsafe/u);
   });
 
   it("refuses an unclaimed execution directory instead of creating a flat run", () => {
@@ -529,43 +558,6 @@ describe("workflow run artifact store", () => {
     });
 
     assert.equal(current.consumeText(sourceRef).text, large);
-  });
-
-  it("keeps an artifact older than the newest twenty consumable", () => {
-    const root = project();
-    const sourceRunId = "deep-history-source";
-    const source = createWorkflowArtifactStore({
-      projectRoot: root,
-      runId: sourceRunId,
-      runDir: runDir(root, sourceRunId),
-    });
-    const refs = Array.from({ length: 25 }, (_, index) =>
-      source.publishText(`doc-${index + 1}.md`, `body ${index + 1}`),
-    );
-    const oldest = refs[0]!;
-    const projected = refs.slice(-20);
-    assert.equal(
-      projected.some((ref) => ref.artifactId === oldest.artifactId),
-      false,
-    );
-    writeFileSync(
-      workflowResultFile(runDir(root, sourceRunId)),
-      `${JSON.stringify({
-        runId: sourceRunId,
-        ok: true,
-        result: "done",
-        artifactRefs: projected,
-        artifactRefsOmitted: refs.length - projected.length,
-        target: { kind: "name", ref: "review", source: "package" },
-      })}\n`,
-    );
-    const current = createWorkflowArtifactStore({
-      projectRoot: root,
-      runId: "deep-history-consumer",
-      runDir: runDir(root, "deep-history-consumer"),
-    });
-
-    assert.equal(current.consumeText(oldest).text, "body 1");
   });
 
   it("consumes an indexed source artifact omitted from the terminal display projection", () => {
