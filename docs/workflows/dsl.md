@@ -41,6 +41,16 @@ now()                         // Recorded wall clock (ms); replayed on --resume
 random()                      // Recorded randomness in [0,1); replayed on --resume
 ```
 
+`publishPrimaryArtifact(name, { workflowSource: "workflow.mjs" })` is the narrow
+checked-source publication form used by `task/plan`. The host reads a confined,
+non-empty, non-symlink UTF-8 workspace file (up to 512 KiB), checks Node syntax
+without import and orchestration-only shape, and publishes those exact bytes
+through the existing retained artifact store. It returns the ordinary artifact
+reference and output path, not a mutable workspace reference. Invalid source
+throws before primary publication and remains in the workspace for repair.
+Ordinary text callers and `publishPrimaryFile()` keep their existing behavior.
+Static validation does not prove semantic correctness or successful execution.
+
 `fusion()` requires `mode: "tool-free" | "agent"`; every member and the judge
 use that same mode. Each selector still requires `model` or `modelRole` and may
 also name an existing catalog `agent`. Tool-free legs retain the selected

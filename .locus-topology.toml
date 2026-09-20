@@ -7,6 +7,30 @@ exclude_paths = [".locus/**", ".tasks/**", ".test_pi/**", ".claude/**", ".pi/**"
 # with an owner and a trigger that says when it is revisited.
 
 [[exceptions]]
+path = "extensions/_shared/host/pi-api.ts"
+rule = "code-lines"
+ceiling = 592
+owner = "Pi tool result integration"
+reason = "T-220: one opt-in registration bridge preserves returned errors through Pi's supported tool_result hook without dropping structured diagnostics. Existing API/type ownership is retained."
+trigger = "Any further tool bridge behavior requires review of the host API boundary; do not add more adapters here."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-runtime.ts"
+rule = "code-lines"
+ceiling = 948
+owner = "workflow DSL publication"
+reason = "T-220: narrow checked-source declaration on the existing primary-artifact API plus an injected host read; no filesystem dependency enters the DSL core."
+trigger = "Another publication variant requires reviewing this union and the artifact port rather than adding a generic validation framework."
+
+[[exceptions]]
+path = "extensions/workflows/runtime/workflow-runner.ts"
+rule = "code-lines"
+ceiling = 1132
+owner = "workflow host composition"
+reason = "T-220: connects confined workspace bytes, existing source checker and retained artifact publication at the existing host boundary."
+trigger = "Further growth in publication wiring requires moving the cohesive operation to the existing artifact owner, not enlarging this exception."
+
+[[exceptions]]
 path = "tests/extensions/workflows/runtime"
 rule = "directory-files"
 ceiling = 53

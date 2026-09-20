@@ -55,7 +55,12 @@ recovery path.
 
 Tool availability wins; do not guess from the host product name. Require one
 exact saved workflow name or project-relative `.workflow.mjs` path. A request to
-create or redesign a workflow belongs to `locus-pi-workflow-create` instead.
+create or redesign a workflow starts with `locus-pi-workflow-create`. When the
+same request authorizes create-and-run, accept its checked-source handoff and
+continue here without repeat approval. For `task/plan`, read its retained
+`outputs/workflow.mjs` primary artifact (`result.name === "workflow.mjs"`), not
+verifier prose or a later workspace edit. Use the existing file target launch;
+the runtime snapshots that file. Do not invent a source-bytes launch target.
 
 ## Native Pi path
 
@@ -76,7 +81,10 @@ through the procedure in "Recover a stopped run". Use `continuation` only for an
 operator-approved answer
 to a recorded handoff. Do not spawn `pi`, build a slash-command, or call a shell
 when this tool exists. Read the returned run id, paths, disposition, result, and
-artifacts from the tool result.
+artifacts from the tool result. Require a completed disposition and retained
+result for success; an error flag, failed/cancelled disposition or unavailable
+terminal evidence is not completion. A successful static check alone is not a
+successful run.
 
 For any workflow, `runName: "<name>"` selects `.locus-pi/workspaces/<name>`. An
 existing legacy-only `.locus-pi/plans/<name>` remains bound in place so its
@@ -210,7 +218,11 @@ Pi may exit `0` after a typed rejection or failed workflow command. Never use
 the process exit code alone as semantic success. If no start/rejection receipt
 arrives within 30 seconds, if a parent `agent_start` or assistant turn begins,
 or if required fields are missing, fail as a protocol error and do not parse
-model prose as a fallback.
+model prose as a fallback. A start receipt without a terminal receipt is also
+incomplete, even after process exit zero. Read the persisted result and reconcile
+it with the receipt before claiming success; disagreement is a protocol failure.
+Headless runs cannot obtain live operator answers: preserve the explicit
+`noOperator` failure or supported handoff, never fabricate an answer.
 
 An `awaiting_operator` terminal status is not permission to answer. Report the
 run id, question/artifacts, and required operator action; continue only after an

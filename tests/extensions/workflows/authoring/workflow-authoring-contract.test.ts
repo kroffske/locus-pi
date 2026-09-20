@@ -63,7 +63,8 @@ describe("readable workflow authoring references", () => {
     expect(text).toContain("Copy and edit this text when needed");
     expect(text).toContain("`task/plan` receives the complete accepted draft as semantic input");
     expect(text).toContain("one concrete `workflow.mjs`");
-    expect(text).toContain("Nothing executes the generated workflow automatically");
+    expect(text).toContain("Neither package stage executes generated source.");
+    expect(text).toContain("For an authorized create-and-run request");
   });
 
   it("keeps CLI syntax target-first on every active manual speaker", () => {
@@ -222,11 +223,14 @@ ${authoring[1] ?? ""}
   it("routes one continuous Design-review-Build process without copying the runtime manual", () => {
     const router = source("skills/locus-pi-workflow-create/SKILL.md");
     const design = source("skills/locus-pi-workflow-create/references/design-and-build.md");
-    expect(router).toContain("This skill owns authoring only.");
+    expect(router).toContain("This skill owns authoring and the checked-source handoff.");
     expect(router).toContain("references/design-and-build.md");
     expect(router).toContain("source-shape.md#machine-enforced-standard-source-shape");
     expect(router).toContain("docs/workflows/index.md");
-    expect(router).toContain("Build does not run");
+    expect(router).toContain("Create-only ends with checked source");
+    expect(router).toContain("Create-and-run continues through that run skill");
+    expect(router).not.toContain("Never run the workflow");
+    expect(design).toContain("no unchecked module is imported");
     expect(router).toContain("exact copyable launch command");
     expect(router).toContain("/workflows run <name>");
     expect(router.split("\n").length).toBeLessThan(100);
