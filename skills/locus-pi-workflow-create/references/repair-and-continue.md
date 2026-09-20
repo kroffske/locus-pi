@@ -6,7 +6,7 @@ This is an existing runtime capability, not a new graph primitive. A resume reus
 
 Read the stopped run diagnostic and the evidence it names: child result, transcript or answer; use the run journal when no child pointer is proven. Find the project-owned source and the original goal. Preserve the same workflow target and workspace contract. Change the failing prompt or contract and the required suffix; keep unaffected labels, prompts, order and phases unchanged. Do not rename every node while fixing one of them. Use stable business keys where the graph already has them, without claiming that keys bypass the prefix rule.
 
-Validate the exact repaired source with the supported checker and the module/source checks. Report what changed and which prefix is expected to remain reusable. Do not run it as part of Build. Hand the source path, the diagnostic and the original run id to the [run skill](../../locus-pi-workflow-run/SKILL.md).
+Validate the exact repaired source with the supported checker and Node syntax/source checks, without importing unchecked source. Report what changed and which prefix is expected to remain reusable. Hand the source path, diagnostics and original run id to the [run skill](../../locus-pi-workflow-run/SKILL.md). Repair-only stops at this handoff; authorized Repair + Continue resumes now through that skill, without a new approval ritual. Preserve original attempts and check the new terminal evidence; checking source alone does not complete continuation.
 
 ## Operator's procedure
 
@@ -85,7 +85,7 @@ is missing and produce fresh verification before ordinary review and QA. Do not
 blindly rerun an effect, reset the tree to the ancestor, or accept a previous
 child's self-report. Changed prerequisites may require an earlier fresh stage.
 Use [external-locus-pi](../../external-locus-pi/SKILL.md) for an inspectable, retained Pi session
-for long execution; creating a workflow still does not launch it.
+for long execution; create-only still stops before launch.
 
 ### Read-only review evidence
 

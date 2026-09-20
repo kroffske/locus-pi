@@ -753,7 +753,7 @@ describe("npm public package boundary", () => {
       const probeScript = `
         const { registerWorkflowSourceCheckTool } = await import(${JSON.stringify(toolUrl)});
         let tool;
-        registerWorkflowSourceCheckTool({ registerTool(value) { tool = value; } });
+        registerWorkflowSourceCheckTool({ registerTool(value) { tool = value; }, on() {} });
         if (!tool) throw new Error("workflow_check_source was not registered");
         const ctx = {
           cwd: ${JSON.stringify(consumerRoot)},

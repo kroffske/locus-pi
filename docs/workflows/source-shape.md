@@ -141,7 +141,7 @@ project-relative path of the exact file Build produced:
 ```
 
 Run the same check for every declared direct child file. Build succeeds only
-when the design `Entries` set, files, `meta.name` values, module imports, and
+when the design `Entries` set, files, `meta.name` values, Node syntax, source identity, and
 source checks all agree.
 
 The tool is owned by the installed `workflows` extension and resolves the path
@@ -153,7 +153,7 @@ with no path to check every `standard` entry
 already present in the Package registry. Neither command discovers
 or adds registry entries. The repository-wide `npm run check` gate runs that
 Package check. Source-shape validation does not replace source-identity
-assessment or importing the module.
+assessment or semantic design/source comparison.
 
 Diagnostics are compiler-shaped. Human-readable output uses
 `path:line:column [CODE] message`; the tool result also returns the full
@@ -164,7 +164,7 @@ calls `standardWorkflowSourceShapeErrors()` keeps the legacy sorted `string[]`
 error projection; warnings are intentionally absent from that compatibility
 view.
 
-Build remains failed until the exact source passes this checker, module import,
+Build remains failed until the exact source passes this checker, Node syntax validation,
 identity checks, and design/source comparison. An unavailable tool or failed
 checker result cannot be reported as a successful Build.
 

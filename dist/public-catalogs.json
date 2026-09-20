@@ -53,7 +53,7 @@
       "id": "workflows",
       "tools": ["workflow", "workflow_check_source", "fusion"],
       "commands": ["workflows", "workflow-stop", "fusion"],
-      "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled"],
+      "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled", "tool_result"],
       "risk": "critical",
       "ownership": "locus-specific"
     }

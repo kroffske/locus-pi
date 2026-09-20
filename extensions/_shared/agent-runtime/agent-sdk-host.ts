@@ -1,3 +1,4 @@
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import type {
@@ -1289,6 +1290,12 @@ async function defaultCreateAgentSession(opts: SdkCreateSessionOptionsLike): Pro
   if (!isRecord(result) || !isRecord(result.session)) {
     throw new AgentSdkUnavailableError("createAgentSession returned an unexpected shape.");
   }
+  try {
+    configureCliSessionDeadline(result.session as unknown as AgentSession, opts.cliRequestTimeoutMs);
+  } catch (error) {
+    disposeQuietly(result.session as unknown as SdkAgentSessionLike);
+    throw error;
+  }
   return result as unknown as SdkCreateSessionResultLike;
 }
 
@@ -1313,53 +1320,7 @@ export async function materializeSdkSessionOptions(
     evidenceSessionDir ?? path.join(runtimeStateDir(opts.cwd ?? process.cwd()), "reports", ".sessions"),
   );
   const isolatedSessionOptions: Record<string, unknown> = { ...sessionOptions, sessionManager: isolatedSessionManager };
-  // Pi's implicit HTTP idle timeout is a whole-process timeout to a CLI adapter.
-  // Override only this child's settings, retaining explicit operator limits and
-  // the SDK's higher-precedence request options. Native HTTP sessions stay intact.
-  if (
-    cliRequestTimeoutMs !== undefined &&
-    isRecord(opts.model) &&
-    typeof opts.model.baseUrl === "string" &&
-    opts.model.baseUrl.startsWith("cli://")
-  ) {
-    if (!Number.isSafeInteger(cliRequestTimeoutMs) || cliRequestTimeoutMs < 1 || cliRequestTimeoutMs > 2_147_483_647) {
-      throw new Error("cliRequestTimeoutMs must be a positive Node timer duration");
-    }
-    const SettingsManager = mod.SettingsManager as
-      | {
-          create(cwd: string): {
-            getProviderRetrySettings(): { timeoutMs?: number };
-            getGlobalSettings(): { httpIdleTimeoutMs?: number };
-            getProjectSettings(): { httpIdleTimeoutMs?: number };
-            getHttpIdleTimeoutMs(): number;
-            applyOverrides(settings: { retry: { provider: { timeoutMs: number } } }): void;
-          };
-        }
-      | undefined;
-    if (typeof SettingsManager?.create !== "function") {
-      throw new AgentSdkUnavailableError("Installed Pi host does not expose SettingsManager.create for CLI deadlines.");
-    }
-    const settings = SettingsManager.create(opts.cwd ?? process.cwd());
-    const explicitHttpTimeout =
-      settings.getProjectSettings().httpIdleTimeoutMs ?? settings.getGlobalSettings().httpIdleTimeoutMs;
-    const configuredTimeout =
-      settings.getProviderRetrySettings().timeoutMs ??
-      (explicitHttpTimeout === undefined ? undefined : settings.getHttpIdleTimeoutMs() || undefined);
-    settings.applyOverrides({
-      retry: {
-        provider: {
-          timeoutMs: Math.min(cliRequestTimeoutMs, configuredTimeout ?? cliRequestTimeoutMs),
-        },
-      },
-    });
-    isolatedSessionOptions.settingsManager = settings;
-  }
-  if (
-    appendSystemPrompt === undefined &&
-    resourceLoaderOptions === undefined &&
-    isolatedSessionOptions.settingsManager === undefined
-  )
-    return isolatedSessionOptions;
+  if (appendSystemPrompt === undefined && resourceLoaderOptions === undefined) return isolatedSessionOptions;
   if (!isRecord(mod) || typeof mod.DefaultResourceLoader !== "function") {
     throw new AgentSdkUnavailableError(
       "Installed Pi host does not expose DefaultResourceLoader for package-owned prompt resources.",
@@ -1385,9 +1346,46 @@ export async function materializeSdkSessionOptions(
   if (typeof mod.getAgentDir === "function") loaderOptions.agentDir = (mod.getAgentDir as () => string)();
   const loader = new DefaultResourceLoader(loaderOptions);
   await loader.reload?.();
-  // The loader has its own settings manager. Supplying the loaded resource
-  // snapshot prevents SDK startup from reloading away the child-only overlay.
   return { ...isolatedSessionOptions, resourceLoader: loader };
+}
+
+/** Keep SDK hooks while separating its HTTP idle default from CLI process deadlines. */
+export function configureCliSessionDeadline(session: AgentSession, requestTimeoutMs?: number): void {
+  if (typeof session.model?.baseUrl !== "string" || !session.model.baseUrl.startsWith("cli://")) return;
+  if (
+    requestTimeoutMs !== undefined &&
+    (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 2_147_483_647)
+  ) {
+    throw new Error("cliRequestTimeoutMs must be a positive Node timer duration");
+  }
+  const suppliedTimeout = Symbol("CLI request timeout before SDK defaults");
+  const stream = session.agent.streamFunction;
+  const runtimeStream = session.modelRuntime.streamSimple.bind(session.modelRuntime);
+  session.agent.streamFunction = (model, context, options) => {
+    const marked = { ...options, [suppliedTimeout]: options?.timeoutMs };
+    return stream.call(session.agent, model, context, marked);
+  };
+  session.modelRuntime.streamSimple = (model, context, options) => {
+    if (!options || !(suppliedTimeout in options)) return runtimeStream(model, context, options);
+    const { [suppliedTimeout]: supplied, ...forwarded } = options as typeof options & {
+      [suppliedTimeout]?: number;
+    };
+    if (model.baseUrl.startsWith("cli://")) {
+      const settings = session.settingsManager;
+      const explicitHttp =
+        settings.getProjectSettings().httpIdleTimeoutMs ?? settings.getGlobalSettings().httpIdleTimeoutMs;
+      const configured =
+        settings.getProviderRetrySettings().timeoutMs ??
+        (explicitHttp === undefined ? undefined : settings.getHttpIdleTimeoutMs() || undefined);
+      const deadline =
+        requestTimeoutMs === undefined ? configured : Math.min(requestTimeoutMs, configured ?? requestTimeoutMs);
+      // The original per-call option outranks settings, exactly as it does in Pi.
+      const timeoutMs = supplied ?? deadline;
+      if (timeoutMs !== undefined) forwarded.timeoutMs = timeoutMs;
+      else delete forwarded.timeoutMs;
+    }
+    return runtimeStream(model, context, forwarded);
+  };
 }
 
 async function exportEvidence(

@@ -1,21 +1,21 @@
 /**
- * extensions/workflows/tool/workflow-tool.ts — The `workflow` tool.
- *
- * Owns its TypeBox parameter schema, the exec-approval detail lines, the
- * launch through the shared command launcher, and the single native toolResult
- * the run is reported through. Its custom result card owns the tool-call
- * hierarchy; command widgets and overlays still belong to `/workflows`.
+ * Native workflow schema, approval, command-launcher dispatch and terminal result.
+ * Cards own tool-call hierarchy; command widgets and overlays remain in /workflows.
  */
 
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
-import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
-import type { ThemeLike, ToolRenderContext, ToolRenderResultOptions, ToolResult } from "../../_shared/host/pi-api.js";
 import {
+  type ExtensionAPI,
+  type ThemeLike,
+  type ToolRenderContext,
+  type ToolRenderResultOptions,
+  type ToolResult,
   errorResult,
   getProjectRoot,
   getWorkingDirectory,
   isOneShotHostMode,
+  registerToolWithErrorResults,
   textResult,
 } from "../../_shared/host/pi-api.js";
 import { prepareValidatedParams, validateParams } from "../../_shared/host/validation.js";
@@ -250,7 +250,7 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
   pi.on("session_start", (_event, ctx) => {
     approvalProjectRoot = getProjectRoot(ctx);
   });
-  pi.registerTool({
+  registerToolWithErrorResults(pi, {
     name: "workflow",
     label: "workflow",
     description:
@@ -268,8 +268,8 @@ export function registerWorkflowTool(pi: ExtensionAPI, deps: WorkflowToolDepende
       `item checkpoints. Legacy script strings normalize to name or path; arbitrary inline JavaScript is not supported. To AUTHOR a new workflow, use the ` +
       `packaged \`locus-pi-workflow-create\` skill: a raw request writes and reviews .locus-pi/workflows/<name>/<name>.design.md before writing exactly the ` +
       `design-declared entries in the same turn (a declared \`runnable root\` includes the root; \`group-only\` omits it); explicit design-only wording pauses ` +
-      `before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Authoring never runs the ` +
-      `workflow. Substantive implementation defaults to adaptive slices with owner re-cutting and outcome-led briefs; fixed graphs are explicit alternatives. The contract is skills/locus-pi-workflow-create/SKILL.md → skills/locus-pi-workflow-create/references/source-boundary.md → docs/workflows/index.md.`,
+      `before source, while \`Build design: <exact path>\` and \`Build approved design: <exact path>\` remain build-only forms. Create-only stops at checked source; authorized create-and-run hands it to locus-pi-workflow-run for execution and terminal evidence. ` +
+      ` Substantive implementation defaults to adaptive slices with owner re-cutting and outcome-led briefs; fixed graphs are explicit alternatives. The contract is skills/locus-pi-workflow-create/SKILL.md → skills/locus-pi-workflow-create/references/source-boundary.md → docs/workflows/index.md.`,
     parameters: WorkflowParams,
     prepareArguments: (args) => prepareValidatedParams(WorkflowParams, args),
     approval: "exec",

@@ -10,10 +10,35 @@
    source as the final result. Missing, empty, or whitespace-only input fails before
    the first child starts and publishes no `workflow.mjs`.
 
-The second stage replaces the old generic implementation and template-rendering
-pipeline. Nothing executes the generated workflow automatically. Review the
-source, copy it into the target project's `.locus-pi/workflows/` namespace, and run it
-only through the normal reviewed-workflow path.
+The verifier writes workspace `workflow.mjs` and returns check evidence, never
+publication bytes. A choice routes to publication, failure, or one explicit
+correction followed by independent recheck. Decision agents write their findings
+and next action to workspace `workflow-source-decision.md` and, after correction,
+`workflow-source-recheck.md`; the correction owner reads those findings. Refusal
+returns `stage: "verify"` with source, report and transcript guidance. Exhaustion
+stays failed. The host
+reads the confined regular file, checks Node syntax and orchestration-only shape,
+and retains those same bytes as `result.name === "workflow.mjs"` and
+`outputs/workflow.mjs`. Invalid source remains available for repair but receives
+no accepted primary artifact.
+
+Design, design review, and source build return complete text without writing a
+saved workflow into the project. The designated verifier writes the workspace
+candidate. Semantic review checks explicit failure returns, actionable findings
+reaching correction, and agreement between primary output names and content;
+static syntax/shape checks alone do not establish those properties. The design
+must express those checks through supported agent/choice edges, not JavaScript
+inspection of opaque answers or publication references. The host already rejects
+empty answers and execution/publication errors. Simple fixed tasks retain their
+requested graph and primary filename without automatic QA or approval stages;
+substantive implementation still needs its declared review and final QA.
+
+Neither package stage executes generated source. Create-only ends with the
+checked source and launch command. For an authorized create-and-run request, the
+caller reviews the retained file and hands it to `locus-pi-workflow-run` through
+the existing file-target path, without repeat approval. Report authoring,
+execution and product verification separately. A mutable workspace file or a
+verifier's success sentence is not the retained source.
 
 ```text
 /workflows run task/draft -- <raw request>
@@ -22,7 +47,8 @@ only through the normal reviewed-workflow path.
 
 Both workflow scripts are orchestration-only. Child agents may inspect the live
 project when their prompt requires it. The JavaScript does not read project or
-artifact files.
+artifact files. The checked-source publication declaration delegates the file
+read and validation to the existing host publication boundary.
 
 ## Default authoring style
 

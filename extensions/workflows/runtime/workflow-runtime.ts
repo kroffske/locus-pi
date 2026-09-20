@@ -284,8 +284,8 @@ export interface WorkflowDsl {
   outputDir(): string;
   /** Persist deterministic workflow-authored text and return its complete digest-bound reference. */
   publishArtifact(name: string, text: string): WorkflowArtifactRef;
-  /** Publish the one semantic document that represents a successful terminal result. */
-  publishPrimaryArtifact(name: string, text: string, stage?: string): WorkflowArtifactRef;
+  /** Publish exact text, or host-check and retain a workspace workflow source file. */
+  publishPrimaryArtifact(name: string, text: string | { workflowSource: string }, stage?: string): WorkflowArtifactRef;
   /** Validate and publish one non-empty regular file by reference without copying its content. */
   publishPrimaryFile(relativePath: string): WorkflowPrimaryFileReference;
   /** Verify and copy one complete prior-run text reference into this run. */
@@ -359,6 +359,8 @@ export interface WorkflowRuntimeOptions {
   projectRoot?: string;
   /** Project-relative workflow workspace. */
   outputDir?: string;
+  /** Host-owned confined source read and syntax/orchestration-only check. */
+  readCheckedWorkflowSource?: (relativePath: string) => string;
   /** Host-owned regular-file validator/reference publisher. */
   publishPrimaryFile?: (relativePath: string) => WorkflowPrimaryFileReference;
   /** Host-owned saved-child runner. Absent in bare runtime embeddings. */
@@ -810,9 +812,25 @@ export function createWorkflowRuntime(options: WorkflowRuntimeOptions): Workflow
   }
 
   let primaryArtifactPublished = false;
-  function publishPrimaryArtifact(name: string, text: string, stage?: string): WorkflowArtifactRef {
+  function publishPrimaryArtifact(
+    name: string,
+    text: string | { workflowSource: string },
+    stage?: string,
+  ): WorkflowArtifactRef {
     if (primaryArtifactPublished) throw new Error("workflow already published its primary output");
     if (options.artifactPorts === undefined) throw new Error("workflow artifact store is not configured");
+    if (typeof text !== "string") {
+      if (
+        text === null ||
+        typeof text !== "object" ||
+        Object.keys(text).length !== 1 ||
+        typeof text.workflowSource !== "string" ||
+        options.readCheckedWorkflowSource === undefined
+      ) {
+        throw new Error("workflow source publication requires a configured host and { workflowSource: relativePath }");
+      }
+      text = options.readCheckedWorkflowSource(text.workflowSource);
+    }
     const ref = options.artifactPorts.publishText(name, text, stage ?? currentPhase(), "primary");
     primaryArtifactPublished = true;
     return ref;
