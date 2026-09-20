@@ -4,8 +4,14 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-20
+
 ### Changed
 
+- Agent and workflow terminal rows now show `thinking` only when the Pi host
+  confirms the applied value, including success, failure, and cancellation
+  results. HTML transcript documentation now describes export as opt-in rather
+  than a default side effect of every child run.
 - The packaged workflows manifest and authoring guidance now state the mode-scoped
   launch defaults consistently: every run defaults to `concurrency = 4`; headless
   Pi `print`/`json` root launches additionally default to `totalAgents = 10_000`,
@@ -182,6 +188,21 @@ User-visible changes to the public package.
 - Added opt-in plain-text agent execution reports so eligible failed reviewers can reach an arbiter while fatal controls and replay failure records remain intact.
 - Separated specification and implementation authoring, clarified ambiguous workflow goals before building, and gave both adaptive references repeated correction with truthful remaining-work handoffs.
 - Clarified workflow decision ownership: an arbiter may return its branch directly; a separate translator copies its explicit decision without adding owner-approval conditions or treating missing context as a failed review.
+
+### Fixed
+
+- Workflow artifact writes now reject an existing symlink destination before
+  writing, so a prepared path cannot redirect output outside its run directory.
+
+### Removed
+
+- **Breaking:** Removed the unused beta `plan`, `loop`, and `todo-context`
+  extensions, their commands and tools, and the beta activation tier. The
+  packaged `task/plan` workflow and the `plan` model role remain available, and
+  existing user files are not deleted or migrated.
+- Removed runtime recognition of legacy `todo_write` session records. Existing
+  JSONL files remain untouched; the loader skips that unsupported record and
+  continues reading supported records around it.
 
 ## [0.7.3] - 2026-09-10
 
