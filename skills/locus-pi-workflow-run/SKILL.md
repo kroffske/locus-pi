@@ -127,6 +127,9 @@ Workflow child roles have one persistent source:
 `provider/model[:thinking]`. Project `.pi/model-roles/config.json`, Pi
 `settings.json#modelRoles`, and session evidence do not override this file.
 
+Use user-configured default model/effort routing unless the user or project explicitly
+requests an override. Do not add model brands, tiers, or role substitutions at launch.
+
 A model-less child with no assigned `agent` role inherits the live main session
 model; assigning `default` does not replace that inheritance. Supplying
 `--model` and `--thinking` on an external launch overrides the main model for
