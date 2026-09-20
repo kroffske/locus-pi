@@ -261,6 +261,17 @@ export function agentGroupMemberDisplayRank(status: AgentLiveStatus): number {
   return GROUP_MEMBER_RANK[status] ?? 3;
 }
 
+/**
+ * Tally live rows by status. Both the workflow progress header and the `/agent
+ * observe` text read it, and those two surfaces sit in different features, so
+ * the tally lives beside the row projections rather than inside either surface.
+ */
+export function countAgentLiveStatuses(rows: AgentLiveRow[]): Record<AgentLiveStatus, number> {
+  const counts: Record<AgentLiveStatus, number> = { queued: 0, working: 0, done: 0, cancelled: 0, error: 0 };
+  for (const row of rows) counts[row.status] += 1;
+  return counts;
+}
+
 function orderGroupMembers(members: AgentLiveRow[]): AgentLiveRow[] {
   return members
     .map((row, index) => ({ row, index }))
@@ -308,6 +319,7 @@ function dropSubThresholdGroupRows(rows: AgentLiveRow[]): AgentLiveRow[] {
  * A workflow journal anchor and the SDK child it launches describe one logical
  * agent. Once the child exists, keep the child and splice it into the anchor's
  * place in the tree so every fleet/status surface shows that actor once.
+ * Keep failed anchors: host validation can reject an otherwise completed SDK child.
  */
 export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] {
   const rowById = new Map(rows.map((row) => [row.id, row]));
@@ -315,7 +327,15 @@ export function compactWorkflowParentRows(rows: AgentLiveRow[]): AgentLiveRow[] 
     rows.map((row) => row.parentRowId).filter((id): id is string => id !== undefined),
   );
   const collapsedParentIds = new Set(
-    rows.filter((row) => parentIdsWithChildren.has(row.id) && isWorkflowAgentParentRow(row)).map((row) => row.id),
+    rows
+      .filter(
+        (row) =>
+          parentIdsWithChildren.has(row.id) &&
+          isWorkflowAgentParentRow(row) &&
+          row.status !== "error" &&
+          row.status !== "cancelled",
+      )
+      .map((row) => row.id),
   );
   if (collapsedParentIds.size === 0) return rows;
 

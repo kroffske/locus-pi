@@ -51,13 +51,13 @@ function writeFinishedRun(
   root: string,
   runId: string,
   result: unknown,
-  options: { resultText?: boolean } = {},
+  options: { resultText?: boolean; ts?: string } = {},
 ): string {
   const runDir = workflowRunDir(root, runId);
   ensureWorkflowRunDir(root, runId);
   writeFileSync(
     workflowJournalFile(runDir),
-    `${JSON.stringify({ ts: "2026-07-26T21:27:52.000Z", runId, kind: "phase", phase: "review" })}\n`,
+    `${JSON.stringify({ ts: options.ts ?? "2026-07-26T21:27:52.000Z", runId, kind: "phase", phase: "review" })}\n`,
     "utf8",
   );
   writeFileSync(workflowResultFile(runDir), `${JSON.stringify({ runId, ok: true, result }, null, 2)}\n`, "utf8");
@@ -100,7 +100,7 @@ describe("workflow result text persistence", () => {
 
   it("resolves the run id an operator actually has: the printed short suffix, or last", () => {
     const root = makeRoot();
-    writeFinishedRun(root, "20260725-101010-7f3a", "older run");
+    writeFinishedRun(root, "20260725-101010-7f3a", "older run", { ts: "2026-07-25T10:10:10.000Z" });
     writeFinishedRun(root, "20260726-212752-98cc", REVIEW_TEXT);
 
     expect(resolveWorkflowRunId(root, "20260726-212752-98cc")).toEqual({

@@ -4,21 +4,20 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
-  DEFAULT_WORKFLOW_BUDGET,
-  NODE_TIMER_MAX_DELAY_MS,
+  DEFAULT_WORKFLOW_CONCURRENCY,
+  DEFAULT_HEADLESS_WORKFLOW_TOTAL_AGENTS,
   WORKFLOW_BUDGET_AXES,
-  WORKFLOW_MAX_TIMEOUT_MS,
+  WORKFLOW_BUDGET_UNBOUNDED,
   formatWorkflowBudgetPrelude,
   formatWorkflowBudgetRaise,
   resolveWorkflowBudget,
-  workflowSdkTurnTimeoutMs,
+  workflowBudgetEnvelope,
   type WorkflowBudget,
 } from "../../../../extensions/workflows/runtime/workflow-budget.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
+import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { workflowJournalFile } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
 import {
-  DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS,
-  DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS,
   WorkflowRunDeadlineError,
   createWorkflowRuntime,
   type WorkflowAgentRequest,
@@ -27,82 +26,75 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { createHarness } from "../../../test-harness.js";
 
-/**
- * T-131 — the package budget contract, and the run wall clock that had no
- * default at all before it.
- *
- * The values are asserted verbatim on purpose. They are an owner-approved spend
- * policy, so a change to one of them must break a test and be re-decided, not
- * ride along in a refactor.
- */
+/** Approved launch defaults and explicit overrides, checked through persisted evidence. */
 
-describe("DEFAULT_WORKFLOW_BUDGET", () => {
-  it("carries the seven owner-approved values", () => {
-    expect(DEFAULT_WORKFLOW_BUDGET).toEqual({
-      concurrency: 4,
-      totalAgents: 10_000,
-      runtimeMs: 86_400_000,
-      timeoutMs: 86_400_000,
-      toolCalls: 1_000,
-      turns: 1000,
-      answerChars: 500_000,
+describe("the applied budget", () => {
+  it("defaults only the queueing width outside headless mode", () => {
+    expect(resolveWorkflowBudget().budget).toEqual({ concurrency: DEFAULT_WORKFLOW_CONCURRENCY });
+    expect(DEFAULT_WORKFLOW_CONCURRENCY).toBe(4);
+  });
+
+  it("defaults only the fresh-child allowance in headless mode", () => {
+    expect(DEFAULT_HEADLESS_WORKFLOW_TOTAL_AGENTS).toBe(10_000);
+    expect(resolveWorkflowBudget(undefined, true)).toEqual({
+      budget: { concurrency: 4, totalAgents: 10_000 },
+      raises: [],
+    });
+    expect(
+      resolveWorkflowBudget({ totalAgents: undefined } as unknown as Partial<WorkflowBudget>, true).budget.totalAgents,
+    ).toBe(10_000);
+    expect(resolveWorkflowBudget({ totalAgents: 2 }, true)).toEqual({
+      budget: { concurrency: 4, totalAgents: 2 },
+      raises: [],
+    });
+    expect(resolveWorkflowBudget({ totalAgents: 20_000 }, true)).toEqual({
+      budget: { concurrency: 4, totalAgents: 20_000 },
+      raises: [{ axis: "totalAgents", applied: 10_000, requested: 20_000 }],
     });
   });
 
-  it("is frozen, so no consumer can mutate the package promise at runtime", () => {
-    expect(Object.isFrozen(DEFAULT_WORKFLOW_BUDGET)).toBe(true);
-    expect(() => {
-      (DEFAULT_WORKFLOW_BUDGET as WorkflowBudget).concurrency = 99;
-    }).toThrow(TypeError);
-    expect(DEFAULT_WORKFLOW_BUDGET.concurrency).toBe(4);
-  });
-
   it("names every axis exactly once in WORKFLOW_BUDGET_AXES", () => {
-    expect([...WORKFLOW_BUDGET_AXES].sort()).toEqual(Object.keys(DEFAULT_WORKFLOW_BUDGET).sort());
+    expect([...WORKFLOW_BUDGET_AXES].sort()).toEqual(
+      ["concurrency", "runtimeMs", "timeoutMs", "toolCalls", "totalAgents", "turns"].sort(),
+    );
     expect(new Set(WORKFLOW_BUDGET_AXES).size).toBe(WORKFLOW_BUDGET_AXES.length);
   });
 
-  it("is the single source of the two constants that used to live 580 lines apart", () => {
-    expect(DEFAULT_WORKFLOW_AGENT_MAX_TOOL_CALLS).toBe(DEFAULT_WORKFLOW_BUDGET.toolCalls);
-    expect(DEFAULT_MAX_TOTAL_AGENT_INVOCATIONS).toBe(DEFAULT_WORKFLOW_BUDGET.totalAgents);
+  it("prints an undeclared axis as one word rather than omitting it", () => {
+    expect(workflowBudgetEnvelope(resolveWorkflowBudget().budget)).toEqual({
+      concurrency: 4,
+      totalAgents: WORKFLOW_BUDGET_UNBOUNDED,
+      runtimeMs: WORKFLOW_BUDGET_UNBOUNDED,
+      timeoutMs: WORKFLOW_BUDGET_UNBOUNDED,
+      toolCalls: WORKFLOW_BUDGET_UNBOUNDED,
+      turns: WORKFLOW_BUDGET_UNBOUNDED,
+    });
   });
 });
 
 describe("resolveWorkflowBudget", () => {
-  it("returns the package contract when nothing is overridden", () => {
-    const resolved = resolveWorkflowBudget();
-    expect(resolved.budget).toEqual(DEFAULT_WORKFLOW_BUDGET);
+  it("keeps an explicit value on every axis the caller named", () => {
+    const resolved = resolveWorkflowBudget({ concurrency: 1, totalAgents: 3, turns: 7 });
+    expect(resolved.budget).toEqual({ concurrency: 1, totalAgents: 3, turns: 7 });
     expect(resolved.raises).toEqual([]);
   });
 
-  it("lets a narrowing override apply silently", () => {
-    const resolved = resolveWorkflowBudget({ concurrency: 1, totalAgents: 3 });
-    expect(resolved.budget.concurrency).toBe(1);
-    expect(resolved.budget.totalAgents).toBe(3);
+  it("treats an explicit value on an unbounded axis as a narrowing, never a raise", () => {
+    const resolved = resolveWorkflowBudget({ runtimeMs: 172_800_000, turns: 10_000 });
     expect(resolved.raises).toEqual([]);
-  });
-
-  it("treats a value equal to the default as no raise at all", () => {
-    const resolved = resolveWorkflowBudget({ turns: DEFAULT_WORKFLOW_BUDGET.turns });
-    expect(resolved.raises).toEqual([]);
-  });
-
-  it("records a raise instead of refusing it or hiding it", () => {
-    const resolved = resolveWorkflowBudget({ runtimeMs: 172_800_000 });
     expect(resolved.budget.runtimeMs).toBe(172_800_000);
-    expect(resolved.raises).toEqual([{ axis: "runtimeMs", applied: 86_400_000, requested: 172_800_000 }]);
   });
 
-  it("accepts explicit long-work turn budgets and rejects non-integers", () => {
-    expect(resolveWorkflowBudget({ turns: 1000 }).budget.turns).toBe(1000);
-    expect(resolveWorkflowBudget({ turns: 2000 }).raises).toEqual([{ axis: "turns", applied: 1000, requested: 2000 }]);
+  it("records an explicit raise of the concurrency default", () => {
+    const resolved = resolveWorkflowBudget({ concurrency: 16 });
+    expect(resolved.budget.concurrency).toBe(16);
+    expect(resolved.raises).toEqual([{ axis: "concurrency", applied: 4, requested: 16 }]);
+  });
+
+  it("accepts a deadline far longer than one Node timer instead of refusing it", () => {
+    const fortyEightHours = 48 * 60 * 60 * 1000;
+    expect(resolveWorkflowBudget({ timeoutMs: fortyEightHours }).budget.timeoutMs).toBe(fortyEightHours);
     expect(() => resolveWorkflowBudget({ turns: 1.5 })).toThrow(/positive safe integer/u);
-  });
-
-  it("refuses a timeout that Node would clamp to a one-millisecond timer", () => {
-    expect(() => resolveWorkflowBudget({ timeoutMs: WORKFLOW_MAX_TIMEOUT_MS + 1 })).toThrow(
-      /cannot be represented by Node timers with the SDK backstop/u,
-    );
   });
 
   it.each([0, -1, 1.5, Number.NaN])("refuses a value that could never bound a run (%s)", (value) => {
@@ -111,15 +103,7 @@ describe("resolveWorkflowBudget", () => {
     );
   });
 
-  it("never mutates the frozen package contract", () => {
-    resolveWorkflowBudget({ toolCalls: 5 });
-    expect(DEFAULT_WORKFLOW_BUDGET.toolCalls).toBe(1_000);
-  });
-
-  it("names the option it replaced instead of silently applying the package default", () => {
-    // `RunWorkflowScriptOptions.maxTotalAgentInvocations` became `budget.totalAgents`.
-    // TypeScript catches the old spelling on a literal; a JS embedder would have had
-    // its explicit cap dropped and replaced by 200 with nothing said.
+  it("names the option it replaced instead of silently dropping the bound it carries", () => {
     expect(() => resolveWorkflowBudget({ maxTotalAgentInvocations: 5 } as unknown as Partial<WorkflowBudget>)).toThrow(
       /workflow budget option maxTotalAgentInvocations was removed; use budget\.totalAgents instead/u,
     );
@@ -132,8 +116,6 @@ describe("resolveWorkflowBudget", () => {
   });
 
   it("still accepts an unknown key that states nothing, so a spread-built override survives", () => {
-    // `undefined` asks for no bound at all — the same rule the axes follow — so it
-    // cannot be a silently dropped limit and must not fail a legitimate spread.
     const resolved = resolveWorkflowBudget({
       turns: 2,
       somethingElse: undefined,
@@ -144,10 +126,12 @@ describe("resolveWorkflowBudget", () => {
 });
 
 describe("budget journal text", () => {
-  it("prints every axis in the prelude line", () => {
-    const line = formatWorkflowBudgetPrelude(DEFAULT_WORKFLOW_BUDGET);
-    for (const axis of WORKFLOW_BUDGET_AXES) {
-      expect(line).toContain(`${axis}=${String(DEFAULT_WORKFLOW_BUDGET[axis])}`);
+  it("prints all six axes, undeclared ones included, in one header line", () => {
+    const line = formatWorkflowBudgetPrelude(resolveWorkflowBudget({ totalAgents: 2 }).budget);
+    expect(line).toContain("concurrency=4");
+    expect(line).toContain("totalAgents=2");
+    for (const axis of ["runtimeMs", "timeoutMs", "toolCalls", "turns"] as const) {
+      expect(line).toContain(`${axis}=${WORKFLOW_BUDGET_UNBOUNDED}`);
     }
   });
 
@@ -159,45 +143,6 @@ describe("budget journal text", () => {
     expect(line).toContain("call");
   });
 });
-
-describe("workflowSdkTurnTimeoutMs", () => {
-  it("rejects unsafe timeout/turn combinations instead of creating a one-ms timer", () => {
-    expect(() => workflowSdkTurnTimeoutMs(WORKFLOW_MAX_TIMEOUT_MS, 1000)).toThrow(/Node timers/u);
-    expect(() => workflowSdkTurnTimeoutMs(86_400_000, Number.MAX_SAFE_INTEGER)).toThrow(/Node timers/u);
-    expect(workflowSdkTurnTimeoutMs(86_400_000, 1000)).toBe(91_400);
-  });
-  it("keeps the SDK budget strictly above the declared fuse at every legal turn count", () => {
-    // Sample both legacy limits and long-work overrides without changing the declared fuse.
-    for (const maxTurns of [1, 2, 20, 21, 1000, 10_000]) {
-      for (const timeoutMs of [1, 999, 60_000, 600_000, 7_200_000]) {
-        const turnTimeoutMs = workflowSdkTurnTimeoutMs(timeoutMs, maxTurns);
-        const sdkBudgetMs = turnTimeoutMs * maxTurns;
-        expect(sdkBudgetMs).toBeGreaterThan(timeoutMs);
-      }
-    }
-  });
-
-  it("keeps both real timers within Node's maximum delay at the largest accepted fuse", () => {
-    for (let maxTurns = 1; maxTurns <= 20; maxTurns += 1) {
-      const turnTimeoutMs = workflowSdkTurnTimeoutMs(WORKFLOW_MAX_TIMEOUT_MS, maxTurns);
-      expect(WORKFLOW_MAX_TIMEOUT_MS).toBeLessThanOrEqual(NODE_TIMER_MAX_DELAY_MS);
-      expect(turnTimeoutMs * maxTurns).toBeLessThanOrEqual(NODE_TIMER_MAX_DELAY_MS);
-      expect(turnTimeoutMs * maxTurns).toBeGreaterThan(WORKFLOW_MAX_TIMEOUT_MS);
-    }
-  });
-
-  it("keeps the SDK host backstop after the 24-hour workflow emergency fuse", () => {
-    const turn = workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, DEFAULT_WORKFLOW_BUDGET.turns);
-    expect(turn * DEFAULT_WORKFLOW_BUDGET.turns).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
-    expect(DEFAULT_WORKFLOW_BUDGET.runtimeMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000);
-    expect(DEFAULT_WORKFLOW_BUDGET.timeoutMs).toBeGreaterThanOrEqual(24 * 60 * 60 * 1_000);
-    expect(DEFAULT_WORKFLOW_BUDGET.turns).toBe(1000);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// W2 — the runner applies the contract to a run that declares nothing
-// ---------------------------------------------------------------------------
 
 const roots: string[] = [];
 
@@ -226,19 +171,18 @@ function saveWorkflow(root: string, name: string, body: string): void {
 
 interface ChildObservation {
   /** What the executor factory was handed for this child — the resolved fuses. */
-  factory: { maxToolCalls?: number; turnTimeoutMs?: number };
+  factory: { maxToolCalls?: number; childTimeoutMs?: number };
   request: AgentRunRequest;
 }
 
-/**
- * Run a saved workflow with a scripted child, capturing what each child was
- * actually bounded by. `onEnter`/`onExit` let a case observe overlap.
- */
+/** Scripted execution captures child bounds; callbacks observe concurrency. */
 async function runSaved(
   root: string,
   name: string,
   options: {
     budget?: Partial<WorkflowBudget>;
+    mode?: "tui" | "rpc" | "print" | "json";
+    noOperator?: true;
     input?: string;
     answer?: (request: AgentRunRequest) => string;
     onEnter?: () => void;
@@ -246,9 +190,12 @@ async function runSaved(
     hold?: () => Promise<void>;
   } = {},
 ) {
-  const harness = createHarness(root, { sessionId: `budget-${name}` });
+  const harness = createHarness(root, {
+    sessionId: `budget-${name}`,
+    ...(options.mode === undefined ? {} : { mode: options.mode }),
+  });
   const children: ChildObservation[] = [];
-  const createExecutor = (factory: { maxToolCalls?: number; turnTimeoutMs?: number }): AgentExecutor => ({
+  const createExecutor = (factory: { maxToolCalls?: number; childTimeoutMs?: number }): AgentExecutor => ({
     async run(request: AgentRunRequest) {
       children.push({ factory: { ...factory }, request });
       options.onEnter?.();
@@ -270,21 +217,14 @@ async function runSaved(
     signal: new AbortController().signal,
     name,
     createExecutor,
+    ...(options.noOperator === undefined ? {} : { noOperator: options.noOperator }),
     ...(options.budget !== undefined ? { budget: options.budget } : {}),
     ...(options.input !== undefined ? { input: options.input } : {}),
   });
   return { result, children };
 }
 
-/**
- * The run's append-only journal FILE, not the in-memory mirror `result.journal`
- * returns.
- *
- * An audit record that exists only in the object handed back to the caller is not
- * an audit record: the operator who reads a raise weeks later opens
- * `journal.ndjson`. Every raise assertion below is made against this, so a
- * regression that emitted the line into the mirror alone would fail.
- */
+/** Read durable evidence, independently of the in-memory result journal. */
 function persistedJournal(runDir: string): WorkflowJournalLine[] {
   return readFileSync(workflowJournalFile(runDir), "utf8")
     .split("\n")
@@ -299,7 +239,7 @@ export default async function runWorkflow(dsl) {
 `;
 
 /** Four branches, each running its OWN parallel() of three: twelve leaf children.
- *  A FLAT parallel() of twelve is already held to four by SCHEDULER_WIDTH, so it
+ *  A FLAT parallel() of twelve is already held to four by the group width, so it
  *  would go green with the global gate switched off and prove nothing. */
 const NESTED_FANOUT_WORKFLOW = `export const meta = { name: "nested-fanout", description: "four branches of three" };
 export default async function runWorkflow(dsl) {
@@ -332,7 +272,44 @@ export default async function runWorkflow(dsl) {
 `;
 
 describe("the runner applies the budget contract", () => {
-  it("allows more than 200 finite fake calls under the package default", async () => {
+  it.each(["print", "json", "tui", "rpc"] as const)(
+    "persists the applied %s host policy without child limits",
+    async (mode) => {
+      const root = scratchProject();
+      saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+      const { result, children } = await runSaved(root, "no-limits", { mode, noOperator: true });
+      expect(result.ok, result.error).toBe(true);
+      const cap = mode === "print" || mode === "json" ? 10_000 : "unbounded";
+      expect(persistedJournal(result.runDir)[0]?.message).toContain(`totalAgents=${cap}`);
+      const stored = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8"));
+      expect(stored.budget).toEqual({
+        concurrency: 4,
+        totalAgents: cap,
+        runtimeMs: "unbounded",
+        timeoutMs: "unbounded",
+        toolCalls: "unbounded",
+        turns: "unbounded",
+      });
+      expect(children).toHaveLength(1);
+      expect(children[0]?.factory.childTimeoutMs).toBeUndefined();
+      expect(children[0]?.factory.maxToolCalls).toBeUndefined();
+      expect(children[0]?.request.maxTurns).toBeUndefined();
+    },
+  );
+
+  it("journals an explicit headless raise over the default", async () => {
+    const root = scratchProject();
+    saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+    const { result } = await runSaved(root, "no-limits", { mode: "print", budget: { totalAgents: 20_000 } });
+    expect(result.ok, result.error).toBe(true);
+    const messages = persistedJournal(result.runDir)
+      .map((line) => line.message)
+      .join("\n");
+    expect(messages).toContain("totalAgents=20000");
+    expect(messages).toContain("run raised totalAgents above the applied default: default=10000 requested=20000");
+  });
+
+  it("runs 201 children when nobody declared a cap, because there is no cap", async () => {
     const root = scratchProject();
     saveWorkflow(root, "atomic-decomposition", ATOMIC_DECOMPOSITION_WORKFLOW);
 
@@ -343,19 +320,69 @@ describe("the runner applies the budget contract", () => {
     expect(children).toHaveLength(201);
   }, 30_000);
 
-  it("bounds a script that declares nothing with the contract tool-call fuse", async () => {
+  it("runs a three-child chain with no budgets declared and prints six axes in the header", async () => {
     const root = scratchProject();
-    saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+    saveWorkflow(
+      root,
+      "chain",
+      `export const meta = { name: "chain", description: "three children, no limits" };
+export default async function runWorkflow(dsl) {
+  const a = await dsl.agent("one");
+  const b = await dsl.agent("two");
+  const c = await dsl.agent("three");
+  return { a, b, c };
+}
+`,
+    );
 
-    const { result, children } = await runSaved(root, "no-limits");
+    const { result, children } = await runSaved(root, "chain");
 
     expect(result.ok, result.error).toBe(true);
-    expect(children).toHaveLength(1);
-    // The script said nothing; the package contract is what reached the child.
-    expect(children[0]?.factory.maxToolCalls).toBe(DEFAULT_WORKFLOW_BUDGET.toolCalls);
+    expect(children).toHaveLength(3);
+    const header = persistedJournal(result.runDir)[0];
+    expect(header?.message).toContain("concurrency=4");
+    for (const axis of ["totalAgents", "runtimeMs", "timeoutMs", "toolCalls", "turns"] as const) {
+      expect(header?.message).toContain(`${axis}=${WORKFLOW_BUDGET_UNBOUNDED}`);
+    }
   });
 
-  it("holds nested fan-out to the contract concurrency, which SCHEDULER_WIDTH alone does not", async () => {
+  it("stops the third child before it starts on an explicit totalAgents=2, keeping both answers", async () => {
+    const root = scratchProject();
+    saveWorkflow(
+      root,
+      "three-children",
+      `export const meta = { name: "three-children", description: "asks for three, is allowed two" };
+export default async function runWorkflow(dsl) {
+  const answers = [];
+  answers.push(await dsl.agent("one"));
+  answers.push(await dsl.agent("two"));
+  answers.push(await dsl.agent("three"));
+  return { answers };
+}
+`,
+    );
+
+    const { result, children } = await runSaved(root, "three-children", { mode: "json", budget: { totalAgents: 2 } });
+
+    expect(result.ok).toBe(false);
+    // Two children ran; the third never reached the child runner, so no work was
+    // done and then thrown away.
+    expect(children).toHaveLength(2);
+    const journal = persistedJournal(result.runDir);
+    const stop = journal.find((line) => line.message?.includes("stopped by budget"));
+    expect(stop).toMatchObject({ kind: "log", source: "runtime" });
+    expect(stop?.message).toContain("stopped by budget totalAgents");
+    expect(stop?.message).toContain("Data received so far is kept");
+    // The two answers that DID arrive are still in the run evidence, and neither is
+    // marked failed. A budget stop is not a verdict on the work.
+    const ends = journal.filter((line) => line.kind === "agent_end");
+    expect(ends).toHaveLength(2);
+    for (const end of ends) expect(end.status).toBe("completed");
+    // And the stop is not reported as a bad answer anywhere.
+    expect(journal.some((line) => line.message?.includes("stopped by budget"))).toBe(true);
+  });
+
+  it("holds nested fan-out to the one effective concurrency", async () => {
     const root = scratchProject();
     saveWorkflow(root, "nested-fanout", NESTED_FANOUT_WORKFLOW);
     let active = 0;
@@ -376,31 +403,29 @@ describe("the runner applies the budget contract", () => {
     expect(result.ok, result.error).toBe(true);
     expect(children).toHaveLength(12);
     // Without the global gate these twelve overlap: four branch pools of three.
-    expect(peak).toBeLessThanOrEqual(DEFAULT_WORKFLOW_BUDGET.concurrency);
+    expect(peak).toBeLessThanOrEqual(DEFAULT_WORKFLOW_CONCURRENCY);
   });
 
-  it("fails a call that declared NO maxAnswerChars but overran the contract bound, naming the axis", async () => {
+  it("passes a half-megabyte answer through instead of failing the run on its size", async () => {
     const root = scratchProject();
     saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+    const long = "x".repeat(600_000);
 
-    const { result } = await runSaved(root, "no-limits", {
-      answer: () => "x".repeat(DEFAULT_WORKFLOW_BUDGET.answerChars + 1),
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.error).toContain("answerChars");
-    expect(result.error).toContain(String(DEFAULT_WORKFLOW_BUDGET.answerChars));
-  });
-
-  it("accepts an answer exactly at the contract bound, so the fuse is not off by one", async () => {
-    const root = scratchProject();
-    saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
-
-    const { result } = await runSaved(root, "no-limits", {
-      answer: () => "x".repeat(DEFAULT_WORKFLOW_BUDGET.answerChars),
-    });
+    const { result } = await runSaved(root, "no-limits", { answer: () => long });
 
     expect(result.ok, result.error).toBe(true);
+  });
+
+  it("refuses a budget override on the removed axis by name, with the reason", async () => {
+    const root = scratchProject();
+    saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
+
+    const failure = await runSaved(root, "no-limits", { budget: { answerChars: 500_000 } as never })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    expect((failure as Error).message).toContain("answerChars");
+    expect((failure as Error).message).toContain("no longer bounds the SIZE of an answer");
   });
 
   it("routes a per-run narrowing through to the invocation cap", async () => {
@@ -419,12 +444,7 @@ describe("the runner applies the budget contract", () => {
     const root = scratchProject();
     saveWorkflow(root, "loop", LOOP_WORKFLOW);
 
-    // Each child holds for 30 ms against a 1 ms run budget, so the run cannot reach
-    // the script's fiftieth call. No injected clock reaches the runner, so this is
-    // the wiring proof the unit cases above cannot give. WHICH call is refused
-    // first is deliberately not asserted: on a loaded machine the module import
-    // alone can outlast a 1 ms budget, and pinning the ordinal would make the
-    // wiring proof a timing bet.
+    // Import may itself exceed 1 ms; assert a stop, not a timing-dependent ordinal.
     const { result, children } = await runSaved(root, "loop", {
       budget: { runtimeMs: 1 },
       hold: () => new Promise<void>((resolve) => setTimeout(resolve, 30)),
@@ -443,12 +463,11 @@ describe("the runner applies the budget contract", () => {
 
     const prelude = result.journal[0];
     expect(prelude).toMatchObject({ kind: "log", source: "runtime" });
+    const applied = resolveWorkflowBudget().budget;
     for (const axis of WORKFLOW_BUDGET_AXES) {
-      expect(prelude?.message).toContain(`${axis}=${String(DEFAULT_WORKFLOW_BUDGET[axis])}`);
+      expect(prelude?.message).toContain(`${axis}=${String(applied[axis] ?? WORKFLOW_BUDGET_UNBOUNDED)}`);
     }
-    // A run that declares nothing raises nothing.
     expect(result.journal.filter((line) => line.message?.includes("raised"))).toEqual([]);
-    // And the same line is on disk, first, where an operator would look for it.
     expect(persistedJournal(result.runDir)[0]?.message).toBe(prelude?.message);
   });
 
@@ -456,48 +475,49 @@ describe("the runner applies the budget contract", () => {
     const root = scratchProject();
     saveWorkflow(root, "no-limits", NO_LIMITS_WORKFLOW);
 
+    // TUI has only a concurrency default; explicit runtimeMs narrows silently.
     const { result } = await runSaved(root, "no-limits", {
-      budget: { runtimeMs: DEFAULT_WORKFLOW_BUDGET.runtimeMs * 2, concurrency: 1 },
+      budget: { concurrency: 8, runtimeMs: 60_000 },
     });
 
     const raises = result.journal.filter((line) => line.message?.includes("raised"));
     expect(raises).toHaveLength(1);
     expect(raises[0]).toMatchObject({ kind: "log", source: "runtime" });
-    expect(raises[0]?.message).toContain("run raised runtimeMs");
-    expect(raises[0]?.message).toContain(`default=${String(DEFAULT_WORKFLOW_BUDGET.runtimeMs)}`);
-    expect(raises[0]?.message).toContain(`requested=${String(DEFAULT_WORKFLOW_BUDGET.runtimeMs * 2)}`);
+    expect(raises[0]?.message).toContain("run raised concurrency");
+    expect(raises[0]?.message).toContain("default=4");
+    expect(raises[0]?.message).toContain("requested=8");
     // The narrowing on the same call stays silent.
-    expect(
-      result.journal.some((line) => line.message?.includes("concurrency") && line.message.includes("raised")),
-    ).toBe(false);
+    expect(result.journal.some((line) => line.message?.includes("runtimeMs") && line.message.includes("raised"))).toBe(
+      false,
+    );
     // The durable record, not the mirror: this is what makes the raise auditable.
     const persisted = persistedJournal(result.runDir).filter((line) => line.message?.includes("raised"));
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({ kind: "log", source: "runtime", message: raises[0]?.message });
   });
 
-  it("journals a per-call raise, which is the surface a workflow script can actually reach", async () => {
+  it("journals a per-call raise above a run-level value, and stays silent with no value to exceed", async () => {
     const root = scratchProject();
     saveWorkflow(
       root,
       "raising",
-      `export const meta = { name: "raising", description: "asks for more than the package default" };
+      `export const meta = { name: "raising", description: "asks for more than the run declared" };
 export default async function runWorkflow(dsl) {
   const narrowed = await dsl.agent("narrow", { maxToolCalls: 10 });
-  const raised = await dsl.agent("raise", { timeoutMs: ${DEFAULT_WORKFLOW_BUDGET.timeoutMs * 3} });
+  const raised = await dsl.agent("raise", { timeoutMs: 180000 });
   return { narrowed, raised };
 }
 `,
     );
 
-    const { result } = await runSaved(root, "raising");
+    const { result } = await runSaved(root, "raising", { budget: { timeoutMs: 60_000, toolCalls: 100 } });
 
     expect(result.ok, result.error).toBe(true);
     const raises = result.journal.filter((line) => line.message?.includes("raised"));
     expect(raises).toHaveLength(1);
     expect(raises[0]?.message).toContain("call raised timeoutMs");
-    expect(raises[0]?.message).toContain(`default=${String(DEFAULT_WORKFLOW_BUDGET.timeoutMs)}`);
-    expect(raises[0]?.message).toContain(`requested=${String(DEFAULT_WORKFLOW_BUDGET.timeoutMs * 3)}`);
+    expect(raises[0]?.message).toContain("default=60000");
+    expect(raises[0]?.message).toContain("requested=180000");
     // A per-call raise travels the runtime's own emit() rather than the runner's
     // prelude, so its durability is a separate claim and gets its own assertion.
     const persisted = persistedJournal(result.runDir).filter((line) => line.message?.includes("raised"));
@@ -558,7 +578,7 @@ function answeringRuntime(options: {
 }
 
 describe("run wall clock (runtimeMs)", () => {
-  it("keeps a private invocation cap for direct runtime embeddings without runner coordination", async () => {
+  it("honours an explicit invocation cap for direct runtime embeddings without runner coordination", async () => {
     const runtime = createWorkflowRuntime({
       runId: "direct-embedding-private-scheduler",
       maxTotalAgentInvocations: 1,
@@ -655,7 +675,13 @@ describe("run wall clock (runtimeMs)", () => {
       },
     });
 
-    const grouped = runtime.dsl.parallel([() => runtime.dsl.agent("first"), () => runtime.dsl.agent("queued")]);
+    // Explicit group width of 2 against a global gate of 1: both calls enter the
+    // runtime and the second waits at the GATE, which is the state under test. The
+    // group pool would otherwise inherit the run's width of 1 and admit them one at
+    // a time, so nothing would ever queue.
+    const grouped = runtime.dsl.parallel([() => runtime.dsl.agent("first"), () => runtime.dsl.agent("queued")], {
+      concurrency: 2,
+    });
     // Both calls have entered the runtime; only the first owns the one execution
     // slot, so only it is started — the other is still queued at the gate.
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -732,6 +758,93 @@ describe("run wall clock (runtimeMs)", () => {
 
     clock.advance(Number.MAX_SAFE_INTEGER - 1);
     await expect(dsl.agent("late but unbounded")).resolves.toBe("answer");
+  });
+
+  it("journals the axis when the deadline passes WHILE a call waits for a concurrency slot", async () => {
+    // The pre-queue check is not the one that usually fires. A run with a narrow
+    // concurrency spends most of its wall clock with calls queued, so the check that
+    // actually stops such a run is the second one — and it was bare, ending the run
+    // with an error and no line naming the axis or saying the answers are kept.
+    const clock = clockFrom(0);
+    const lines: WorkflowJournalLine[] = [];
+    const started: string[] = [];
+    const { dsl } = createWorkflowRuntime({
+      runId: "deadline-after-queue-wait",
+      runtimeMs: 100,
+      // ONE leaf agent at a time, so the second call provably waits at the gate.
+      maxConcurrentAgents: 1,
+      nowMs: clock.nowMs,
+      onEvent: (line) => lines.push(line),
+      agentRunner: async (request): Promise<WorkflowAgentResult> => {
+        started.push(request.prompt);
+        // The first child outlives the run deadline; the second is still queued.
+        clock.advance(150);
+        return {
+          ok: true,
+          status: "completed",
+          summary: "done",
+          text: "answer",
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+
+    // Group width 2 against a run concurrency of 1: both calls pass the pre-queue
+    // check at t=0, then the second one waits for the gate.
+    await expect(
+      dsl.parallel([() => dsl.agent("first"), () => dsl.agent("queued")], { concurrency: 2 }),
+    ).rejects.toThrow(WorkflowRunDeadlineError);
+
+    // Only the first child ran; the queued one never reached the runner.
+    expect(started).toEqual(["first"]);
+    const stop = lines.find((line) => line.message?.includes("stopped by budget"));
+    expect(stop).toMatchObject({ kind: "log", source: "runtime" });
+    expect(stop?.message).toContain("stopped by budget runtimeMs");
+    expect(stop?.message).toContain("Data received so far is kept");
+  });
+
+  it("journals a fusion that does not fit the remaining totalAgents as a budget stop", async () => {
+    // Running out of declared invocations is not a broken panel: the request was
+    // well-formed and the run simply has no room for it. It used to throw a bare
+    // Error, so the journal said nothing about which axis ended the run.
+    const lines: WorkflowJournalLine[] = [];
+    let calls = 0;
+    const { dsl } = createWorkflowRuntime({
+      runId: "fusion-budget-stop",
+      maxTotalAgentInvocations: 2,
+      onEvent: (line) => lines.push(line),
+      agentRunner: async (request): Promise<WorkflowAgentResult> => {
+        calls += 1;
+        return {
+          ok: true,
+          status: "completed",
+          summary: "done",
+          text: "answer",
+          diagnostics: [],
+          agent: request.agent,
+        };
+      },
+    });
+
+    await expect(
+      dsl.fusion("which option is safer?", {
+        mode: "agent",
+        members: [
+          { label: "alpha", model: "test/alpha" },
+          { label: "beta", model: "test/beta" },
+        ],
+        judge: { label: "synthesizer", model: "test/judge" },
+      }),
+    ).rejects.toThrow(/only 2 remain/u);
+
+    // Refused before the panel convened, so nothing was spent on it.
+    expect(calls).toBe(0);
+    const stop = lines.find((line) => line.message?.includes("stopped by budget"));
+    expect(stop).toMatchObject({ kind: "log", source: "runtime" });
+    expect(stop?.message).toContain("stopped by budget totalAgents");
+    expect(stop?.message).toContain("only 2 remain in this run");
+    expect(stop?.message).toContain("Data received so far is kept");
   });
   // Same reason as the runner suite above: real scheduling, real timers.
 }, 30_000);

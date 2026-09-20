@@ -19,12 +19,12 @@ afterEach(async () => {
 });
 
 describe("repository pull-request policy", () => {
-  it("accepts a task branch into dev when release-relevant changes include a changelog entry", () => {
+  it("accepts a task branch into dev without requiring a changelog entry", () => {
     expect(
       evaluatePullRequestPolicy({
         baseRef: "dev",
         headRef: "codex/example",
-        changedFiles: ["extensions/plan/index.ts", "CHANGELOG.md"],
+        changedFiles: ["README.md"],
         baseVersion: "0.2.0",
         headVersion: "0.2.0",
         headChangelog: releaseHeading,
@@ -32,17 +32,17 @@ describe("repository pull-request policy", () => {
     ).toEqual([]);
   });
 
-  it("rejects release-relevant task work without a changelog update", () => {
+  it("still rejects integration branches that target dev", () => {
     expect(
       evaluatePullRequestPolicy({
         baseRef: "dev",
-        headRef: "codex/example",
-        changedFiles: ["docs/getting-started.md"],
+        headRef: "dev",
+        changedFiles: ["extensions/workflows/index.ts"],
         baseVersion: "0.2.0",
         headVersion: "0.2.0",
         headChangelog: releaseHeading,
       }),
-    ).toContain("release-relevant changes into dev must update CHANGELOG.md");
+    ).toContain("normal pull requests into dev must come from a task branch, not dev");
   });
 
   it("rejects feature branches that target main directly", () => {

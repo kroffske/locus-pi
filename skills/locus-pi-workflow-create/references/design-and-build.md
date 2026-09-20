@@ -71,6 +71,8 @@ that Build must create; do not declare grandchildren or an implicit root.
 
 Concurrency: <groups or none>
 Loop bounds: <bounds or none>
+Budgets: <axis=value with a one-line reason, or none — launch defaults apply; every other undeclared workflow budget axis is unbounded>
+Declared sizes: <each maxItems/minItems/maxLength/singleLine with its consumer, or none>
 File boundary: workflow source performs no file reads; name any child-owned source inspection
 Worst-case calls: <exact formula including saved children>
 Failure exits: <fail-closed exits>
@@ -91,7 +93,14 @@ rebuild the change as an evidence bundle for the reviewer to read.
 For each shaped result or author-selected limit, identify the consuming edge
 and why it needs that contract. Plain narrative is passed whole without an
 invented length cap; structured controls belong only at real routing or
-decomposition edges.
+decomposition edges. Two review checks apply to every design:
+
+- **No invented size policy.** Every `maxItems`, `minItems`, `maxLength` and
+  `singleLine` names the consumer that cannot take more (or less); every budget
+  axis carries a one-line reason. A number with no owner is removed, not lowered.
+- **No prompt-side size request.** No brief asks for a character, word, line or
+  item count the consumer did not declare. "Keep it short" is the removed policy
+  rewritten in English.
 
 Read [the pattern index](INDEX.md), then only the selected
 pattern card. The cards are algorithms and small snippets, not full workflows to
@@ -115,9 +124,13 @@ namespace has no root source and never receives a fake one. It then checks:
 - no design-absent node or standard-profile bad smell appeared.
 - the exact built file passes the Pi-native `workflow_check_source` tool with
   `mode: "orchestration-only"` for every built
-  `.locus-pi/workflows/<name>/*.workflow.mjs` path.
+  `.locus-pi/workflows/<name>/*.workflow.mjs` path; from a `locus-pi` checkout the
+  same validator is `npm run check:workflow-source -- --mode orchestration-only <exact-path>`.
 - every built source uses only the orchestration-only DSL subset and contains no
   file, path, artifact-consumption, clock, or randomness primitive.
+- no source carries `maxItemChars`, `maxAnswerChars` or `schemaMaxLength` (the
+  runtime refuses them by name at load), no `returnVia` (`"tool"` is redundant,
+  `"text"` is refused), and no size or budget number the design did not justify.
 
 Read checker diagnostics as `path:line:column [CODE] message`. Any error fails
 Build. Warning-only output remains a successful check, but Build must report the
@@ -135,6 +148,10 @@ copyable launch command `/workflows run <name>` (or the qualified child ref).
 
 For adaptive slices, name the queue owner, cumulative slice allowance, correction/recheck edge, scope-change exit and required final QA. Re-cut after each accepted slice, including the apparent last one, so an empty queue cannot hide unmet requirements. For fixed graphs, do not add a judge or semantic retry that the request did not require. For refinement, record the completion authority, immutable criteria, measured evidence, literal round cap, no-progress rule, exact handoff and terminal outcomes. For decomposition, record local concurrency, global budget and key ownership. Human continuation names two runs and a verified artifact handoff, never a suspended JavaScript stack.
 
-Budget values and failure dispositions belong to the [runtime reference](../../../extensions/workflows/REFERENCE.md); source provenance, mutation and permitted DSL methods belong to [source contract](../../../extensions/workflows/references/source-shape.md#machine-enforced-standard-source-shape). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
+Budget values and failure dispositions belong to the [runtime reference](../../../docs/workflows/index.md); source provenance, mutation and permitted DSL methods belong to [source contract](../../../docs/workflows/source-shape.md#machine-enforced-standard-source-shape). Read the relevant sections before Build. Do not duplicate those invariants in another skill.
 
 A standard source check is not live proof. Report the exact checks executed and any unavailable native checker, dependency, host or model route. Do not report successful Build after a skipped gate.
+
+## Task specification versus workflow design
+
+Before writing this graph design, resolve whether the user wants specification creation, specification revision or implementation. Ask only when the request and supplied documents leave that ambiguous. For implementation, identify the actual selected specification and documentation directory, then define initial slices and the completion outcome of every phase. A `.design.md` here describes the workflow graph; it does not replace the task specification. Author the implementation workflow after the user has seen the specification and requested implementation, not as an automatic companion to the specification workflow.

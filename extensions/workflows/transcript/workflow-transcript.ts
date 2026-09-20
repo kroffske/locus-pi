@@ -185,6 +185,20 @@ export function createWorkflowTranscript(
       // unabridged text is, and which command shows it — otherwise the operator
       // is left with a sentence fragment and no way forward. A failed run that
       // still produced text needs it just as much as a clean one.
+      // Failures remain visible even when the script captured them and returned success.
+      // Keep paths exact; the index carries the complete inventory beyond this display bound.
+      const failures = res.journal.filter(
+        (line) =>
+          (line.kind === "error" && (line.callId !== undefined || line.message !== res.error)) ||
+          (line.kind === "agent_end" && ["failed", "blocked", "cancelled"].includes(line.status ?? "")),
+      );
+      if (failures.length > 0) {
+        bodyLines.push(`Execution failures (${failures.length}; workflow outcome is shown separately)`);
+        for (const failure of failures.slice(-5)) {
+          bodyLines.push(...formatWorkflowExecutionFailure(failure, workflowJournalFile(res.runDir)));
+        }
+        if (failures.length > 5) bodyLines.push("Earlier failures: open the project error index or run journal.");
+      }
       const fileLines: string[] = [];
       const commandLines: string[] = [];
       if (res.primaryFile?.absolutePath !== undefined && res.primaryFile.absolutePath !== "") {
@@ -473,8 +487,7 @@ export function renderMainWorkflowStatus(line: WorkflowJournalLine): string | un
   if (line.kind === "agent_end") {
     const warnings = line.evidenceWarnings?.filter((warning) => warning.trim() !== "") ?? [];
     if (warnings.length > 0) return `warning: ${warnings.join("; ")}`;
-    if (line.status !== undefined && line.status !== "completed")
-      return `agent ${line.agent ?? "sub-agent"} ${line.status}`;
+    if (line.status !== undefined && line.status !== "completed") return formatWorkflowExecutionFailure(line)[0];
     return undefined;
   }
   if (line.kind === "log") {
@@ -502,4 +515,30 @@ function compactTranscriptText(value: string): string {
 
 function firstTranscriptLine(value: string): string {
   return (value.split(/\r?\n/u, 1)[0] ?? "").trim();
+}
+
+/** Identity comes from this attempt, never the most recent sibling or an inferred stage. */
+function formatWorkflowExecutionFailure(line: WorkflowJournalLine, journalPath?: string): string[] {
+  const identity = [
+    line.displayName ?? line.agent ?? "(agent unknown)",
+    line.label,
+    line.phase,
+    line.callId,
+    line.attempt === undefined ? undefined : `attempt ${line.attempt}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return [
+    `✗ ${identity}: ${line.failureCause ?? line.status ?? "error"} — ${compactTranscriptText(line.message ?? "No failure message recorded")}`,
+    ...(line.journalWarning !== undefined
+      ? [line.journalWarning]
+      : journalPath === undefined
+        ? []
+        : [`details: ${journalPath}`]),
+    ...(line.resultArtifact === undefined ? [] : [`child result: ${line.resultArtifact}`]),
+    ...(line.errorLogPath === undefined
+      ? []
+      : [`errors: ${line.errorLogPath}${line.errorId === undefined ? "" : ` (id ${line.errorId})`}`]),
+    ...(line.errorLogWarning === undefined ? [] : [line.errorLogWarning]),
+  ];
 }

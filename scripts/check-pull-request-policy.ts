@@ -12,20 +12,6 @@ export interface PullRequestPolicyInput {
   headChangelog: string;
 }
 
-const releaseRelevantPatterns = [
-  /^\.agents\/agents\//,
-  /^bin\//,
-  /^docs\//,
-  /^extensions\//,
-  /^README\.md$/,
-  /^schemas\/extension-manifest\.schema\.json$/,
-  /^package(?:-lock)?\.json$/,
-];
-
-export function isReleaseRelevantFile(file: string): boolean {
-  return releaseRelevantPatterns.some((pattern) => pattern.test(file));
-}
-
 export function compareSemver(left: string, right: string): number {
   const parsedLeft = parseSemver(left);
   const parsedRight = parseSemver(right);
@@ -63,20 +49,16 @@ function parseSemver(version: string): { core: [number, number, number]; prerele
 
 export function evaluatePullRequestPolicy(input: PullRequestPolicyInput): string[] {
   const errors: string[] = [];
-  const changelogChanged = input.changedFiles.includes("CHANGELOG.md");
-  const releaseRelevantChange = input.changedFiles.some(isReleaseRelevantFile);
 
   if (input.baseRef === "dev") {
     if (input.headRef === "main" || input.headRef === "dev") {
       errors.push(`normal pull requests into dev must come from a task branch, not ${input.headRef}`);
     }
-    if (releaseRelevantChange && !changelogChanged) {
-      errors.push("release-relevant changes into dev must update CHANGELOG.md");
-    }
     return errors;
   }
 
   if (input.baseRef === "main") {
+    const changelogChanged = input.changedFiles.includes("CHANGELOG.md");
     if (input.headRef !== "dev") {
       errors.push("main accepts only the release pull request from dev");
     }

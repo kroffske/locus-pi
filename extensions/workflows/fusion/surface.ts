@@ -34,25 +34,27 @@ const FUSION_PROGRESS_WIDGET_KEY = "fusion-live";
 const FUSION_DEFAULT_OUTPUT =
   "Answer the question directly. Return only the final answer, not a discussion of candidates.";
 
+// Non-blank is the only length contract here. Each of these three fields is the CALLER'S
+// input — the question it wants answered, the context it chose to forward, the format it
+// wants back — and a tool that refused a long question would be applying a size policy to
+// work nobody has done yet. `minLength: 1` stays because an empty question is not a short
+// question, it is a missing one.
 const FusionToolParams = Type.Object(
   {
     question: Type.String({
       description: "One complete standalone question. Ambient parent-session history is not forwarded.",
       minLength: 1,
-      maxLength: 16_000,
     }),
     context: Type.Optional(
       Type.String({
         description: "Optional explicit context forwarded verbatim to every panel member. Do not include secrets.",
         minLength: 1,
-        maxLength: 16_000,
       }),
     ),
     output: Type.Optional(
       Type.String({
         description: "Optional instruction defining the judge's final answer format.",
         minLength: 1,
-        maxLength: 16_000,
       }),
     ),
   },

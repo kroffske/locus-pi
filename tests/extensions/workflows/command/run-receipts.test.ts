@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as runner from "../../../../extensions/workflows/runtime/workflow-runner.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import workflows from "../../../../extensions/workflows/index.js";
 import {
   announceCommandWorkflowStart,
@@ -59,7 +58,6 @@ describe("workflow command receipts", () => {
     ["run alpha --resume", "missing_resume_id", "alpha"],
     ["run alpha --output-dir", "missing_output_dir", "alpha"],
     ["run task/draft --run-name", "missing_run_name", "task/draft"],
-    [`run alpha -- ${"x".repeat(WORKFLOW_INPUT_MAX_CHARS + 1)}`, "input_too_long", "alpha"],
     ["run definitely-missing", "workflow_not_found", "definitely-missing"],
   ] as const)("persists a typed pre-start rejection for %s", async (command, code, target) => {
     const h = harness();

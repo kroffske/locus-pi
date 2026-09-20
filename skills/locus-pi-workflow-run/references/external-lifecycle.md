@@ -86,7 +86,7 @@ terminal workflow truth. Files written by a child are working evidence until its
 required acceptance succeeds. A zero process exit is insufficient.
 
 If the process is gone without terminal evidence, preserve its streams and
-supervisor status and follow the [unconfirmed-call reconciliation route](../../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
+supervisor status and follow the [unconfirmed-call reconciliation route](../../../docs/workflows/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
 Do not write a replacement result or guess a kill cause. A supervisor separates
 process lifetime from the caller; it does not guarantee survival of logout,
 machine restart, supervisor loss or power failure. Those interruptions still

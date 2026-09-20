@@ -7,15 +7,17 @@
  * Workflow root runs persist under `.locus-pi/runs/<storageRootRunId>/`, with
  * saved children and attempts below fixed nested directories. The journal owner
  * also owns the append sink; its sibling workflow-live.ts owns the
- * journal-to-live-row projection and the live-row retention bound. Two consumers
- * outside this extension only ever needed to READ a run — the agent drill's round
- * submenu and the loop's continuation source — yet both reached straight into
- * those modules and so held a handle on the write side too. This file is the
- * narrow surface those consumers get instead: read operations and the types they
- * return, nothing else. No sink, no append, no retention, no live-row mutation.
- * `check:layers` declares both modules feature-internal to `extensions/workflows/`
- * and names this file as their only sanctioned exception, so the seam cannot decay
- * back into direct access.
+ * journal-to-live-row projection and the live-row retention bound. Code outside
+ * this extension — today the agent drill's round submenu — only ever needs to
+ * READ a run, yet reaching straight into those modules would hand it the write
+ * side too. This file is the narrow surface such a consumer gets instead: read
+ * operations and the types they return, nothing else. No sink, no append, no
+ * retention, no live-row mutation.
+ * `check:layers` declares the persisted-run owners feature-internal to
+ * `extensions/workflows/` — the journal and its event format, the result
+ * persistence-and-readback owner, the snapshot reader, the resume authority, the
+ * run admission, and workflow-live — and names this file as their only sanctioned
+ * exception, so the seam cannot decay back into direct access.
  *
  * WHAT IS IMPLEMENTED HERE, AND WHAT IS ONLY RE-EXPORTED
  *
@@ -30,8 +32,11 @@
  *     it would make workflow-live.ts import this file, i.e. make foundational code
  *     import a feature directory, which is the exact edge the ownership refactor
  *     exists to remove.
- *   - Path constructors belong to the layout owner and are not exposed here.
- *     This facade re-exports only resolved read operations allowed across feature layers.
+ *   - The path constructors below (`resolveWorkflowRunDir`, `workflowJournalFile`,
+ *     `workflowRunsRootDir`, `workflowResultFile`) stay implemented by the layout and
+ *     result owners; this facade re-exports them so an outside reader can name a
+ *     run's files without importing the owners, and they construct paths only —
+ *     they neither create directories nor write.
  *   - `listWorkflowRunIds`, `readWorkflowRunSummary`, `listWorkflowRoundsForSlot`,
  *     `readWorkflowRoundBody`, and `readWorkflowSlotPhase` all resolve through
  *     private journal internals — the start-timestamp proof that orders runs, the

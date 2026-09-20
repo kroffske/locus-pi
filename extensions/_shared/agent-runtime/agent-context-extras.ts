@@ -6,11 +6,14 @@ export const AGENT_CONTEXT_EXTRAS_ENV = "LOCUS_AGENT_CONTEXT_EXTRAS";
 export const AGENT_MEMORY_FILE_ENV = "LOCUS_AGENT_MEMORY_FILE";
 export const AGENT_PRELOAD_SKILLS_ENV = "LOCUS_AGENT_PRELOAD_SKILLS";
 
-const MAX_MEMORY_LINES = 200;
-const MAX_MEMORY_BYTES = 8 * 1024;
-const MAX_SKILL_LINES = 200;
-const MAX_SKILL_BYTES = 4 * 1024;
-const MAX_TOTAL_EXTRAS_BYTES = 16 * 1024;
+/**
+ * Selected memory and skills are passed WHOLE. This is not a ceiling: nothing is
+ * cut at it. It is the size at which the resolution adds a visible note naming the
+ * real byte totals, so an operator reading the receipt can see that a large context
+ * was sent on purpose. It is deliberately the byte count this module used to
+ * truncate at, so the point that used to hide content now reports it instead.
+ */
+export const AGENT_CONTEXT_EXTRAS_SIZE_NOTE_BYTES = 16 * 1024;
 
 export interface AgentContextExtrasOptions {
   cwd?: string;
@@ -25,7 +28,6 @@ export interface AgentContextTextBlock {
   requested: string;
   source: string;
   content: string;
-  truncated?: boolean;
 }
 
 export interface AgentContextExtrasResolution {
@@ -56,6 +58,8 @@ export function resolveAgentContextExtras(options: AgentContextExtrasOptions): A
   const diagnostics: string[] = [];
   const memory = resolveMemoryBlock(requestedMemory, resolvedOptions, io, diagnostics);
   const skills = resolveSkillBlocks(requestedSkills, resolvedOptions, io, diagnostics);
+  const sizeNote = contextExtrasSizeNote(memory, skills);
+  if (sizeNote !== undefined) diagnostics.push(sizeNote);
   return {
     enabled: true,
     diagnostics,
@@ -71,11 +75,7 @@ export function formatAgentContextExtras(resolution: AgentContextExtrasResolutio
   if (resolution.memory !== undefined) sections.push(formatMemoryBlock(resolution.memory));
   for (const skill of resolution.skills) sections.push(formatSkillBlock(skill));
   if (sections.length === 0) return undefined;
-  return clampUtf8Text(
-    ["# Context extras", ...sections].join("\n\n"),
-    MAX_TOTAL_EXTRAS_BYTES,
-    "...[context extras truncated]",
-  );
+  return ["# Context extras", ...sections].join("\n\n");
 }
 
 export function buildAgentContextExtrasText(options: AgentContextExtrasOptions): {
@@ -111,13 +111,11 @@ function resolveMemoryBlock(
     diagnostics.push(`Requested: ${requestedMemory}`);
     return undefined;
   }
-  const clipped = clampBoundedContent(raw, MAX_MEMORY_LINES, MAX_MEMORY_BYTES);
   return {
     kind: "memory",
     requested: requestedMemory,
     source: resolved,
-    content: clipped.content,
-    truncated: clipped.truncated,
+    content: raw,
   };
 }
 
@@ -148,13 +146,11 @@ function resolveSkillBlocks(
       diagnostics.push("(skill content unavailable)");
       continue;
     }
-    const clipped = clampBoundedContent(raw, MAX_SKILL_LINES, MAX_SKILL_BYTES);
     blocks.push({
       kind: "skill",
       requested,
       source: resolved,
-      content: clipped.content,
-      truncated: clipped.truncated,
+      content: raw,
     });
   }
   return blocks;
@@ -167,9 +163,7 @@ function formatDiagnosticsSection(messages: string[]): string {
 }
 
 function formatMemoryBlock(block: AgentContextTextBlock): string {
-  const lines = ["## Memory", `Requested: ${block.requested}`, `Source: ${block.source}`, "", block.content];
-  if (block.truncated) lines.push("First 200 lines kept.");
-  return lines.join("\n");
+  return ["## Memory", `Requested: ${block.requested}`, `Source: ${block.source}`, "", block.content].join("\n");
 }
 
 function formatSkillBlock(block: AgentContextTextBlock): string {
@@ -180,7 +174,6 @@ function formatSkillBlock(block: AgentContextTextBlock): string {
     "",
     block.content,
   ];
-  if (block.truncated) lines.push("First 200 lines kept.");
   return lines.join("\n");
 }
 
@@ -258,28 +251,23 @@ function defaultExists(filePath: string): boolean {
   }
 }
 
-function clampBoundedContent(
-  text: string,
-  maxLines: number,
-  maxBytes: number,
-): { content: string; truncated: boolean } {
-  const lines = text.split(/\r?\n/);
-  const lineLimited = lines.slice(0, maxLines).join("\n");
-  const truncated = lines.length > maxLines || Buffer.byteLength(lineLimited, "utf8") > maxBytes;
-  if (!truncated) return { content: lineLimited, truncated: false };
-  const suffix = "...[truncated]";
-  const clipped = clampUtf8Text(lineLimited, maxBytes, suffix);
-  return { content: clipped, truncated: true };
-}
-
-function clampUtf8Text(text: string, maxBytes: number, suffix: string): string {
-  if (Buffer.byteLength(text, "utf8") <= maxBytes) return text;
-  const suffixBytes = Buffer.byteLength(suffix, "utf8");
-  const targetBytes = Math.max(0, maxBytes - suffixBytes);
-  let end = text.length;
-  while (end > 0 && Buffer.byteLength(text.slice(0, end), "utf8") > targetBytes) end = Math.floor(end * 0.9);
-  while (end < text.length && Buffer.byteLength(text.slice(0, end + 1), "utf8") <= targetBytes) end += 1;
-  return `${text.slice(0, end)}${suffix}`;
+/**
+ * A size REPORT, never a cut. Absent when the selection is small enough to be
+ * unremarkable; present — and therefore visible in the prompt and in the caller's
+ * diagnostics — when it is large, naming the exact bytes that were sent whole.
+ */
+function contextExtrasSizeNote(
+  memory: AgentContextTextBlock | undefined,
+  skills: readonly AgentContextTextBlock[],
+): string | undefined {
+  const memoryBytes = memory === undefined ? 0 : Buffer.byteLength(memory.content, "utf8");
+  const skillBytes = skills.reduce((total, skill) => total + Buffer.byteLength(skill.content, "utf8"), 0);
+  const totalBytes = memoryBytes + skillBytes;
+  if (totalBytes < AGENT_CONTEXT_EXTRAS_SIZE_NOTE_BYTES) return undefined;
+  return (
+    `Context extras are large: ${totalBytes} bytes passed whole ` +
+    `(memory ${memoryBytes}, ${skills.length} skill file(s) ${skillBytes}). Nothing was truncated.`
+  );
 }
 
 function parseRequestedSkills(value: string | undefined): string[] {

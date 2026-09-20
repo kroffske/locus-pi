@@ -5,6 +5,8 @@ description: Run, start, execute, launch, or resume an existing locus-pi workflo
 
 # Run a locus-pi workflow
 
+Resolve this `SKILL.md` to its physical file before following relative links; the installed [workflow manual](../../docs/workflows/index.md) is relative to that file, never the caller cwd (see [discovery](../README.md#find-the-installed-workflow-documentation)).
+
 Run an existing reviewed workflow through the host that already owns model,
 authentication, session, child-agent, and evidence lifecycle. Do not add a new
 workflow API wrapper, ask a parent model to call the tool, or import the workflow
@@ -13,6 +15,15 @@ runner. A process supervisor may own the native CLI on the external path below.
 Workflow JavaScript is trusted code with full Node.js access in the Pi host. It
 is not sandboxed. Project approval is a broad Pi trust decision, not approval of
 one workflow file.
+
+## Diagnose before restarting
+
+Workflow not working → open `.locus-pi/logs/errors.jsonl` → follow the exact
+journal/result pointer → repair the responsible layer. Read the shared
+[error diagnostics and jq examples](../../docs/workflows/error-diagnostics.md).
+Captured failures remain there even after success; successful review findings
+are not execution failures. If the index is unavailable, use the evidence path
+and warning in the failure message.
 
 ## Preserve completed work before starting over
 
@@ -203,6 +214,47 @@ run id, question/artifacts, and required operator action; continue only after an
 explicit answer. Timer or spinner changes are presentation, not evidence of new
 activity—the durable journal is the activity record.
 
+## Read the run header and budget lines
+
+Every journal opens with one runtime line naming all six budget axes. For a TUI/RPC
+run with no budget overrides, for example: `[workflow:budget] applied concurrency=4 totalAgents=unbounded
+runtimeMs=unbounded timeoutMs=unbounded toolCalls=unbounded turns=unbounded`.
+`unbounded` means nobody declared that axis and nothing will stop the run on
+it; it is not an error, not a default to "fix", and not a hidden number.
+`/workflows status <runId>` and `runtime/result.json` (`budget`) repeat the same
+six values as `budget applied: …`. The canonical [budget policy](../../docs/workflows/budgets.md#run-budget)
+owns all defaults, their launch-mode scope and explicit controls. Read that policy
+before choosing an override; do not infer a default from an example receipt.
+
+- `[workflow:budget] call raised <axis> above the applied default: default=…
+requested=…` — a per-call value above the run's; informational.
+- `[workflow:budget] stopped by budget <axis>: … Data received so far is kept.`
+  — the run reached an applied budget. It is stopped, not wrong: every answer
+  already received stays stored and readable, and no result becomes invalid.
+  Continue through Repair + Continue with an explicit `budget` on the structured
+  tool or an explicit per-call value, chosen by the operator; never raise it
+  automatically.
+- `[workflow:return] <label>: contract v2, N same-session clarification
+turn(s)` — the correction budget of a shaped call, stated on every such call
+  (package default: one turn; `repair.maxAttempts` is the author's declaration).
+- `workflow_ask: operator wait of N ms counted against the call deadline` in a
+  call's diagnostics — `timeoutMs` is wall clock and includes the operator's
+  thinking time. A call that died on its deadline while someone was answering
+  says so here; it was not a slow model.
+- `failureCause: "output-contract-unavailable"` — the transport cannot register
+  `workflow_return` and read its tool set back, so the shaped call was refused
+  before the child started. A capability limit of that host, not a script bug:
+  run it on a host that supports the return tool, or hand the call to the
+  authoring skill to become plain text. Retrying the same transport cannot help.
+- `[workflow:deprecated] agent returnVia: "tool" is redundant and ignored` —
+  informational for one release; `returnVia: "text"` is refused at load and
+  needs an authoring fix.
+
+No journal line names answer length, and none ever will: a large answer is
+never the cause of a stop. Do not shorten an answer, ask for a character limit,
+or look for a `maxItemChars`/`maxAnswerChars` to raise — those options are
+refused by name.
+
 ## Recover a stopped run
 
 A run that failed, was interrupted, or ended without a usable result is
@@ -262,15 +314,33 @@ What reuse costs and requires:
 - The first fresh call ends reuse for the whole run. Every later call runs fresh
   too, including calls whose own prompt did not change: their recorded answers
   came from a run where the repaired node behaved differently.
-- A `fusion()` group standing after that point does not run fresh. It ends the
-  run with `fusion resume cannot mix recorded and fresh agent calls`. Split the
-  panel out, or accept a fully fresh run. The same boundary costs one case that
-  used to work: a byte-identical resume no longer replays a fusion tail that sat
-  after a recorded failure.
+- A `fusion()` group standing after that point runs as an ordinary fresh panel:
+  every leg is fresh, and it gets its model preflight like any other fresh call.
+  What stays refused is a MIXED panel, some legs served from the record and some
+  fresh. That ends the run with
+  `fusion resume cannot mix recorded and fresh agent calls`.
+  A fully replayed panel is not charged against `totalAgents`, because it starts
+  no child.
 - The first miss is reported by name: `no-record`, `unnamed-node`,
-  `node-mismatch`, `key-mismatch`, `recorded-failure` or `side-effecting-call`.
-  A recorded failure is re-run, never served back as an answer; a worktree or
-  otherwise side-effecting call never replays.
+  `node-mismatch`, `return-contract-changed`, `key-mismatch`,
+  `recorded-failure` or `side-effecting-call`. A recorded failure is re-run,
+  never served back as an answer; a worktree or otherwise side-effecting call
+  never replays.
+- `return-contract-changed` is the one miss that is not about the script. A
+  shaped call (`choice`, `handoffs`, `output`, `schema`) sends a versioned
+  return contract; a record written under v1 cannot match the v2 key, so the
+  journal names the release boundary (`[workflow:replay] <label>: the shaped
+return contract changed in this release`) and that call plus its tail run
+  fresh. Do not hunt for a source edit that does not exist.
+- **A run recorded before the explicit-budgets release re-runs from its first
+  agent call, whatever that call is.** `timeoutMs`, `toolCalls` and `turns` are
+  part of every canonical request key, and the package defaults that used to fill
+  them (`86400000` / `1000` / `1000`) are gone, so those axes now read `null`.
+  Plain-text calls are affected exactly like shaped ones: the first call reports
+  `key-mismatch` and the whole run is fresh. The exception is a run that declared
+  each of those budgets explicitly — its keys never contained a default, so it
+  replays unchanged. Nothing historical is rewritten, no key is recomputed, and a
+  call recorded as failed never becomes accepted.
 - Changed parallel scheduling may shorten the usable prefix, and independently
   completed branches are not recovered by business key. Stable `keys` prevent
   item mismatch; they create no per-item checkpoint.
@@ -349,10 +419,10 @@ requires identical bound source/input/budget, a healthy fully confirmed serial
 prefix, workspace ownership and the existing lease. A started but unconfirmed
 child, grouped execution, malformed result or missing binding requires operator
 review. Never fabricate `result.json` to bypass admission. See the canonical
-[recovery contract](../../extensions/workflows/references/recovery-and-continuation.md).
+[recovery contract](../../docs/workflows/recovery-and-continuation.md).
 
 For a dead process with a started-but-unconfirmed call, read the contract's
-[reconciliation path](../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
+[reconciliation path](../../docs/workflows/recovery-and-continuation.md#reconcile-an-unconfirmed-call).
 The project owner reconciles current changes and effects first. When prerequisites
 remain suitable, ordinary resume from a verified terminal ancestor can reuse its
 prefix and run a repaired reconciliation stage fresh. Name that ancestor and the
@@ -361,9 +431,14 @@ Otherwise use an explicitly declared fresh recovery workflow or report the exact
 unresolved effect. Existing authorization covers in-scope repair and continuation;
 technical uncertainty is not a missing repeat approval.
 
-The same structured tool accepts optional `budget` overrides forwarded to the
-single runtime budget owner and shown in approval details. Slash syntax above
-is unchanged. See [execution controls](../../extensions/workflows/references/execution-controls.md).
+The same structured tool accepts an optional `budget` object with the six axes
+(`concurrency`, `totalAgents`, `runtimeMs`, `timeoutMs`, `toolCalls`, `turns`),
+forwarded to the single runtime budget owner and shown in approval details.
+The [budget policy](../../docs/workflows/budgets.md#run-budget) owns launch-mode
+defaults; other undeclared axes are unbounded. `answerChars` is refused by name
+because a run does not bound answer size. One explicit `timeoutMs` is the whole wall clock of
+a child attempt, operator waits included. Slash syntax above is unchanged. See
+[execution controls](../../docs/workflows/dsl.md).
 Semantic extra rounds and same-session output corrections are not crash replay.
 
 ## Large runs: observe and let the operator decide
@@ -371,13 +446,14 @@ Semantic extra rounds and same-session output corrections are not crash replay.
 Hundreds of small agents can be the intended workload: thirty-five work units
 with ten focused fields each legitimately require 350 agent calls. Do not infer
 from that count that the graph is wrong, and do not add a new total-agent limit,
-token-floor stop, estimated-cost gate or automatic graph reduction. Existing
-explicit operator settings and package fuses stay in force; this guidance removes
-none of them. Concurrency limits simultaneous work, not the total number of
-tasks: the keyed `parallel(thunks, { concurrency, keys, title })` group width is
-local, and separate from the shared leaf concurrency gate. A chosen maximum
-number of refinement rounds is local to one design, not an economic policy for
-every workflow.
+token-floor stop, estimated-cost gate or automatic graph reduction. Explicit
+operator budgets and the documented launch defaults stay in force. Do not add
+stops on other axes: they remain unbounded unless explicitly declared. Concurrency limits simultaneous work, not the
+total number of tasks: a `parallel(thunks, { concurrency, keys, title })` group
+runs at the run's effective `concurrency` unless the author
+passed a local width, and every child still passes the shared leaf gate. A
+chosen maximum number of refinement rounds is local to one design, not an
+economic policy for every workflow.
 
 Use the existing `/ps`, `/workflows status <runId>` and explicit
 `/workflows stop <runId>` surfaces. Separate new physical attempts,
@@ -385,12 +461,13 @@ queued/active/terminal calls and reused answers. Same-session format corrections
 are not fresh child sessions. Unknown endpoint usage stays unavailable; usage
 reported for only some calls is a partial subtotal, not a verified bill.
 
-Replayed answers still spend the run's `totalAgents` fuse: an attempt is charged
-whether its answer comes from the record or from a child. A continuation that
-would cross that fuse needs an explicit operator `budget` override on the
-structured tool; never raise it automatically, and never reinterpret
-interrupted-recovery binding checks as ordinary-resume rules. See
-[execution controls](../../extensions/workflows/references/execution-controls.md).
+Replayed answers do not spend an explicit `totalAgents` budget: a replayed call
+starts no child and is not charged, and the run report counts
+`N fresh + M replayed (not charged)`. A continuation whose fresh work would
+cross an explicit cap needs an explicit operator `budget` on the structured
+tool; never raise it automatically, and never reinterpret interrupted-recovery
+binding checks as ordinary-resume rules. See
+[execution controls](../../docs/workflows/dsl.md).
 Report actual reuse from the new result.
 
 When more work is discovered after a run stops, preserve the completed work

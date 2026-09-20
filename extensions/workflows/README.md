@@ -43,7 +43,7 @@ The `workflow` tool is the structured execution surface for agents. It supports 
 - Explicit output directories must remain safe, project-relative paths.
 - Run evidence and the workflow workspace are separate ownership zones.
 - `.locus-pi/workflow-state/v1/<hash>/` is active lease and saved-child checkpoint state. A normal run can leave an empty state directory after releasing its temporary workspace lock.
-- `.locus-pi/plans/*.md` is owned by the `plan` extension and is not workflow workspace storage.
+- Loose `.locus-pi/plans/*.md` files are plan documents left by the removed `plan` extension; they are user data, not workflow workspace storage.
 
 ## Trust
 
@@ -53,6 +53,8 @@ Workflow modules execute in the Pi Node.js host and are not sandboxed. Review pr
 
 - [Operator workflow guide](../../docs/workflows.md)
 - [Readable authoring contract](../../docs/locus-pi-workflows.md)
-- [Advanced runtime and DSL reference](REFERENCE.md)
+- [Advanced runtime and DSL reference](../../docs/workflows/index.md)
+- [Output acceptance](../../docs/workflows/agent-results.md) — the shaped-result API, and the
+  single statement of what the runtime does and does not bound
 - [Packaged examples](examples/README.md)
 - [Manifest](manifest.json)

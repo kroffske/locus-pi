@@ -88,11 +88,37 @@ export type WorkflowReplayEntry =
       kind: "agent";
       node?: string;
       key: string;
+      /** Return-contract version of a SHAPED call; absent for a plain-text call and for
+       *  every record written before contract v2 existed. See WORKFLOW_RETURN_CONTRACT_V1. */
+      rcv?: number;
       ok: true;
       text: string;
     }
-  | { v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION; seq: number; kind: "agent"; node?: string; key: string; ok: false }
+  | {
+      v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION;
+      seq: number;
+      kind: "agent";
+      node?: string;
+      key: string;
+      rcv?: number;
+      ok: false;
+    }
   | { v: typeof WORKFLOW_REPLAY_SCHEMA_VERSION; seq: number; kind: WorkflowReplayValueKind; value: number };
+
+/**
+ * The shaped-return contract version a record written before this release used.
+ *
+ * v1 stated a default answer ceiling, a derived canonical-JSON allowance and a bounded
+ * clarification budget; v2 states none of them. That text is part of the prompt and
+ * therefore of the request key, so EVERY recorded shaped call diverges under v2 — which is
+ * correct and must stay correct: recomputing an old key would claim the old child answered
+ * a contract it was never shown.
+ *
+ * What would NOT be correct is reporting it as `key-mismatch`, which everywhere else means
+ * "your script changed" and would send an operator looking for an edit that does not exist.
+ * A record is therefore still fully readable, and the miss is named for what happened.
+ */
+export const WORKFLOW_RETURN_CONTRACT_V1 = 1 as const;
 
 export type WorkflowReplayAgentEntry = Extract<WorkflowReplayEntry, { kind: "agent" }>;
 
@@ -101,6 +127,7 @@ export type WorkflowReplayMissReason =
   | "no-record"
   | "unnamed-node"
   | "node-mismatch"
+  | "return-contract-changed"
   | "key-mismatch"
   | "recorded-failure"
   | "side-effecting-call"
@@ -151,6 +178,8 @@ export interface WorkflowReplayAgentCall {
   /** `[phase, label, occurrence]`; absent for a call without a label. */
   node?: string;
   canonicalRequest: string;
+  /** Shaped-return contract version of THIS call; absent for a plain-text call. */
+  returnContractVersion?: number;
 }
 
 /**
@@ -300,7 +329,14 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
       if (entry.node === undefined || call.node === undefined) return miss("unnamed-node");
       if (entry.node !== call.node) return miss("node-mismatch");
     }
-    if (entry.key !== hashCanonicalRequest(call.canonicalRequest)) return miss("key-mismatch");
+    if (entry.key !== hashCanonicalRequest(call.canonicalRequest)) {
+      // A shaped call whose record predates contract v2 (no `rcv`, or an older one) cannot
+      // match by construction. Name that boundary rather than blaming the author's script.
+      const recorded = entry.rcv ?? WORKFLOW_RETURN_CONTRACT_V1;
+      return call.returnContractVersion !== undefined && recorded < call.returnContractVersion
+        ? miss("return-contract-changed")
+        : miss("key-mismatch");
+    }
     if (!entry.ok) return miss("recorded-failure");
     if (!call.replayable) return miss("side-effecting-call");
 
@@ -313,10 +349,11 @@ class FileBackedWorkflowReplayController implements WorkflowReplayController {
     this.#writeCursor += 1;
     const key = hashCanonicalRequest(call.canonicalRequest);
     const node = call.node === undefined ? {} : { node: call.node };
+    const rcv = call.returnContractVersion === undefined ? {} : { rcv: call.returnContractVersion };
     this.#append(
       outcome.ok
-        ? { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", ...node, key, ok: true, text: outcome.text }
-        : { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", ...node, key, ok: false },
+        ? { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", ...node, key, ...rcv, ok: true, text: outcome.text }
+        : { v: WORKFLOW_REPLAY_SCHEMA_VERSION, seq, kind: "agent", ...node, key, ...rcv, ok: false },
     );
   }
 
@@ -385,6 +422,11 @@ function parseReplayEntry(value: unknown): WorkflowReplayEntry | undefined {
     // skipped line, exactly as a wrong `key` is.
     if (record.node !== undefined && typeof record.node !== "string") return undefined;
     const node = record.node === undefined ? {} : { node: record.node };
+    // Same discipline as `node`: absent means "v1 or plain text" and stays absent; a wrong
+    // TYPE is a malformed line, because a contract version that cannot be read cannot be
+    // compared and would silently collapse into the legacy reading.
+    if (record.rcv !== undefined && (typeof record.rcv !== "number" || !Number.isInteger(record.rcv))) return undefined;
+    const rcv = record.rcv === undefined ? {} : { rcv: record.rcv as number };
     if (record.ok === true) {
       return typeof record.text === "string"
         ? {
@@ -393,6 +435,7 @@ function parseReplayEntry(value: unknown): WorkflowReplayEntry | undefined {
             kind: "agent",
             ...node,
             key: record.key,
+            ...rcv,
             ok: true,
             text: record.text,
           }
@@ -405,6 +448,7 @@ function parseReplayEntry(value: unknown): WorkflowReplayEntry | undefined {
         kind: "agent",
         ...node,
         key: record.key,
+        ...rcv,
         ok: false,
       };
     }

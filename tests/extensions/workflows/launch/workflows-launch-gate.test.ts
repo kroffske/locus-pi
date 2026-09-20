@@ -331,16 +331,17 @@ describe("/workflows run launch gate", () => {
     }
   });
 
-  it("rejects oversized effective command input before creating a workflow run", async () => {
+  it("starts a run for a long effective command input instead of rejecting it", async () => {
+    // The removed 16 000-character launch gate. The input IS the operator's task; a
+    // launch check bounds what a run may SPEND, never how long the request may be.
     const h = registerHarness();
     const spy = vi.spyOn(runner, "runWorkflowScript");
     try {
       await h.commands.get("workflows")!.handler(`run live-smoke   ${"x".repeat(16_001)}   `, h.ctx);
 
-      expect(spy).not.toHaveBeenCalled();
+      expect(spy).toHaveBeenCalledTimes(1);
       const widget = h.widgets.get("workflows") ?? "";
-      expect(widget).toContain("exceeds the 16000-character limit");
-      expect(widget).toContain("No workflow execution was started");
+      expect(widget).not.toContain("character limit");
     } finally {
       spy.mockRestore();
     }
@@ -487,7 +488,6 @@ describe("/workflows run launch gate", () => {
 
       expect(h.ctx.isIdle()).toBe(false);
       expect(h.waitForIdleCalls).toBe(1);
-      // The run-boundary banner is published at launch, while the session is
       // still idle; nothing else is sent while the host streams.
       expect(h.sentMessages).toHaveLength(1);
       expect(h.sentMessages[0]?.message.details).toMatchObject({ eventKind: "workflow_start" });
@@ -702,6 +702,7 @@ describe("/workflows run launch gate", () => {
     const terminalText = `${"Complete plan line. ".repeat(600)}\nUNTRUNCATED_TERMINAL_SENTINEL`;
     const runDir = ensureWorkflowRunDir(projectRoot, "run-full-result");
     const outputDir = path.join(runDir, "outputs");
+    mkdirSync(outputDir);
     writeFileSync(path.join(outputDir, "workflow-result.md"), `${terminalText}\n`, "utf8");
     const spy = vi.spyOn(runner, "runWorkflowScript").mockResolvedValue({
       runId: "run-full-result",

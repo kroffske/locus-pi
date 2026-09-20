@@ -101,6 +101,29 @@ describe("workflow_ask — validation", () => {
     expect(badRecommended.isError).toBe(true);
     expect(events).toEqual([]); // the fuse was never touched
   });
+
+  it("asks twelve questions in one call: the queue length is not a refusal", async () => {
+    const asked: string[] = [];
+    const { deps, records } = makeDeps({
+      requestQuestion: async (_ctx, spec) => {
+        asked.push(spec.question);
+        return { status: "answered", kind: "custom", answer: `answer-${asked.length}` };
+      },
+    });
+    const tool = createWorkflowAskTool(deps);
+    const questions = Array.from({ length: 12 }, (_, index) => ({
+      id: `q${index + 1}`,
+      question: `Question ${index + 1}?`,
+      options: [],
+    }));
+
+    const result = await tool.execute("call-many", { questions }, signal());
+
+    expect(result.isError).toBeUndefined();
+    expect(asked).toHaveLength(12);
+    expect(records[0]?.entries).toHaveLength(12);
+    expect(result.content[0]?.text).toContain("Operator answered 12 of 12");
+  });
 });
 
 describe("workflow_ask — answers", () => {

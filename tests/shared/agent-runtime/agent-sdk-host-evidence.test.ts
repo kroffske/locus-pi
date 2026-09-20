@@ -250,6 +250,60 @@ describe("agent SDK evidence surfacing", () => {
     assert.equal(Object.hasOwn(body, "evidence"), false);
   });
 
+  it("reports a finished run whose envelope could not be stored as a storage failure, answer kept", () => {
+    // Three notions, three answers: the execution FINISHED, its answer is ACCEPTABLE, and
+    // the durable record was NOT stored. The old code returned the first two and appended
+    // a diagnostic about the third, so the launcher printed `done` over a record that does
+    // not exist. Nothing about the answer changes — only the claim that it was saved.
+    const req = request();
+    const result: AgentRunResult = {
+      status: "completed",
+      agentName: req.agent.name,
+      reason: "ok",
+      text: "The migration is safe; here is the evidence.",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+    };
+    // A file where the artifacts directory should be: the store cannot create it, so the
+    // write fails for a real filesystem reason rather than a stubbed throw.
+    const blockedDir = path.join(mkdtempSync(path.join(tmpdir(), "locus-agent-storage-")), "artifacts");
+    writeFileSync(blockedDir, "not a directory", "utf8");
+
+    const stored = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result, blockedDir);
+
+    assert.equal(stored.status, "storage-failed");
+    assert.equal(stored.resultArtifact, undefined);
+    // The answer survived, and so did the execution outcome it belongs to.
+    assert.equal(stored.text, "The migration is safe; here is the evidence.");
+    assert.equal(stored.resultStorage?.executionStatus, "completed");
+    assert.equal(stored.resultStorage?.answerAvailable, true);
+    assert.ok(stored.resultStorage!.reason.length > 0);
+    assert.match(stored.reason, /result envelope was not written/u);
+    assert.ok(stored.diagnostics.some((entry) => /result envelope was not written/u.test(entry)));
+  });
+
+  it("says so plainly when a run with no answer text also fails to store its envelope", () => {
+    const req = request();
+    const result: AgentRunResult = {
+      status: "failed",
+      agentName: req.agent.name,
+      reason: "provider ended the turn",
+      failureCause: "provider-error",
+      diagnostics: [],
+      lifecycleEntryIds: [],
+    };
+    const blockedDir = path.join(mkdtempSync(path.join(tmpdir(), "locus-agent-storage-")), "artifacts");
+    writeFileSync(blockedDir, "not a directory", "utf8");
+
+    const stored = writeAgentRunResultArtifact(req.projectRoot ?? process.cwd(), req, result, blockedDir);
+
+    assert.equal(stored.status, "storage-failed");
+    assert.equal(stored.resultStorage?.executionStatus, "failed");
+    assert.equal(stored.resultStorage?.answerAvailable, false);
+    // The original failure cause is not overwritten by the storage problem.
+    assert.equal(stored.failureCause, "provider-error");
+  });
+
   it("uses the request as the sole declared Fusion mode authority in the run-result artifact", () => {
     const req = { ...request(), capabilityMode: "tool-free" as const };
     const result: AgentRunResult & { capabilityMode: "agent" } = {
@@ -486,6 +540,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir,
       now: () => "fixed",
+      promptEnv: { LOCUS_PI_HTML_TRANSCRIPTS: "1" },
       live: { rowId, label: "draft recon" },
     });
 
@@ -512,6 +567,32 @@ describe("agent SDK evidence surfacing", () => {
     assert.deepEqual(body.childTrace, result.childTrace);
   });
 
+  it.each([{}, { LOCUS_PI_HTML_TRANSCRIPTS: "0" }])(
+    "keeps JSONL and quietly skips HTML when automatic rendering is disabled (%j)",
+    async (promptEnv) => {
+      const req = request();
+      const reportsDir = path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports");
+      const executor = createAgentSdkSessionExecutor({
+        createSession: (async () => ({
+          session: fakeSession({ toolCalls: 0, toolResults: 0, text: completedText("Reviewed."), exportsHtml: true }),
+        })) as CreateAgentSessionFactory,
+        reportsDir,
+        now: () => "fixed",
+        promptEnv,
+      });
+
+      const result = await executor.run(req, new AbortController().signal);
+
+      assert.equal(result.status, "completed");
+      assert.equal(result.childTrace?.format, "pi-session-jsonl");
+      assert.equal(result.childTrace?.htmlPath, undefined);
+      assert.equal(
+        result.diagnostics.some((line) => line.startsWith("HTML transcript render")),
+        false,
+      );
+    },
+  );
+
   it.each([
     ["a host without the method", {}, "unavailable: the installed Pi host exposes no AgentSession.exportToHtml"],
     ["a renderer that throws", { exportsHtml: true, htmlExportError: "renderer refused" }, "failed: renderer refused"],
@@ -525,6 +606,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir: path.join(req.projectRoot ?? process.cwd(), ".locus", "runtime", "reports"),
       now: () => "fixed",
+      promptEnv: { LOCUS_PI_HTML_TRANSCRIPTS: "1" },
     });
 
     const result = await executor.run(req, new AbortController().signal);
@@ -575,7 +657,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "timeout",
-      turnTimeoutMs: 1,
+      childTimeoutMs: 1,
     });
     const timedOut = await timeoutExecutor.run(request(), new AbortController().signal);
     assert.equal(timedOut.status, "failed");
@@ -587,7 +669,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "cancelled",
-      turnTimeoutMs: 10_000,
+      childTimeoutMs: 10_000,
     });
     const controller = new AbortController();
     const pending = cancelExecutor.run(request(), controller.signal);
@@ -639,7 +721,7 @@ describe("agent SDK evidence surfacing", () => {
       })) as CreateAgentSessionFactory,
       reportsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-evidence-reports-")),
       now: () => "hung-abort",
-      turnTimeoutMs: 1,
+      childTimeoutMs: 1,
       abortTimeoutMs: 5,
     });
 

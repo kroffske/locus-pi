@@ -9,6 +9,8 @@ tags: [workflows, authoring]
 
 # Locus Pi workflows
 
+[Workflow documentation by topic](workflows/index.md) — open only the contract needed for the current task.
+
 Create a readable graph of agents for a real task. The default implementation style works through reviewable slices and revises the remaining plan after each slice. [Run and inspect workflows](workflows.md) covers commands, evidence and recovery.
 
 ## Create a workflow
@@ -72,14 +74,33 @@ Show the worst-case agent calls and explain if the task requires more.
 
 This is advice to the author. Locus Pi has no `workflowSizeGuideline` setting or
 `small`/`medium` runtime switch. The reviewed design records concrete slice and
-correction bounds; existing runtime attempt and concurrency limits are separate.
-Never remove required work to meet an advisory size preference.
+correction bounds; run budgets — time, agents, turns, tool calls — are a separate
+concern governed by the [budget policy](workflows/budgets.md#run-budget).
+Only the listed launch defaults apply; other undeclared axes are `unbounded`. Never remove required work to meet an
+advisory size preference.
 
 Claude Code's **Dynamic workflow size** setting uses `workflowSizeGuideline`:
 `small` aims below 5 agents, `medium` below 15, `large` below 50, and
 `unrestricted` sends no guideline. Its default is `medium`. This controls an
 advisory agent count, not prompt length or reasoning effort. See the
 [Claude Code size guide](https://code.claude.com/docs/en/workflows#set-a-size-guideline).
+
+### What the runtime does not bound
+
+Use the [output acceptance principle](workflows/agent-results.md#the-principle)
+when designing results and the [budget policy](workflows/budgets.md#run-budget)
+when planning execution. Two practical consequences for authoring:
+
+- Shape a stage by asking for what you want — "one paragraph and three bullets", "one
+  sentence naming the failing check". Do not write "keep this under 2000 characters"
+  as a stand-in for a limit the runtime no longer has; it buys nothing and costs the
+  part of the answer the stage was for.
+- Declare a bound only when a real consumer has one, and then declare it on the call
+  (`output.maxLength`, or `maxLength`/`maxItems` inside a `schema`) so the child is
+  told about it and can correct the value in the same session.
+
+The full statement, including how budgets and unsupported capabilities behave, is in
+[output acceptance](workflows/agent-results.md#the-principle).
 
 ### Use the references
 
@@ -113,27 +134,18 @@ independence. Configure routes through `/model-roles` or `~/.pi/agent/model-role
 
 ### Return a result and continue
 
-A workflow returns its result and evidence. A `next_command` field is a manual
-suggestion; it does not execute another workflow or authorize implementation.
-The design reference returns the reviewed proposal to the owner. The owner
-accepts that exact design revision before starting the implementation entry.
-A nonempty acceptance path is insufficient; the first implementation agent reads
-and checks the actual acceptance evidence.
+A specification workflow returns its artifact and review history. After the user examines it and asks to implement, author a separate implementation workflow against that actual specification and documentation directory. Define initial slices and completion outcomes during that authoring step. A next-action field is guidance, not execution or authorization; no special acceptance-file ceremony is required. Ordinary technical omissions can be repaired in scope by the implementation workflow.
 
 For a host-managed question, `awaitOperator` declares a pause and the source
 returns immediately. The host starts a new run after a real answer and verifies
 its continuation artifacts. This is separate from manual cross-workflow handoff
 and from `invokeWorkflow`, which actually invokes a saved child with runtime-owned
 checkpoint semantics. Choose the mechanism needed by the design; never run a
-child across an unresolved owner decision. See [continuation](../extensions/workflows/references/recovery-and-continuation.md).
+child across an unresolved owner decision. See [continuation](workflows/recovery-and-continuation.md).
 
-## Planned: specification and implementation as independent workflows
+## Specification and implementation as independent workflows
 
-This is the accepted direction for the next authoring revision. The current
-adaptive references do not yet implement the full correction behavior below.
-In particular, the design example stops after one reconciliation, and the
-implementation example still uses an acceptance-file convention and one
-correction per slice.
+Before authoring, clarify the intended deliverable if the request is ambiguous: create a specification, revise one, or implement the selected design. Identify the authoritative specification and unresolved product choices. Preserve a clear user instruction; a specification need not be flawless to begin authorized implementation.
 
 ### Produce the specification first
 
@@ -141,8 +153,7 @@ Author and run a workflow whose deliverable is the task specification. Its
 agents investigate the task, write the specification, review it and correct
 findings. The specification records intended behavior, scope, responsibilities,
 constraints, acceptance scenarios, assumptions and unresolved work. A fresh
-review follows each correction. Evidence-backed rejection of a finding also
-receives independent review.
+review follows each correction. A substantive arbiter can accept or reject findings with evidence. Reviewers assess prior dispositions on subsequent rounds; a final arbiter decision remains an explicitly attributed judgment.
 
 ### Author implementation from the actual specification
 
@@ -176,21 +187,17 @@ must grant new permission.
 
 Every result distinguishes delivered and verified work, unverified work and
 remaining work. A partial implementation is not a completed feature. Existing
-runtime failure and partial-result rules remain unchanged; this plan adds no
+runtime failure and partial-result rules remain unchanged; this behavior adds no
 global retry scheduler, status system or automatic cross-workflow launcher.
 
-### Planned implementation and proof
+### Review failure and remaining work
 
-Update the workflow-create guidance and both adaptive examples together. Reuse
-the existing bounded-refinement primitives for correction and fresh review.
-Extend the actual-example tests to cover residual findings after a second
-review, implementation from an imperfect specification, repeated corrections,
-real owner decisions, resource stops and failed required reviews. Finally,
-exercise two separately authored workflows on disposable local content,
-creating the implementation source only after reading the first artifact.
-Scripted-child tests prove routing; a live run is still needed to demonstrate
-real agent behavior.
+The default uses outcome-led briefs for capable agents and substantive arbitration. Fixed graphs and procedural detail remain separate task-dependent choices; no model route is changed automatically.
+
+An opted-in `agent(prompt, { result: "report" })` returns the actual answer or eligible host-observed failure facts for the next agent. Preserve full reports from completed, failed, missing and skipped checks. An arbiter may reject a finding, request correction, retry a review or continue with a disclosed limitation when the requested outcome is evidenced. A failed check is never described as completed. Cancellation, global limits, uncertain shutdown and persistence failures remain fatal. See [the exact report contract](workflows/agent-results.md#agent-execution-reports).
+
+Both adaptive references allow new residuals to return to the author after the second review. Teaching limits allow two corrections with fresh reviews; actual resource limits come from the task. On exhaustion they return the latest reviewed artifact and remaining criteria with a continuation action. Scripted-child regression tests prove graph routing and failure/replay boundaries; they do not certify model judgment, the user's feature or a previously stopped project run.
 
 ## Authoring references
 
-The installed [workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md) owns Design → review → Build. The [workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md) owns execution and recovery. Read the [source boundary](../skills/locus-pi-workflow-create/references/source-boundary.md) before building and the [exact source contract](../extensions/workflows/references/source-shape.md) when resolving checker diagnostics.
+The installed [workflow-create skill](../skills/locus-pi-workflow-create/SKILL.md) owns Design → review → Build. The [workflow-run skill](../skills/locus-pi-workflow-run/SKILL.md) owns execution and recovery. Read the [source boundary](../skills/locus-pi-workflow-create/references/source-boundary.md) before building and the [exact source contract](workflows/source-shape.md) when resolving checker diagnostics.

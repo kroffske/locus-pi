@@ -30,6 +30,8 @@ import { resolveWorkflowModel } from "../../_shared/model/workflow-model-resolve
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
 import type { AgentDefinition } from "../../_shared/agent-runtime/agents.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
+import { appendProjectError } from "../../_shared/host/error-journal.js";
+import { getProjectRoot, getSessionId } from "../../_shared/host/pi-api.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { installWorkflowProgress } from "../../workflows/operator/progress-widget.js";
 import { resolveAgentSelection } from "../catalog/catalog.js";
@@ -46,6 +48,12 @@ export function nextAgentRunSequence(): number {
   return ++agentRunSeq;
 }
 
+/** One hour for a standalone task; turns and tool calls remain unbounded.
+ * The SDK receives this runtime budget as its single child wall-clock deadline.
+ * Policy: docs/workflows/budgets.md#run-budget.
+ */
+export const INTERACTIVE_AGENT_RUNTIME_MS = 60 * 60 * 1000;
+
 interface AgentLiveTaskBaseInput {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
@@ -56,7 +64,8 @@ interface AgentLiveTaskBaseInput {
   task: string;
   approvalTier: ApprovalTier;
   liveModel: { model?: string; thinking?: string } | undefined;
-  maxTurns: number;
+  /** Explicit wall clock for this whole interactive child. */
+  childTimeoutMs: number;
   onStarted?: (line: string) => void;
   parentContext?: { inline?: string; artifactPath?: string };
 }
@@ -117,22 +126,23 @@ export async function runAgentLiveTask(
     // row shows an operator a model that never ran and cannot be told apart from one
     // that ran and failed, so the labels go with the same model-free patch the host
     // uses for its own pre-execution exits.
-    agentLiveStore.patchExecutionWithoutModel(execution, {
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
       status: "error",
       errors: [tier.refusal],
       finalAnswer: tier.refusal,
     });
-    return {
+    return recordStandaloneFailure(input, {
       status: "failed",
       executionMode: "named",
       agentName: input.agent.name,
       reason: tier.refusal,
       diagnostics: [tier.refusal],
       lifecycleEntryIds: [],
-    };
+    });
   }
   const executor = createAgentSdkSessionExecutor({
     model: tier.model ?? (ctx as { model?: unknown }).model,
+    childTimeoutMs: input.childTimeoutMs,
     live: {
       rowId,
       label,
@@ -143,7 +153,6 @@ export async function runAgentLiveTask(
     liveExecution: execution,
   });
   const requestInput = {
-    maxTurns: input.maxTurns,
     approvalTier: input.approvalTier,
     // Travels on the request for the same reason it does in the bridge: the
     // run-result artifact is written inside the boundary. `writeAgentRunResultArtifact`
@@ -159,20 +168,81 @@ export async function runAgentLiveTask(
           modelRoleResolution: input.modelRoleResolution,
         })
       : createBareAgentRunRequest(input.task, requestInput);
-  const boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
+  let boundary: Awaited<ReturnType<typeof executeAgentRunBoundary>>;
+  try {
+    boundary = await executeAgentRunBoundary({ pi: input.pi, ctx, request, executor, signal: input.signal });
+  } catch (err) {
+    recordStandaloneFailure(input, {
+      status: "failed",
+      reason: errorMessage(err),
+      diagnostics: [],
+      lifecycleEntryIds: [],
+    });
+    throw err;
+  }
+  if (boundary.status !== "completed") boundary = recordStandaloneFailure(input, boundary);
+  // A run whose envelope could not be stored is NOT a done run — it prints as the storage
+  // failure it is, through the same failure receipt as every other non-completion. What it
+  // is also not is a lost answer: the child answered, so the row keeps that answer and the
+  // storage reason travels in `errors` beside it, instead of overwriting the one copy of
+  // the result the operator still has.
+  const answerSurvivedStorageFailure = boundary.status === "storage-failed" && boundary.resultStorage?.answerAvailable;
   const finishedRow = agentLiveStore.patchExecution(execution, {
     status: boundary.status === "completed" ? "done" : boundary.status === "cancelled" ? "cancelled" : "error",
     ...(boundary.childSession?.id !== undefined ? { childSessionId: boundary.childSession.id } : {}),
     ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),
-    finalAnswer: boundary.reason,
+    finalAnswer: answerSurvivedStorageFailure === true && boundary.text !== undefined ? boundary.text : boundary.reason,
     errors: boundary.status === "completed" ? [] : [boundary.reason, ...boundary.diagnostics],
   });
   // REQ-011: append-only transcript event line at completion (finished / error).
-  if (finishedRow !== undefined) {
-    const level = boundary.status === "completed" ? "info" : boundary.status === "cancelled" ? "warning" : "error";
-    emitAgentEventLine(ctx, formatAgentFinishedEventLine(finishedRow), level);
+  if (finishedRow !== undefined && boundary.status === "completed") {
+    emitAgentEventLine(ctx, formatAgentFinishedEventLine(finishedRow), "info");
   }
   return boundary;
+}
+
+/** Final standalone facts only. Workflow children are indexed by their own journal owner. */
+function recordStandaloneFailure(
+  input: AgentLiveTaskInput,
+  result: Awaited<ReturnType<typeof executeAgentRunBoundary>>,
+): Awaited<ReturnType<typeof executeAgentRunBoundary>> {
+  const row = agentLiveStore.rows.get(input.rowId);
+  const parentSessionId = getSessionId(input.ctx);
+  const receipt = appendProjectError(getProjectRoot(input.ctx), {
+    ts: new Date().toISOString(),
+    source: "agent",
+    event: "agent_result",
+    status: result.status,
+    message: result.reason,
+    cause: result.failureCause,
+    agent: result.agentName ?? input.resolvedAgent,
+    displayName: row?.displayName,
+    title: input.title,
+    callId: input.rowId,
+    sessionId: result.childSession?.id,
+    parentSessionId: parentSessionId === "unknown-session" ? undefined : parentSessionId,
+    resultPath: result.resultArtifact?.path,
+    transcriptPath: result.childTrace?.path,
+  });
+  const details = result.resultArtifact?.path ?? result.childTrace?.path;
+  emitAgentEventLine(
+    input.ctx,
+    [
+      `Agent ${row?.displayName ?? result.agentName ?? "(unnamed)"} ${result.status}: ${result.reason}`,
+      `task: ${input.title}`,
+      ...(result.failureCause === undefined ? [] : [`cause: ${result.failureCause}`]),
+      ...(details === undefined ? [] : [`details: ${details}`]),
+      `errors: ${receipt.path}`,
+      ...(receipt.warning === undefined ? [] : [receipt.warning]),
+    ].join("\n"),
+    result.status === "cancelled" ? "warning" : "error",
+  );
+  return {
+    ...result,
+    errorLogPath: receipt.path,
+    ...(receipt.id === undefined ? {} : { errorId: receipt.id }),
+    ...(receipt.warning === undefined ? {} : { errorLogWarning: receipt.warning }),
+  };
 }
 
 /**
@@ -299,7 +369,7 @@ export async function executeAgentRunCommand(
       approvalTier,
       liveModel,
       modelRoleResolution,
-      maxTurns: 5,
+      childTimeoutMs: INTERACTIVE_AGENT_RUNTIME_MS,
     });
     if (hasUI) {
       panel?.render(80);

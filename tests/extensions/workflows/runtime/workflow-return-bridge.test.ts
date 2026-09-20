@@ -66,7 +66,7 @@ function bridgeHarness(
         ...(opts.thinkingLevel === undefined ? {} : { thinkingLevel: opts.thinkingLevel }),
         ...(opts.live === undefined ? {} : { live: opts.live }),
         ...(opts.maxToolCalls === undefined ? {} : { maxToolCalls: opts.maxToolCalls }),
-        ...(opts.turnTimeoutMs === undefined ? {} : { turnTimeoutMs: opts.turnTimeoutMs }),
+        ...(opts.childTimeoutMs === undefined ? {} : { childTimeoutMs: opts.childTimeoutMs }),
         ...(opts.reportsDir === undefined ? {} : { reportsDir: opts.reportsDir }),
         ...(opts.onLiveExecution === undefined ? {} : { onLiveExecution: opts.onLiveExecution }),
         createSession: async (sessionOptions) => {
@@ -146,7 +146,6 @@ test("runtime -> bridge -> SDK returns the validated tool value and preserves on
     const value = await runtime.dsl.agent("Extract an ID", {
       label: "extract",
       title: "Orders · ID",
-      returnVia: "tool",
       output: { type: "string", singleLine: true },
     });
     assert.equal(value, "orders");
@@ -184,7 +183,6 @@ test("stringified arrays and objects receive raw-container examples and require 
       );
       const result = await runtime.dsl.agent("Return the existing evidence", {
         label: `raw-${item.type}`,
-        returnVia: "tool",
         schema: item.schema,
       });
       assert.deepEqual(result, item.value);
@@ -205,7 +203,6 @@ test("repeating a stringified array still exhausts the contract instead of being
     await assert.rejects(
       runtime.dsl.agent("Return the existing evidence", {
         label: "raw-array-exhausted",
-        returnVia: "tool",
         schema: { type: "array", items: { type: "string" } },
       }),
       /Output contract exhausted after 2 attempts: root: expected array, got string/,
@@ -226,7 +223,6 @@ test("an already-correct container receives only its actual content validation e
     );
     const value = await runtime.dsl.agent("Return the existing item", {
       label: "array-item-correction",
-      returnVia: "tool",
       schema: { type: "array", items: { type: "string" } },
     });
     assert.deepEqual(value, ["Existing item"]);
@@ -241,9 +237,7 @@ test("a large discovered work unit passes runtime -> bridge -> SDK in one sessio
     const { runtime, counters } = bridgeHarness(root, "bridge-large-handoff", () => [workUnit]);
     const value = await runtime.dsl.agent("Discover migration work units with their source context.", {
       label: "discover",
-      handoffs: { minItems: 0, maxItems: 1, maxItemChars: workUnit.length },
-      maxAnswerChars: JSON.stringify([workUnit]).length,
-      returnVia: "tool",
+      handoffs: { minItems: 0, maxItems: 1 },
     });
     assert.deepEqual(value, [workUnit]);
     assert.deepEqual(counters, { sessions: 1, prompts: 1, disposals: 1 });
@@ -260,7 +254,6 @@ test("runtime -> bridge -> SDK returns the validated record after same-session s
       label: "verify",
       title: "Orders · verify",
       schema: RESULT,
-      returnVia: "tool",
     });
     assert.deepEqual(value, { decision: "complete", summary: "ok" });
     assert.equal(counters.sessions, 1);
@@ -280,7 +273,6 @@ test("mapped agents keep distinct human titles through runtime, bridge, fleet ro
           runtime.dsl.agent(`Extract ${field}`, {
             label: "extract-field",
             title: `orders.py · ${field}`,
-            returnVia: "tool",
             output: { type: "string" },
           }),
       ),

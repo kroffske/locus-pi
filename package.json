@@ -1,6 +1,6 @@
 {
   "name": "@kroffske/locus-pi",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "type": "module",
   "description": "Audited Locus Pi extension package for agentic development tools.",
   "license": "MIT",
@@ -30,11 +30,8 @@
       "./extensions/agents/index.ts",
       "./extensions/ask-user-question/index.ts",
       "./extensions/ast-structural-edit/index.ts",
-      "./extensions/loop/index.ts",
       "./extensions/model/index.ts",
-      "./extensions/plan/index.ts",
       "./extensions/status-line/index.ts",
-      "./extensions/todo-context/index.ts",
       "./extensions/workflows/index.ts"
     ],
     "skills": [
@@ -50,7 +47,8 @@
     "check:links": "tsx scripts/check-markdown-links.ts",
     "check:manifests": "tsx scripts/check-extension-manifests.ts",
     "check:pull-request": "tsx scripts/check-pull-request-policy.ts",
-    "check:push": "npm run check && npm run pack:json > /dev/null",
+    "check:push": "npm run check && npm run check:topology && npm run pack:json > /dev/null",
+    "check:topology": "node scripts/check-topology.mjs",
     "check:release": "tsx scripts/check-release-metadata.ts",
     "check:repository": "tsx scripts/check-repository.ts",
     "check:workflow-source": "tsx scripts/check-workflow-source-shape.ts",

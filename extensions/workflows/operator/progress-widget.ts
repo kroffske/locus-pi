@@ -1,20 +1,12 @@
 import type { CustomUiComponent, ExtensionContext, WidgetFactoryTui } from "../../_shared/host/pi-api.js";
 import { DEFAULT_RENDER_MIN_INTERVAL_MS, framesEqual, RenderScheduler } from "../../_shared/host/render-scheduler.js";
-import { defaultRenderProfile } from "../../_shared/host/render-profile.js";
-import { visibleWidth } from "@earendil-works/pi-tui";
-import {
-  agentLiveStore,
-  type AgentLiveRow,
-  type AgentLiveStatus,
-} from "../../_shared/agent-runtime/agent-live-store.js";
+import { coerceTheme, defaultRenderProfile, type ThemeLike } from "../../_shared/host/render-profile.js";
+import { agentLiveStore, type AgentLiveRow } from "../../_shared/agent-runtime/agent-live-store.js";
 import {
   AgentLivePanel,
   AGENT_LIVE_SPINNER_FRAME_COUNT,
-  agentGroupMemberDisplayRank,
   compactWorkflowParentRows,
-  elapsedSinceStart,
-  formatAgentIdentity,
-  formatDuration,
+  countAgentLiveStatuses,
   orderAgentLiveRows,
   selectAgentLiveRowsForParents,
   truncate,
@@ -38,31 +30,42 @@ import type { WorkflowResultPersistence } from "../runtime/workflow-result.js";
 import { FLEET_MENU_PLACEMENT } from "../../_shared/operator/widget-render.js";
 import { clearViewerExternalRows, setViewerExternalRows } from "../../_shared/operator/viewer-geometry.js";
 import type { WorkflowJournalLine } from "../runtime/workflow-runtime.js";
+import {
+  agentCollapseRank,
+  alignWorkflowRail,
+  clampRosterLines,
+  currentWorkflowPhase,
+  fitLines,
+  focusedFleetRowBudget,
+  formatCompactTokenCount,
+  formatProgressTailLine,
+  isTerminalRosterStatus,
+  normalizeWorkflowPhase,
+  ROSTER_COLLAPSE_RANK_FINISHED,
+  ROSTER_COLLAPSE_RANK_LIVE,
+  ROSTER_COLLAPSE_RANK_TERMINAL_GROUP_HEADING,
+  shortWorkflowRunId,
+  workflowProgressDonePresentation,
+  workflowProgressStatusLabel,
+  workflowProgressStatusMark,
+  workflowRailRef,
+  workflowStageFrontier,
+  type WorkflowDeclaredStage,
+} from "./progress-render.js";
 
-export interface ThemeLike {
-  fg?: (color: string, text: string) => string;
-  bg?: (color: string, text: string) => string;
-  bold?: (s: string) => string;
-}
-
-export function coerceTheme(t: unknown): ThemeLike {
-  if (typeof t !== "object" || t === null) return {};
-  const theme = t as { fg?: unknown; bg?: unknown; bold?: unknown };
-  const result: ThemeLike = {};
-  if (typeof theme.fg === "function") {
-    const fg = theme.fg as (this: unknown, color: string, text: string) => unknown;
-    result.fg = (color: string, text: string) => String(fg.call(theme, color, text));
-  }
-  if (typeof theme.bold === "function") {
-    const bold = theme.bold as (this: unknown, s: string) => unknown;
-    result.bold = (s: string) => String(bold.call(theme, s));
-  }
-  if (typeof theme.bg === "function") {
-    const bg = theme.bg as (this: unknown, color: string, text: string) => unknown;
-    result.bg = (color: string, text: string) => String(bg.call(theme, color, text));
-  }
-  return result;
-}
+/**
+ * Ownership re-exports. Three responsibilities that used to live in this file now
+ * belong to the modules that own them; this widget keeps NAMED re-exports so an
+ * existing importer of the old owner still resolves:
+ *
+ *   - `coerceTheme` / `ThemeLike` → `_shared/host/render-profile.ts` (host contract);
+ *   - the layout helpers and `WorkflowDeclaredStage` → `./progress-render.ts`;
+ *   - `renderAgentObserverText` → `agents/operator/agent-observer.ts`, which this
+ *     file may NOT import (workflows may not reach into the agents feature), so
+ *     it is not re-exported here — its one caller imports the new owner directly.
+ */
+export { coerceTheme, type ThemeLike } from "../../_shared/host/render-profile.js";
+export { type WorkflowDeclaredStage } from "./progress-render.js";
 
 export const WORKFLOW_LIVE_WIDGET_KEY = "workflows-live";
 
@@ -72,16 +75,6 @@ const WORKFLOW_RAIL_FOREGROUND = "\u001b[38;2;248;241;255m";
 const WORKFLOW_RAIL_RESET = "\u001b[0m";
 const WORKFLOW_VIEWER_RESERVATION_OWNER = "workflow-live";
 const NOOP_TUI: WidgetFactoryTui = { requestRender: () => {} };
-const OBSERVER_ROW_LIMIT = 2;
-const OBSERVER_EVENT_DIGEST_LIMIT = 5;
-const OBSERVER_EVENT_DIGEST_CHAR_LIMIT = 120;
-const OBSERVER_STATUS_ORDER: Record<AgentLiveStatus, number> = {
-  working: 0,
-  queued: 1,
-  done: 2,
-  cancelled: 3,
-  error: 4,
-};
 
 export interface WorkflowProgressOptions {
   scope?: "fleet" | "workflow";
@@ -99,12 +92,6 @@ export interface WorkflowProgressOptions {
   calm?: boolean;
   /** Internal host wiring: only an installed below-editor component may own focused fleet projection. */
   ownsFleetProjection?: boolean;
-}
-
-/** One stage a workflow declared before the run started. */
-export interface WorkflowDeclaredStage {
-  title: string;
-  detail?: string;
 }
 
 export class WorkflowProgressComponent implements CustomUiComponent {
@@ -655,134 +642,6 @@ export class WorkflowProgressComponent implements CustomUiComponent {
   }
 }
 
-function formatCompactTokenCount(tokens: number): string {
-  if (tokens < 1000) return String(Math.max(0, Math.trunc(tokens)));
-  if (tokens < 1_000_000) return `${trimCompactTokenCount((tokens / 1000).toFixed(1))}k`;
-  return `${trimCompactTokenCount((tokens / 1_000_000).toFixed(1))}M`;
-}
-
-function alignWorkflowRail(left: string, right: string, width: number): string | undefined {
-  const gap = width - visibleWidth(left) - visibleWidth(right);
-  if (gap < 2) return undefined;
-  return `${left}${" ".repeat(gap)}${right}`;
-}
-
-/**
- * Rail identity budget for a path-like `scriptRef`, in columns. A ref wider than
- * this is a filesystem location, not a name, and the rail's job is identity.
- */
-const WORKFLOW_RAIL_REF_MAX_COLS = 32;
-
-/**
- * A workflow run started by absolute path carries that whole path as its
- * `scriptRef`. Interpolated raw into either header, it spends the line on a
- * directory prefix and the run's actual state falls off the end: on the rail every
- * projection overflows, `alignWorkflowRail` returns undefined at `gap < 2`, and
- * the ladder falls through to a bare `truncate(compact, width)` that drops the
- * right-hand commands; on the fleet header the counters are simply truncated away.
- * So the ref is cut to its identifying tail before either line is composed.
- *
- * A ref with no separator is a name and is never touched — including a long one.
- * A package ref (`task/plan`) is already inside the budget and passes through, so
- * only a real path is abbreviated: `…/<parent>/<file>`, then `…/<file>`.
- */
-function workflowRailRef(scriptRef: string): string {
-  if (!/[/\\]/u.test(scriptRef)) return scriptRef;
-  if (visibleWidth(scriptRef) <= WORKFLOW_RAIL_REF_MAX_COLS) return scriptRef;
-  const segments = scriptRef.split(/[/\\]/u).filter((segment) => segment !== "");
-  const basename = segments.at(-1);
-  if (basename === undefined) return truncate(scriptRef, WORKFLOW_RAIL_REF_MAX_COLS);
-  const parent = segments.at(-2);
-  const candidates = [
-    ...(parent === undefined ? [] : [`…/${parent}/${basename}`]),
-    `…/${basename}`,
-    truncate(basename, WORKFLOW_RAIL_REF_MAX_COLS),
-  ];
-  return (
-    candidates.find((candidate) => visibleWidth(candidate) <= WORKFLOW_RAIL_REF_MAX_COLS) ?? candidates.at(-1) ?? ""
-  );
-}
-
-function trimCompactTokenCount(value: string): string {
-  return value.endsWith(".0") ? value.slice(0, -2) : value;
-}
-
-function workflowProgressStatusMark(status: WorkflowProjectedStatus | "running"): string {
-  switch (status) {
-    case "running":
-      return "●";
-    case "completed":
-      return "✓";
-    case "awaiting_operator":
-      return "◐";
-    case "cancelled":
-      return "⊘";
-    case "failed":
-      return "✗";
-    case "unknown":
-      return "■";
-    default:
-      return assertNever(status);
-  }
-}
-
-function workflowProgressStatusLabel(status: WorkflowProjectedStatus | "running"): string {
-  switch (status) {
-    case "running":
-      return "RUNNING";
-    case "completed":
-      return "OK";
-    case "awaiting_operator":
-      return "AWAITING OPERATOR";
-    case "cancelled":
-      return "CANCELLED";
-    case "failed":
-      return "FAILED";
-    case "unknown":
-      return "UNKNOWN";
-    default:
-      return assertNever(status);
-  }
-}
-
-function workflowProgressDonePresentation(status: WorkflowProjectedStatus): {
-  marker: string;
-  color: "success" | "warning" | "error";
-} {
-  switch (status) {
-    case "completed":
-      return { marker: "✓", color: "success" };
-    case "awaiting_operator":
-      return { marker: "◐", color: "warning" };
-    case "cancelled":
-      return { marker: "⊘", color: "warning" };
-    case "failed":
-      return { marker: "✗", color: "error" };
-    case "unknown":
-      return { marker: "■", color: "warning" };
-    default:
-      return assertNever(status);
-  }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled workflow progress status: ${String(value)}`);
-}
-
-function formatProgressTailLine(line: WorkflowJournalLine): string {
-  if (line.kind === "agent_end") {
-    const warnings = line.evidenceWarnings?.filter((warning) => warning.trim() !== "") ?? [];
-    const suffix = warnings.length > 0 ? ` evidenceWarnings=${warnings.join("; ")}` : "";
-    return `  agent_end: ${line.agent ?? ""} ${line.status ?? ""}${suffix}`;
-  }
-  if (line.kind === "log") {
-    if (line.source === "script") return `│ script · ${line.message ?? ""}`;
-    if (line.source === "runtime") return `│ runtime · ${line.message ?? ""}`;
-    return `│ journal · ${line.message ?? ""}`;
-  }
-  return `  ${line.kind}: ${line.message ?? ""}`;
-}
-
 export class WorkflowTextComponent implements CustomUiComponent {
   constructor(
     public tui: WidgetFactoryTui,
@@ -876,289 +735,4 @@ export function renderAgentLiveRowsText(): string {
   return new AgentLivePanel({})
     .renderRows(orderAgentLiveRows(compactWorkflowParentRows(rows)), Number.POSITIVE_INFINITY)
     .join("\n");
-}
-
-export function renderAgentObserverText(): string {
-  const rows = [...agentLiveStore.rows.values()];
-  if (rows.length === 0) return "Agent observer: no live rows";
-  const counts = countAgentLiveStatuses(rows);
-  const selectedRows = selectAgentObserverRows(rows, OBSERVER_ROW_LIMIT);
-  const lines = [
-    `Agent observer: ${rows.length} rows total; showing ${selectedRows.length} current/recent rows`,
-    `counts: queued=${counts.queued} waiting; working=${counts.working} running; done=${counts.done} completed; cancelled=${counts.cancelled} terminal/not-running; error=${counts.error} terminal/not-running`,
-    ...selectedRows.flatMap((row) => formatAgentObserverRow(row)),
-  ];
-  if (selectedRows.length < rows.length) lines.push(`more: ${rows.length - selectedRows.length} row(s) not shown`);
-  return lines.join("\n");
-}
-
-function countAgentLiveStatuses(rows: AgentLiveRow[]): Record<AgentLiveStatus, number> {
-  const counts: Record<AgentLiveStatus, number> = {
-    queued: 0,
-    working: 0,
-    done: 0,
-    cancelled: 0,
-    error: 0,
-  };
-  for (const row of rows) counts[row.status] += 1;
-  return counts;
-}
-
-function currentWorkflowPhase(journal: readonly WorkflowJournalLine[]): string | undefined {
-  for (let i = journal.length - 1; i >= 0; i -= 1) {
-    const line = journal[i];
-    if (line === undefined) continue;
-    if (line.kind !== "phase") continue;
-    const phase = normalizeWorkflowPhase(line.phase);
-    if (phase !== undefined) return phase;
-  }
-  return undefined;
-}
-
-function normalizeWorkflowPhase(phase: string | undefined): string | undefined {
-  const normalized = phase?.trim();
-  return normalized === undefined || normalized === "" ? undefined : normalized;
-}
-
-type WorkflowStageState = "declared" | "reached" | "current";
-
-interface WorkflowStageFrontierItem {
-  title: string;
-  state: WorkflowStageState;
-}
-
-function workflowStageFrontier(
-  declaredStages: readonly WorkflowDeclaredStage[],
-  journal: readonly WorkflowJournalLine[],
-): WorkflowStageFrontierItem[] {
-  const titles: string[] = [];
-  const seen = new Set<string>();
-  const append = (title: string | undefined): void => {
-    const normalized = normalizeWorkflowPhase(title);
-    if (normalized === undefined || seen.has(normalized)) return;
-    seen.add(normalized);
-    titles.push(normalized);
-  };
-  for (const stage of declaredStages) append(stage.title);
-  const reached = new Set<string>();
-  for (const line of journal) {
-    if (line.kind !== "phase") continue;
-    const phase = normalizeWorkflowPhase(line.phase);
-    if (phase === undefined) continue;
-    append(phase);
-    reached.add(phase);
-  }
-  const current = currentWorkflowPhase(journal);
-  return titles.map((title) => ({
-    title,
-    state: title === current ? "current" : reached.has(title) ? "reached" : "declared",
-  }));
-}
-
-function shortWorkflowRunId(runId: string): string {
-  const compact = runId.replace(/[^a-zA-Z0-9]/gu, "");
-  if (compact === "") return runId;
-  return compact.slice(-4);
-}
-
-function selectAgentObserverRows(rows: AgentLiveRow[], limit: number): AgentLiveRow[] {
-  return rows
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const statusDelta = OBSERVER_STATUS_ORDER[a.row.status] - OBSERVER_STATUS_ORDER[b.row.status];
-      if (statusDelta !== 0) return statusDelta;
-      const aStartedAt = a.row.startedAt;
-      const bStartedAt = b.row.startedAt;
-      if (aStartedAt !== undefined && bStartedAt !== undefined && aStartedAt !== bStartedAt)
-        return bStartedAt - aStartedAt;
-      if (aStartedAt !== undefined) return -1;
-      if (bStartedAt !== undefined) return 1;
-      return a.index - b.index;
-    })
-    .slice(0, limit)
-    .map(({ row }) => row);
-}
-
-function formatAgentObserverRow(row: AgentLiveRow): string[] {
-  const activeTools = row.status === "working" ? row.currentTools : [];
-  const agent = row.agentName === undefined ? "" : ` agent=${formatAgentIdentity(row)}`;
-  const tools = activeTools.length === 0 ? "" : ` tools=${activeTools.join(",")}`;
-  const model = row.model === undefined ? "" : ` model=${row.model}`;
-  const effort = row.thinking === undefined ? "" : ` /effort=${row.thinking}`;
-  return [
-    `- ${row.id}${agent}${model}${effort} status=${formatAgentObserverStatus(row.status)} label=${JSON.stringify(row.label)}`,
-    `  elapsed=${formatAgentObserverElapsed(row)} steps=${row.stepCount}(events)${tools}`,
-    `  events: ${formatAgentObserverDigest(row.eventLines)}`,
-  ];
-}
-
-function formatAgentObserverStatus(status: AgentLiveStatus): string {
-  switch (status) {
-    case "queued":
-      return "queued (waiting)";
-    case "working":
-      return "working (running)";
-    case "done":
-      return "done (terminal, not running)";
-    case "cancelled":
-      return "cancelled (terminal, not running)";
-    case "error":
-      return "error (terminal, not running)";
-  }
-}
-
-function formatAgentObserverElapsed(row: AgentLiveRow): string {
-  return formatDuration(row.elapsedMs ?? elapsedSinceStart(row)) || "n/a";
-}
-
-function formatAgentObserverDigest(eventLines: string[]): string {
-  if (eventLines.length === 0) return "(no events)";
-  const recent = eventLines.slice(-OBSERVER_EVENT_DIGEST_LIMIT);
-  const omitted = eventLines.length - recent.length;
-  const collapsed = collapseConsecutiveDuplicateLines(recent);
-  let text = collapsed.join(" | ");
-  if (text.length > OBSERVER_EVENT_DIGEST_CHAR_LIMIT) text = `${text.slice(0, OBSERVER_EVENT_DIGEST_CHAR_LIMIT - 1)}…`;
-  if (omitted > 0) text = `${text} (+${omitted} earlier events omitted)`;
-  return text;
-}
-
-function collapseConsecutiveDuplicateLines(lines: string[]): string[] {
-  const collapsed: string[] = [];
-  let lastLine: string | undefined;
-  let count = 0;
-  const flush = () => {
-    if (lastLine === undefined) return;
-    collapsed.push(count > 1 ? `${lastLine} x${count}` : lastLine);
-  };
-  for (const line of lines) {
-    if (lastLine === line) {
-      count += 1;
-      continue;
-    }
-    flush();
-    lastLine = line;
-    count = 1;
-  }
-  flush();
-  return collapsed;
-}
-
-/** Finished work — a done member, a closed previous run: given up first, oldest first. */
-const ROSTER_COLLAPSE_RANK_FINISHED = 4;
-/** A finished group heading: given up only after every settled leaf. */
-const ROSTER_COLLAPSE_RANK_TERMINAL_GROUP_HEADING = 1;
-/** Live work and rows nobody may collapse ahead of it. */
-const ROSTER_COLLAPSE_RANK_LIVE = 0;
-
-function isTerminalRosterStatus(status: AgentLiveStatus): boolean {
-  return status === "done" || status === "cancelled" || status === "error";
-}
-
-/**
- * How readily an agent row is given up: the REVERSE of the order
- * `orderAgentLiveRows` displays a group member in (working → failed → queued →
- * done), so the row shown first is collapsed last. A working row drops to the
- * live rank, beneath even a finished group's heading, because it is the running
- * work the whole roster exists to show. A linear run has one rank across all its
- * finished rows, so there it still collapses oldest-first.
- */
-function agentCollapseRank(status: AgentLiveStatus): number {
-  const displayRank = agentGroupMemberDisplayRank(status);
-  return displayRank === 0 ? ROSTER_COLLAPSE_RANK_LIVE : ROSTER_COLLAPSE_RANK_TERMINAL_GROUP_HEADING + displayRank;
-}
-
-/**
- * Keep the roster inside its budget by collapsing the most expendable settled
- * entry first, and the oldest one when several are equally expendable: finished
- * agents, then queued and failed group members, then the headings of groups that
- * have already finished, and only then anything live. The current agent, the
- * live group and its working members, and the pending stages are what an
- * operator steers on, so they are what survives. The collapse is announced,
- * never silent.
- *
- * Rank, not position, drives the choice: a roster whose oldest entries are
- * finished-group headings would otherwise run out of "settled" entries at the
- * top and fall through to a plain tail cut, taking the live group, its working
- * agents and the pending line off the screen.
- */
-function clampRosterLines(
-  entries: readonly {
-    settled: boolean;
-    collapseRank?: number;
-    hiddenAgents?: number;
-    hiddenGroups?: number;
-    lines: string[];
-  }[],
-  budget: number,
-  width: number,
-): string[] {
-  const all = entries.flatMap((entry) => entry.lines);
-  if (all.length <= budget) return all;
-  let hiddenAgents = 0;
-  let hiddenGroups = 0;
-  const kept = [...entries];
-  while (kept.flatMap((entry) => entry.lines).length + 1 > budget) {
-    const index = nextRosterCollapseIndex(kept);
-    if (index < 0) break;
-    const [removed] = kept.splice(index, 1);
-    hiddenAgents += removed?.hiddenAgents ?? 1;
-    hiddenGroups += removed?.hiddenGroups ?? 0;
-  }
-  const lines = kept.flatMap((entry) => entry.lines);
-  const hidden = [
-    ...(hiddenAgents > 0 ? [`+${hiddenAgents} earlier agents`] : []),
-    ...(hiddenGroups > 0 ? [`+${hiddenGroups} earlier groups`] : []),
-  ];
-  if (hidden.length === 0) return lines.slice(0, budget);
-  return [truncate(`  (${hidden.join(" · ")})`, width), ...lines].slice(0, budget);
-}
-
-/** The settled entry the roster gives up next, or -1 when nothing may be given up. */
-function nextRosterCollapseIndex(entries: readonly { settled: boolean; collapseRank?: number }[]): number {
-  let chosen = -1;
-  let chosenRank = -1;
-  entries.forEach((entry, index) => {
-    if (!entry.settled) return;
-    const rank = entry.collapseRank ?? ROSTER_COLLAPSE_RANK_FINISHED;
-    if (rank > chosenRank) {
-      chosen = index;
-      chosenRank = rank;
-    }
-  });
-  return chosen;
-}
-
-function fitLines(
-  fixedLines: string[],
-  tailLines: string[],
-  budget: number,
-  width: number,
-  protectedDone = 0,
-): string[] {
-  if (fixedLines.length + tailLines.length <= budget) return [...fixedLines, ...tailLines];
-  let dropped = 0;
-  let visibleTail = [...tailLines];
-  while (fixedLines.length + visibleTail.length + 1 > budget && visibleTail.length > 0) {
-    visibleTail = visibleTail.slice(1);
-    dropped += 1;
-  }
-  if (fixedLines.length + visibleTail.length + 1 <= budget) {
-    return [...fixedLines, truncate(`  (+${dropped} more)`, width), ...visibleTail];
-  }
-  const doneCount = Math.min(protectedDone, Math.max(0, budget - 1), fixedLines.length);
-  const doneBlock = doneCount > 0 ? fixedLines.slice(fixedLines.length - doneCount) : [];
-  const middle = fixedLines.slice(0, fixedLines.length - doneCount);
-  const middleSlots = Math.max(1, budget - 1 - doneBlock.length);
-  const visibleMiddle = middle.slice(0, middleSlots);
-  const hiddenCount = fixedLines.length + visibleTail.length - visibleMiddle.length - doneBlock.length;
-  return [...visibleMiddle, truncate(`  (+${hiddenCount} more)`, width), ...doneBlock].slice(0, budget);
-}
-
-/**
- * A settled focused row can use two lines (identity + final-answer preview),
- * while a working row can add one tool-activity line. Reserve the rail,
- * viewport count and controls before choosing how many logical rows to show.
- */
-function focusedFleetRowBudget(panelLines: number): number {
-  return Math.max(1, Math.min(8, Math.floor((panelLines - 3) / 2)));
 }

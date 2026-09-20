@@ -8,7 +8,6 @@ import {
   workflowCommandIdleBlock,
 } from "../launch/launch-guard.js";
 import { workflowNotFoundBlock, workflowRunConflictBlock, workflowWarningBlock } from "../operator/operator-ui.js";
-import { WORKFLOW_INPUT_MAX_CHARS } from "../runtime/workflow-runtime.js";
 import type { WorkflowCommandLauncher } from "../launch/workflow-command-launcher.js";
 import { persistCommandWorkflowRejection, type WorkflowTranscriptRejectionCode } from "./receipts.js";
 
@@ -57,20 +56,8 @@ export async function handleWorkflowRunCommand(
     setOperatorWidget(ctx, "workflows", workflowWarningBlock(message, workflowRunRecoveryUsage(parsed)));
     return reject("launch_policy_refused", `Workflow not started: ${message}`);
   }
-  if (parsed.input !== undefined && parsed.input.length > WORKFLOW_INPUT_MAX_CHARS) {
-    setOperatorWidget(
-      ctx,
-      "workflows",
-      workflowWarningBlock(
-        `Workflow input exceeds the ${WORKFLOW_INPUT_MAX_CHARS}-character limit.`,
-        "Retry with a shorter semantic request.",
-      ),
-    );
-    return reject(
-      "input_too_long",
-      `Workflow not started: input exceeds the ${WORKFLOW_INPUT_MAX_CHARS}-character limit.`,
-    );
-  }
+  // No input-length refusal. The input IS the operator's task; refusing to start because
+  // the task is long is a size policy over work, not a launch check.
   const idleBlock = workflowCommandIdleBlock(ctx);
   if (idleBlock !== undefined) {
     setOperatorWidget(

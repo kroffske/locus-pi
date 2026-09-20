@@ -1,26 +1,26 @@
-import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import os from "node:os";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  readWorkflowRunResult,
-  readWorkflowRunResultText,
-  readWorkflowRunScriptSnapshot,
-  readWorkflowRunSummary,
-} from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunSummary } from "../../../../extensions/workflows/runtime/workflow-journal.js";
+import { readWorkflowRunScriptSnapshot } from "../../../../extensions/workflows/runtime/workflow-run-snapshot.js";
 import {
   buildWorkflowCatalogModel,
   readWorkflowCatalogSource,
 } from "../../../../extensions/workflows/catalog/workflow-catalog.js";
 import { workflowRunRuntimeDir } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
-import { workflowResultFile } from "../../../../extensions/workflows/runtime/workflow-result.js";
+import {
+  readWorkflowRunResult,
+  readWorkflowRunResultText,
+  workflowResultFile,
+} from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { packagedWorkflowPath } from "../../../../extensions/workflows/runtime/workflow-discovery.js";
+import { createPersistedRunFixtures, digest } from "../../../fixtures/workflow-persisted-run.js";
 
-const roots: string[] = [];
+const fixtures = createPersistedRunFixtures("workflow-run-snapshot-");
+const { temporaryRoot, workflowRunDirectory, writeResult, writeSnapshotRun } = fixtures;
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  fixtures.cleanup();
 });
 
 describe("persisted workflow run source snapshot", () => {
@@ -145,26 +145,6 @@ describe("persisted workflow run source snapshot", () => {
     expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
   });
 
-  it.each([
-    { schemaVersion: 3 },
-    { schemaVersion: 2, futureField: true },
-    { schemaVersion: 2, builtinImports: "node:fs" },
-  ])("projects present malformed script identity %j as invalid metadata", (change) => {
-    const fixture = writeSnapshotRun("20260713-010102-invalid-script-identity", "invalid script identity\n");
-    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
-    result.scriptIdentity = { ...(result.scriptIdentity as Record<string, unknown>), ...change };
-    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
-      scriptIdentityInvalid: expect.any(String),
-    });
-    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
-      status: "invalid",
-      message: expect.stringContaining("script identity is malformed"),
-    });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
-  });
-
   it("rejects a present target.path that escapes its persisted source root", () => {
     const fixture = writeSnapshotRun("20260713-010102-invalid-target-path", "invalid target path\n");
     writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, {
@@ -260,92 +240,6 @@ describe("persisted workflow run source snapshot", () => {
     expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({ status: "invalid" });
     expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
     expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
-  });
-
-  it("preserves malformed workspace and semantic metadata as explicit read-side invalid markers", () => {
-    const fixture = writeSnapshotRun("20260713-010102-malformed-metadata", "malformed metadata\n");
-    writeFileSync(
-      workflowResultFile(fixture.runDir),
-      JSON.stringify({
-        runId: fixture.runId,
-        ok: true,
-        target: { kind: "name", ref: "alpha", source: "project" },
-        workspaceDirExplicit: "true",
-        semanticInputPresent: true,
-        semanticInputSha256: "not-a-sha",
-      }),
-    );
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
-      workspaceDirExplicitInvalid: expect.any(String),
-      semanticInputInvalid: expect.any(String),
-    });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
-  });
-
-  it("rejects workspace explicitness without its complete workspace mapping", () => {
-    const fixture = writeSnapshotRun("20260713-010102-explicit-without-workspace", "explicit without workspace\n");
-    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, { workspaceDirExplicit: true });
-
-    const result = readWorkflowRunResult(fixture.root, fixture.runId);
-    expect(result).toMatchObject({ workspaceDirExplicitInvalid: expect.stringContaining("requires workspaceDir") });
-    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({ status: "invalid" });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
-  });
-
-  it("rejects a persisted workspace path that is an existing regular file", () => {
-    const fixture = writeSnapshotRun("20260713-010102-workspace-file", "workspace file\n");
-    const workspaceDir = path.join(fixture.root, "tmp", "not-a-directory");
-    mkdirSync(path.dirname(workspaceDir), { recursive: true });
-    writeFileSync(workspaceDir, "not a workspace");
-    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, {
-      workspaceDir,
-      workspaceDirRelative: "tmp/not-a-directory",
-    });
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
-      workspaceDirInvalid: expect.stringContaining("must identify a directory"),
-    });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
-  });
-
-  it("keeps a removed persisted workspace readable with an explicit unavailable marker", () => {
-    const fixture = writeSnapshotRun("20260713-010102-workspace-removed-marker", "workspace removed marker\n");
-    const workspaceDir = path.join(fixture.root, "tmp", "removed-marker");
-    mkdirSync(workspaceDir, { recursive: true });
-    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, {
-      workspaceDir,
-      workspaceDirRelative: "tmp/removed-marker",
-      workspacePhysicalIdentity: "tmp/removed-marker",
-      workspacePhysicalIdentitySchemaVersion: 1,
-      result: "still readable",
-    });
-    rmSync(workspaceDir, { recursive: true, force: true });
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
-      workspaceDirUnavailable: expect.stringContaining("unavailable"),
-    });
-    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
-      status: "ready",
-      text: "still readable",
-    });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("completed");
-  });
-
-  it.each([
-    ["okInvalid", { ok: "true" }],
-    ["errorInvalid", { error: 7 }],
-    ["failureDiagnosticInvalid", { failureDiagnostic: {} }],
-    ["artifactRefsInvalid", { artifactRefs: {} }],
-    ["artifactRefsOmittedInvalid", { artifactRefsOmitted: 0 }],
-    ["resultPersistenceInvalid", { resultPersistence: { ok: true, path: "wrong-result.json" } }],
-  ] as const)("projects malformed present result field %s as invalid", (marker, metadata) => {
-    const fixture = writeSnapshotRun(`20260713-010102-malformed-${marker}`, "malformed result field\n");
-    writeResult(fixture.runDir, fixture.snapshotPath, fixture.sha256, undefined, metadata);
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({ [marker]: expect.any(String) });
-    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({ status: "invalid" });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
   });
 
   it("rejects a present workspace location with a non-string field across read surfaces", () => {
@@ -480,49 +374,6 @@ describe("persisted workflow run source snapshot", () => {
   });
 
   it.each([
-    { workspacePhysicalIdentity: "workspace" },
-    { workspacePhysicalIdentitySchemaVersion: 1 },
-    { workspacePhysicalIdentitySchemaVersion: 2 },
-    { workspacePhysicalIdentity: "../escape", workspacePhysicalIdentitySchemaVersion: 1 },
-  ])("projects malformed physical workspace metadata as invalid across result reads: %j", (metadata) => {
-    const fixture = writeSnapshotRun("20260713-010102-malformed-physical", "malformed physical metadata\n");
-    writeFileSync(
-      workflowResultFile(fixture.runDir),
-      JSON.stringify({
-        ok: true,
-        result: "ok",
-        disposition: { status: "completed" },
-        target: { kind: "name", ref: "post-code-review", source: "project" },
-        ...metadata,
-      }),
-    );
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
-      workspacePhysicalIdentityInvalid: expect.any(String),
-    });
-    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
-      status: "invalid",
-      message: expect.stringContaining("workspace physical identity"),
-    });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
-  });
-
-  it("keeps legacy envelopes without optional metadata readable", () => {
-    const root = temporaryRoot();
-    const runId = "20260713-010102-legacy-metadata";
-    const runDir = workflowRunDirectory(root, runId);
-    mkdirSync(workflowRunRuntimeDir(runDir), { recursive: true });
-    writeFileSync(workflowResultFile(runDir), JSON.stringify({ ok: true, result: "legacy" }));
-
-    expect(readWorkflowRunResult(root, runId)).toEqual({
-      ok: true,
-      result: "legacy",
-      runUnbound: "persisted result envelope has no runId",
-    });
-    expect(readWorkflowRunSummary(root, runId).status).toBe("completed");
-  });
-
-  it.each([
     { kind: "name", ref: " alpha", source: "project" },
     { kind: "name", ref: "alpha ", source: "personal" },
     { kind: "name", ref: "nested/run/extra", source: "project" },
@@ -595,15 +446,6 @@ describe("persisted workflow run source snapshot", () => {
     expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
   });
 
-  it("keeps a removed but lexically matching scriptPath source readable", () => {
-    const fixture = writeSnapshotRun("20260713-010102-removed-source", "removed source\n");
-    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
-    result.target = { kind: "scriptPath", ref: "alpha.workflow.mjs", source: "project" };
-    (result.scriptIdentity as Record<string, unknown>).sourcePath = path.join(fixture.root, "alpha.workflow.mjs");
-    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).not.toHaveProperty("scriptIdentityInvalid");
-  });
-
   it("keeps removed canonical Project workflow history readable", () => {
     const fixture = writeSnapshotRun("20260713-010102-removed-project-name", "removed project name\n");
     rmSync(fixture.sourcePath);
@@ -626,26 +468,6 @@ describe("persisted workflow run source snapshot", () => {
       scriptIdentityInvalid: expect.stringContaining("persisted workflow source root"),
     });
     expect(readWorkflowRunScriptSnapshot(fixture.root, fixture.runId)).toMatchObject({ kind: "invalid" });
-  });
-
-  it.each([
-    { ok: true, disposition: { status: "failed" } },
-    { ok: true, disposition: { status: "future" } },
-    { ok: "true", disposition: { status: "completed" } },
-  ])("projects malformed persisted disposition %j as shared invalidity", (metadata) => {
-    const fixture = writeSnapshotRun("20260713-010102-invalid-disposition", "invalid disposition\n");
-    const result = JSON.parse(readFileSync(workflowResultFile(fixture.runDir), "utf8")) as Record<string, unknown>;
-    Object.assign(result, metadata);
-    writeFileSync(workflowResultFile(fixture.runDir), JSON.stringify(result));
-
-    expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
-      dispositionInvalid: expect.any(String),
-    });
-    expect(readWorkflowRunResultText(fixture.root, fixture.runId)).toMatchObject({
-      status: "invalid",
-      message: expect.stringContaining("disposition is malformed or inconsistent"),
-    });
-    expect(readWorkflowRunSummary(fixture.root, fixture.runId).status).toBe("unknown");
   });
 
   it("reports a missing expected snapshot", () => {
@@ -735,67 +557,6 @@ describe("persisted workflow run source snapshot", () => {
   });
 });
 
-function writeSnapshotRun(runId: string, source: string) {
-  const root = temporaryRoot();
-  const runDir = workflowRunDirectory(root, runId);
-  const sourcePath = path.join(root, ".locus-pi", "workflows", "alpha.workflow.mjs");
-  mkdirSync(path.dirname(sourcePath), { recursive: true });
-  writeFileSync(sourcePath, source);
-  const sha256 = digest(source);
-  const snapshotPath = path.join(workflowRunRuntimeDir(runDir), `script-${sha256}.workflow.mjs`);
-  mkdirSync(workflowRunRuntimeDir(runDir), { recursive: true });
-  writeFileSync(snapshotPath, source);
-  writeResult(runDir, snapshotPath, sha256);
-  return { root, runId, runDir, source, sha256, snapshotPath, sourcePath };
-}
-
-function writeResult(
-  runDir: string,
-  snapshotPath: string,
-  sha256: string,
-  target: {
-    kind: "name" | "scriptPath";
-    ref: string;
-    source: "project" | "personal" | "package";
-    path?: string;
-  } = {
-    kind: "name",
-    ref: "alpha",
-    source: "project",
-  },
-  metadata: Record<string, unknown> = {},
-): void {
-  const projectRoot = path.dirname(path.dirname(path.dirname(runDir)));
-  const sourcePath =
-    target.path ??
-    (target.kind === "scriptPath"
-      ? path.resolve(projectRoot, target.ref)
-      : path.join(projectRoot, ".locus-pi", "workflows", `${target.ref}.workflow.mjs`));
-  writeFileSync(
-    workflowResultFile(runDir),
-    JSON.stringify({
-      runId: path.basename(runDir),
-      ok: true,
-      target,
-      scriptIdentity: {
-        schemaVersion: 2,
-        identityPolicy: "static-node-only-v1",
-        sourcePath,
-        snapshotPath,
-        scriptSha256: sha256,
-        identityCoverage: "self-contained-static",
-        executionSource: "snapshot",
-        nodeVersion: process.version,
-        platform: process.platform,
-        arch: process.arch,
-        builtinImports: [],
-        unboundDependencies: [],
-      },
-      ...metadata,
-    }),
-  );
-}
-
 function expectMalformedWorkspaceReadSurfaces(fixture: { root: string; runId: string }): void {
   expect(readWorkflowRunResult(fixture.root, fixture.runId)).toMatchObject({
     workspaceDirInvalid: expect.any(String),
@@ -812,18 +573,4 @@ function expectMalformedWorkspaceReadSurfaces(fixture: { root: string; runId: st
     kind: "invalid",
     message: expect.stringContaining("workspace location is malformed"),
   });
-}
-
-function workflowRunDirectory(root: string, runId: string): string {
-  return path.join(root, ".locus-pi", "runs", runId);
-}
-
-function temporaryRoot(): string {
-  const root = mkdtempSync(path.join(os.tmpdir(), "workflow-run-snapshot-"));
-  roots.push(root);
-  return root;
-}
-
-function digest(source: string): string {
-  return createHash("sha256").update(Buffer.from(source, "utf8")).digest("hex");
 }

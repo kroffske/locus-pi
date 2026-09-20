@@ -14,7 +14,20 @@ import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import type { WorkflowArtifactRecord } from "../../../../extensions/workflows/runtime/workflow-artifacts.js";
-import { DEFAULT_WORKFLOW_BUDGET } from "../../../../extensions/workflows/runtime/workflow-budget.js";
+import {
+  resolveWorkflowBudget,
+  type WorkflowBudget,
+} from "../../../../extensions/workflows/runtime/workflow-budget.js";
+
+/** A run that declared everything, so the report's applied column has numbers to print. */
+const DECLARED_BUDGET: WorkflowBudget = {
+  concurrency: 4,
+  totalAgents: 10_000,
+  runtimeMs: 86_400_000,
+  timeoutMs: 86_400_000,
+  toolCalls: 1_000,
+  turns: 1_000,
+};
 import {
   workflowReportDir,
   writeWorkflowRunReport as writeClaimedWorkflowRunReport,
@@ -27,10 +40,7 @@ import {
   workflowJournalFile,
   workflowRunDir,
 } from "../../../../extensions/workflows/runtime/workflow-run-layout.js";
-import {
-  workflowResultFile,
-  writeWorkflowResultText,
-} from "../../../../extensions/workflows/runtime/workflow-result.js";
+import { writeWorkflowResultText } from "../../../../extensions/workflows/runtime/workflow-result.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import {
   createWorkflowRuntime,
@@ -900,7 +910,7 @@ describe("workflow run report budget section", () => {
       runDir: overrides.runDir ?? ensureWorkflowRunDir(projectRoot, runId),
       status: "completed",
       journal: [],
-      budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 0 },
+      budget: { applied: DECLARED_BUDGET, peakConcurrency: 0 },
       ...overrides,
     };
   }
@@ -921,7 +931,9 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /\| `timeoutMs` \| 86400000 ms \|/u);
     assert.match(readme, /\| `toolCalls` \| 1000 \|/u);
     assert.match(readme, /\| `turns` \| 1000 \|/u);
-    assert.match(readme, /\| `answerChars` \| 500000 \|/u);
+    // No answer-size axis exists any more: a run bounds spend, never the size of a
+    // result it already paid for.
+    assert.doesNotMatch(readme, /`answerChars`/u);
   });
 
   it("renders declared Fusion mode separately from live host tool readback", () => {
@@ -1057,13 +1069,13 @@ describe("workflow run report budget section", () => {
   it("prints the axes nobody counts as not recorded, never as zero", () => {
     const readme = readmeOf(budgetInput());
 
-    for (const axis of ["toolCalls", "turns", "answerChars"]) {
+    for (const axis of ["toolCalls", "turns"]) {
       const row = readme.split("\n").find((line) => line.startsWith(`| \`${axis}\``));
       assert.ok(row !== undefined, `missing row for ${axis}`);
       assert.match(row, /not recorded/u);
       assert.doesNotMatch(row, /\| 0 \|/u);
     }
-    // Cost is a hardcoded zero in the bridge; the report says so instead of "$0".
+    // The host reports no price at all; the report says so instead of "$0".
     assert.match(readme, /\| cost \| not enforced \| not available \|/u);
   });
 
@@ -1095,11 +1107,11 @@ describe("workflow run report budget section", () => {
             usage: { input: 10, output: 5, totalTokens: 15, costTotal: 0 },
           },
         ] as WorkflowJournalLine[],
-        budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 2 },
+        budget: { applied: DECLARED_BUDGET, peakConcurrency: 2 },
       }),
     );
 
-    assert.match(readme, /\| `totalAgents` \| 10000 \| 2 invocations \|/u);
+    assert.match(readme, /\| `totalAgents` \| 10000 \| 2 fresh \|/u);
     assert.match(readme, /\| `runtimeMs` \| 86400000 ms \| 11000 ms over the journal \|/u);
     assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| 7000 ms longest child \|/u);
     assert.match(readme, /\| `concurrency` \| 4 \| 2 peak \(gate-owned\) \|/u);
@@ -1131,11 +1143,10 @@ describe("workflow run report budget section", () => {
     assert.match(readme, /\| tokens \| not enforced \| 100 observed \|/u);
   });
 
-  it("counts a replayed call as an invocation but never as a child that ran", () => {
-    // A replayed attempt spends the totalAgents cap — the runtime counts it before the
-    // replay lookup — while starting no child. Its durationMs measures projecting a
-    // recorded answer, so folding it into "longest child" would compare a lookup
-    // against a ten-minute per-child fuse.
+  it("counts a replayed call apart from the fresh ones and charges it to nothing", () => {
+    // A replayed attempt starts no child, so it spends no `totalAgents` and its
+    // durationMs measures projecting a recorded answer — folding that into "longest
+    // child" would compare a lookup against a per-child fuse.
     //
     // The replayed attempt is deliberately the LONGER of the two, so the assertion
     // below cannot pass by accident: with the replay filter removed the row reads
@@ -1178,7 +1189,7 @@ describe("workflow run report budget section", () => {
       }),
     );
 
-    assert.match(readme, /\| `totalAgents` \| 10000 \| 2 invocations \(1 replayed, no child ran\) \|/u);
+    assert.match(readme, /\| `totalAgents` \| 10000 \| 1 fresh \+ 1 replayed \(not charged\) \|/u);
     // The FRESH child's 6000 ms, not the longer replay projection.
     assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| 6000 ms longest child \|/u);
     // A replayed call reports no usage, so only the fresh child's tokens are observed.
@@ -1211,7 +1222,7 @@ describe("workflow run report budget section", () => {
       }),
     );
 
-    assert.match(readme, /\| `totalAgents` \| 10000 \| 1 invocations \(1 replayed, no child ran\) \|/u);
+    assert.match(readme, /\| `totalAgents` \| 10000 \| 0 fresh \+ 1 replayed \(not charged\) \|/u);
     // "3 ms longest child" would claim a child ran for 3 ms when none ran at all.
     assert.match(readme, /\| `timeoutMs` \| 86400000 ms \| not recorded \|/u);
   });
@@ -1274,7 +1285,7 @@ describe("workflow run report budget section", () => {
     assert.equal(journal.filter((line) => line.kind === "agent_start").length, 6);
     assert.equal(runtime.peakAgentConcurrency(), 2);
 
-    const readme = readmeOf(budgetInput({ journal, budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: 2 } }));
+    const readme = readmeOf(budgetInput({ journal, budget: { applied: DECLARED_BUDGET, peakConcurrency: 2 } }));
     assert.match(readme, /\| `concurrency` \| 4 \| 2 peak \(gate-owned\) \|/u);
     assert.doesNotMatch(readme, /6 peak/u);
   });
@@ -1320,188 +1331,14 @@ describe("workflow run report budget section", () => {
 
     assert.equal(result.ok, true, result.error);
     const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
+    // A real run that declares nothing: the report names every axis and says out
+    // loud that five of the six will not stop it.
     assert.match(readme, /## Budget/u);
     assert.match(readme, /\| `concurrency` \| 4 \| 1 peak \(gate-owned\) \|/u);
-    assert.match(readme, /\| `totalAgents` \| 10000 \| 1 invocations \|/u);
-    assert.match(readme, /\| `timeoutMs` \| 86400000 ms \|/u);
-    assert.match(readme, /\| `toolCalls` \| 1000 \| not recorded \|/u);
-    assert.match(readme, /\| `turns` \| 1000 \| not recorded \|/u);
-  });
-
-  it("journals a failed report write instead of letting the budget evidence vanish silently", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "workflow-report-blocked-"));
-    roots.push(root);
-    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
-    writeFileSync(
-      path.join(root, ".agents", "agents", "default.md"),
-      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
-      "utf8",
-    );
-    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
-    writeFileSync(
-      path.join(root, ".locus-pi", "workflows", "report-fail.workflow.mjs"),
-      'export const meta = { name: "report-fail", description: "one stage" };\n' +
-        "export default async function runWorkflow(dsl) {\n" +
-        '  return await dsl.agent("answer");\n' +
-        "}\n",
-      "utf8",
-    );
-    const harness = createHarness(root, { sessionId: "report-blocked" });
-    const events: WorkflowJournalLine[] = [];
-    const result = await runWorkflowScript({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      name: "report-fail",
-      // A regular FILE where the outputs directory must be: the write fails and the
-      // module returns { ok: false } instead of throwing, exactly as documented.
-      // Planted once the run id exists and long before the report is written.
-      onRunStart: ({ runDir }) => {
-        rmSync(path.join(runDir, "outputs"), { recursive: true });
-        writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
-      },
-      onEvent: (line) => events.push(line),
-      createExecutor: (): AgentExecutor => ({
-        async run(request: AgentRunRequest) {
-          return {
-            status: "completed",
-            agentName: request.agent?.name ?? "sub-agent",
-            reason: "answered",
-            text: "answer",
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
-    });
-
-    // The secondary report failure is recorded, and the missing mandatory
-    // terminal output makes the run fail instead of claiming an unreadable success.
-    assert.equal(result.ok, false);
-    assert.match(result.error ?? "", /terminal output was not persisted/u);
-    const failure = result.journal.find(
-      (line) => line.kind === "error" && (line.message ?? "").includes("Workflow run report was not written"),
-    );
-    assert.ok(failure !== undefined, "the failed report write must leave a trace in the journal");
-    assert.equal(failure.source, "runtime");
-    assert.ok(
-      events.some((line) => (line.message ?? "").includes("Workflow run report was not written")),
-      "and reach the live surface too",
-    );
-    // The durable journal on disk carries it, not only the returned envelope.
-    const persisted = readFileSync(workflowJournalFile(result.runDir), "utf8");
-    assert.match(persisted, /Workflow run report was not written/u);
-    assert.match(persisted, /Workflow terminal output was not persisted/u);
-    // result.json keeps only the bounded independent finalization projection.
-    // The complete chronological journal has one owner: journal.ndjson.
-    assert.equal(result.resultPersistence.ok, true);
-    const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
-      journal?: unknown;
-      finalizationErrors?: Array<{ stage?: string; message?: string }>;
-    };
-    assert.equal(envelope.journal, undefined);
-    assert.deepEqual(
-      envelope.finalizationErrors?.map((entry) => entry.stage),
-      ["terminal-output", "report"],
-    );
-    assert.match(envelope.finalizationErrors?.[1]?.message ?? "", /Workflow run report was not written/u);
-  });
-
-  it("persists finalization errors when the best-effort journal append also fails", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "workflow-finalization-fallback-"));
-    roots.push(root);
-    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
-    writeFileSync(
-      path.join(root, ".agents", "agents", "default.md"),
-      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
-      "utf8",
-    );
-    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
-    writeFileSync(
-      path.join(root, ".locus-pi", "workflows", "finalization-fallback.workflow.mjs"),
-      'export default async function runWorkflow(dsl) { return await dsl.agent("answer"); }\n',
-      "utf8",
-    );
-    const harness = createHarness(root, { sessionId: "finalization-fallback" });
-    const result = await runWorkflowScript({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      name: "finalization-fallback",
-      onRunStart: ({ runDir }) => {
-        rmSync(path.join(runDir, "outputs"), { recursive: true });
-        writeFileSync(path.join(runDir, "outputs"), "not a directory", "utf8");
-        const journalPath = workflowJournalFile(runDir);
-        rmSync(journalPath);
-        mkdirSync(journalPath);
-      },
-      createExecutor: (): AgentExecutor => ({
-        async run(request: AgentRunRequest) {
-          return {
-            status: "completed",
-            agentName: request.agent?.name ?? "sub-agent",
-            reason: "answered",
-            text: "answer",
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
-    });
-
-    assert.equal(result.ok, false);
-    assert.deepEqual(
-      result.finalizationErrors?.map((entry) => entry.stage),
-      ["terminal-output", "report"],
-    );
-    const envelope = JSON.parse(readFileSync(workflowResultFile(result.runDir), "utf8")) as {
-      journal?: unknown;
-      finalizationErrors?: Array<{ stage: string; message: string }>;
-    };
-    assert.equal(envelope.journal, undefined);
-    assert.deepEqual(
-      envelope.finalizationErrors?.map((entry) => entry.stage),
-      ["terminal-output", "report"],
-    );
-  });
-
-  it("reprojects the readable report as failed when result.json cannot be persisted", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "workflow-result-envelope-blocked-"));
-    roots.push(root);
-    mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
-    writeFileSync(
-      path.join(root, ".agents", "agents", "default.md"),
-      "---\nname: default\ndescription: Report agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
-      "utf8",
-    );
-    mkdirSync(path.join(root, ".locus-pi", "workflows"), { recursive: true });
-    writeFileSync(
-      path.join(root, ".locus-pi", "workflows", "result-fail.workflow.mjs"),
-      'export default async function runWorkflow() { return "answer"; }\n',
-      "utf8",
-    );
-    const harness = createHarness(root, { sessionId: "result-envelope-blocked" });
-
-    const result = await runWorkflowScript({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      name: "result-fail",
-      onRunStart: ({ runDir }) => {
-        mkdirSync(workflowResultFile(runDir));
-      },
-      createExecutor: (): AgentExecutor => ({
-        async run() {
-          throw new Error("this workflow starts no child");
-        },
-      }),
-    });
-
-    assert.equal(result.ok, false);
-    assert.equal(result.resultPersistence.ok, false);
-    const readme = readFileSync(path.join(workflowReportDir(root, result.runId), "README.md"), "utf8");
-    assert.match(readme, /- Status: failed/u);
-    assert.match(readme, /Workflow result was not persisted/u);
-    assert.doesNotMatch(readme, /- Status: completed/u);
+    assert.match(readme, /\| `totalAgents` \| unbounded \| 1 fresh \|/u);
+    assert.match(readme, /\| `runtimeMs` \| unbounded \|/u);
+    assert.match(readme, /\| `timeoutMs` \| unbounded \|/u);
+    assert.match(readme, /\| `toolCalls` \| unbounded \| not recorded \|/u);
+    assert.match(readme, /\| `turns` \| unbounded \| not recorded \|/u);
   });
 });

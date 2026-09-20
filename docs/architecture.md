@@ -18,7 +18,7 @@ tags: [architecture, repository]
 Public behavior is defined by the intersection of:
 
 1. `package.json#pi.extensions` — the extension entrypoints Pi loads;
-2. `extensions/<name>/manifest.json` — declared tier, tools, commands, hooks, permissions, risk, tests, and manual. A `beta` tier means the entrypoint loads like any other and registers nothing until the project enables it, so the loaded set and the registered set are not the same list;
+2. `extensions/<name>/manifest.json` — declared tools, commands, hooks, permissions, risk, tests, and manual;
 3. extension source and focused tests;
 4. the shipped workflow registry under `extensions/workflows/examples/`;
 5. the npm allowlist in `package.json#files`.
@@ -28,8 +28,8 @@ A file merely existing in the repository does not make it a default extension, s
 ## Repository layout
 
 ```text
-extensions/              default extension implementations
-extensions/_shared/      shared host, operator, runtime, model, project, and agent-runtime layers
+extensions/              extension implementations
+extensions/_shared/      shared host, operator, runtime, model, and agent-runtime layers
 extensions/workflows/    workflow runtime, authoring guide, and packaged examples
 skills/                  bundled Pi skills
 scripts/                 validation and public-repository materialization
@@ -43,12 +43,23 @@ Extension-specific documentation is co-located in `extensions/<name>/README.md`.
 
 Shared infrastructure under `extensions/_shared/` does not create a feature dependency. A direct feature dependency exists only when one `extensions/<feature>/` directory imports another feature directory.
 
-The current direct feature graph has two edges:
+The current direct feature graph has one edge:
 
-- `agents → workflows`
-- `loop → workflows` through the read-only persisted-run facade
+- `agents → workflows`, partly through the read-only persisted-run facade
 
 `scripts/check-extension-layers.ts` enforces the shared-layer ownership and import direction rules. It also enforces that the workflow DSL core (`extensions/workflows/runtime/workflow-runtime.ts`) reaches operator handoff and result semantics only through the fs-free contract modules `workflow-handoff-contract.ts` and `workflow-outcome.ts`, never through their durable counterparts, so no `node:fs` dependency enters the core's value-import closure.
+
+## Workflow runtime owners
+
+`extensions/workflows/runtime/` is organised by what a module owns, with imports pointing one way: the composition roots import the owners, never the reverse.
+
+- `workflow-runtime.ts` assembles the DSL; `workflow-runner.ts` is the host entry that claims a run, admits it, executes it and finalizes it. Both re-export the names callers always imported from them, so a reader can start at either root.
+- Execution owners behind the DSL: `workflow-execution-state.ts` (the one root leaf gate, counters and deadline shared by a root run and its saved children), `workflow-groups.ts` (group barriers and branch context), `workflow-agent-contract.ts` / `workflow-agent-call.ts` / `workflow-agent-attempt.ts` (the agent request contract, the logical call with its replay identity and transport retries, and one physical attempt), `workflow-agent-output.ts` (shaped results accepted only from a confirmed tool receipt) and `workflow-fusion.ts` (Fusion composition). All stay in the fs-free closure the layer checker proves for the core.
+- Host owners behind the runner: `workflow-run-admission.ts` (target → source snapshot → workspace identity → launch binding, in that order, after the run claim and first journal line), `workflow-run-resume.ts` (the resume authority the tool and operator handoff share), `workflow-saved-child.ts` (one saved-child level, driven through an injected launcher so it never imports the runner) and `workflow-run-finalization.ts` (terminal precedence: abort, evidence, handoff, terminal text, lease, report, `result.json`).
+- Persistence owners: `workflow-journal-format.ts` (the event contract and strict codec), `workflow-journal.ts` (claim, append, listing, queries), `workflow-result.ts` (result write and tolerant readback), `workflow-run-snapshot.ts` (whether the executed bytes are still provable), `workflow-artifact-format.ts` / `workflow-artifacts.ts` (format vs the mutable store), `workflow-workspace.ts` / `workflow-workspace-state.ts` (workspace identity vs the fenced lease and checkpoints; `workflow-output.ts` is the compatibility surface over both) and `workflow-run-layout.ts` (storage roots and confinement).
+- Everything outside `extensions/workflows/` reads persisted runs through `extensions/workflows/run/run-read.ts`; the layer checker lists the persisted-run owners as feature-internal so that door stays the only one.
+
+File size is a growth ratchet rather than a ceiling: `npm run check:topology` (part of `check:push`) fails on growth since the base ref, and `.locus-topology.toml` records the few accepted exceptions with an owner and a revisit trigger.
 
 ## Runtime state
 
@@ -56,11 +67,10 @@ Local runtime state is intentionally outside the public source surface and ignor
 
 - `.locus-pi/runs/<runId>/` — workflow outputs and machine evidence;
 - `.locus-pi/workspaces/<generated-run-name>/` — workflow-authored working files, including task drafts, generated workflows, review files, and implementation history;
-- `.locus-pi/plans/<plan-slug>.md` — checkout-local documents authored through `/plan`; legacy home files are migration input only;
+- `.locus-pi/plans/<run-name>/` — legacy workflow workspaces; an existing one stays bound in place, and new named workspaces go to `.locus-pi/workspaces/`;
 - `.locus-pi/workflow-state/v1/<hash>/` — active workspace leases and saved-child checkpoints; the directory may be empty after a lease is released;
 - `.locus-pi/fusion/config.json` — project-local Fusion configuration;
-- `.locus-pi/config.json` — project-local settings the package reads at load time; currently only the `beta` opt-in list described in [getting started](getting-started.md#beta-extensions). It is the one file here a project may want to commit;
-- `.locus/runtime/` — session, artifact, and diagnostic state used by Locus extensions; the beta `plan` extension owns its `goal/`, `mode/` and `prompts/` trees and the beta `loop` extension its `goal/` and `loop/` trees, so none of those four appears until the owning extension is enabled;
+- `.locus/runtime/` — session, artifact, and diagnostic state used by Locus extensions;
 - `.tasks/` — optional local task state and explicit bridges;
 - an explicit project-relative output directory — an optional operator override for workflow-owned working files.
 

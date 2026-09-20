@@ -1,7 +1,7 @@
 # Author-facing source boundary
 
 Read before Build. For exact grammar diagnostics read the runtime-owned
-[source contract](../../../extensions/workflows/references/source-shape.md).
+[source contract](../../../docs/workflows/source-shape.md).
 
 ## Target source shape
 
@@ -16,7 +16,9 @@ known failure. Reports and narrative handoffs use ordinary `agent()` text.
 Reserve `choice` for routing and `handoffs` for discovered work
 units, sequential or independent. Do not wrap a report in a singleton list or guess a response-length cap.
 An author-selected bound must come from an explicit user requirement, actual
-consumer contract or measured failure. Runtime safety budgets remain in force.
+consumer contract or measured failure. The runtime adds no size policy of its
+own. Use the canonical [budget policy](../../../docs/workflows/budgets.md#run-budget)
+for approved launch defaults; other undeclared axes stay unbounded.
 
 ```js
 export const meta = {
@@ -56,7 +58,14 @@ The workflow orchestrates but does not interpret or format agent results:
 Every child receives the full tool surface through `tools: ["*"]`. Standard
 source contains no capability fields or tool lists. Roles choose only
 prompt/model identity. `write`, `edit`, `bash`, and every other available tool
-work by default. If repository evidence is needed, the child reads it because
+work by default. This is the Pi host contract; an external model adapter must
+also expose its own full tool surface. Claude Code repository-agent profiles use
+`--tools default --permission-mode bypassPermissions`; `*` is not Claude Code's
+all-tools selector, and `--allowedTools "*"` does not grant all permissions.
+Explicit tool-free profiles remain an intentional exception. A reviewer's
+read-only responsibility concerns product source: it may use shell/git, write
+reports, and repair authorized technical prerequisites. Host restrictions and
+external-action authorization still apply. If repository evidence is needed, the child reads it because
 its prompt asks for that work. Workflow JavaScript does not obtain paths or load
 file contents on the child's behalf.
 
@@ -82,7 +91,7 @@ and usually preferable durable root: `.tasks/<task>/artifacts/<stage>/` keeps
 stage reports beside the task text a human already reads, and later stages read
 earlier ones from there instead of receiving them again as prompt text.
 `--output-dir .tasks/<task>/artifacts` is accepted by the operator surface (see
-[REFERENCE](../../../extensions/workflows/REFERENCE.md)); the runtime places its own lock and run marker inside
+[REFERENCE](../../../docs/workflows/index.md)); the runtime places its own lock and run marker inside
 whatever root is selected. Nothing changes for disposable output: environments,
 dependency caches, test basetemp and staging stay in ordinary OS or tool
 temporary and cache locations, never beside evidence.

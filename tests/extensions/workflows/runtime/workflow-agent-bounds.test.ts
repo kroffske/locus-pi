@@ -3,11 +3,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentExecutor } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
-import {
-  DEFAULT_WORKFLOW_BUDGET,
-  WORKFLOW_MAX_TIMEOUT_MS,
-  workflowSdkTurnTimeoutMs,
-} from "../../../../extensions/workflows/runtime/workflow-budget.js";
 import { createWorkflowAgentRunner } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
 import {
   createWorkflowRuntime,
@@ -17,7 +12,7 @@ import {
 import { createHarness } from "../../../test-harness.js";
 
 /**
- * `timeoutMs` and `maxAnswerChars` — the two per-call bounds the runtime owns so
+ * `timeoutMs` — the per-call bound the runtime owns so
  * a workflow script does not re-implement them. Both fail closed: neither ever
  * resolves to a partial or oversized answer.
  */
@@ -80,45 +75,58 @@ describe("per-call agent bounds", () => {
     expect(calls).toBe(0);
   });
 
-  it("rejects a timeoutMs above the largest real Node timer before a child starts", async () => {
-    let calls = 0;
-    const { dsl } = createWorkflowRuntime({
-      runId: "agent-timeout-node-limit",
-      agentRunner: async () => {
-        calls += 1;
-        throw new Error("must not run");
-      },
-    });
+  it("accepts a timeoutMs longer than one Node timer instead of refusing it", async () => {
+    // 48 hours. The old policy ceiling rejected this because a single `setTimeout`
+    // clamps above 2^31-1 ms; the fuse is a chain of representable waits now, so a
+    // deliberately long deadline is honoured rather than turned into an authoring error.
+    const { dsl, requests } = runtimeWith("agent-timeout-node-limit", "fine");
 
-    await expect(dsl.agent("work", { timeoutMs: WORKFLOW_MAX_TIMEOUT_MS + 1 })).rejects.toThrow(
-      /cannot be represented by Node timers with the SDK backstop/u,
-    );
-    expect(calls).toBe(0);
+    await expect(dsl.agent("work", { timeoutMs: 48 * 60 * 60 * 1000 })).resolves.toBe("fine");
+    expect(requests[0]?.timeoutMs).toBe(48 * 60 * 60 * 1000);
   });
 
-  it("fails an oversized answer instead of handing it to the next stage", async () => {
-    const { dsl, getJournal } = runtimeWith("agent-answer-too-long", "0123456789");
+  it("hands a long answer to the caller instead of refusing it", async () => {
+    // The removed axis. A completed child's answer is never refused for its length:
+    // that judged a result already paid for, and it truncated real discovery queues.
+    const long = "0123456789".repeat(200_000);
+    const { dsl, getJournal } = runtimeWith("agent-answer-long", long);
 
-    await expect(dsl.agent("summarize", { maxAnswerChars: 4 })).rejects.toThrow(
-      /Agent answer is 10 characters; the call allows 4\. Budget axis: answerChars\./u,
-    );
+    await expect(dsl.agent("summarize")).resolves.toBe(long);
     const ends = getJournal().filter((line) => line.kind === "agent_end");
     expect(ends).toHaveLength(1);
-    expect(ends[0]?.status).toBe("failed");
+    expect(ends[0]?.status).toBe("completed");
   });
 
-  it("accepts an answer exactly at the bound", async () => {
-    const { dsl } = runtimeWith("agent-answer-at-bound", "0123");
+  it("refuses maxAnswerChars by name, with its replacement, instead of ignoring it", async () => {
+    const { dsl, requests } = runtimeWith("agent-answer-removed-option", "fine");
 
-    await expect(dsl.agent("summarize", { maxAnswerChars: 4 })).resolves.toBe("0123");
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("summarize", { maxAnswerChars: 4 }),
+    ).rejects.toThrow(/agent maxAnswerChars was removed.*output\.maxLength/su);
+    // Refused at declaration time: an author who believed a bound applied must hear so
+    // before a child is spent, never afterwards and never silently.
+    expect(requests).toHaveLength(0);
   });
 
-  it.each([0, -1, 1.5])("rejects an invalid maxAnswerChars bound (%s)", async (maxAnswerChars) => {
-    const { dsl } = runtimeWith("agent-answer-invalid-bound", "fine");
+  it("refuses schemaMaxLength by name at the DSL boundary instead of dropping it", async () => {
+    // It used to be dropped while the return contract was assembled: the call RAN, the
+    // answer came back unbounded, and the author kept believing a ceiling applied. A
+    // removed option has to be heard, and the only place that can happen is the public
+    // boundary the author wrote it on.
+    const { dsl, requests } = runtimeWith("agent-schema-max-length-removed", "fine");
 
-    await expect(dsl.agent("summarize", { maxAnswerChars })).rejects.toThrow(
-      "agent maxAnswerChars must be a positive safe integer",
-    );
+    await expect(
+      (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("summarize", {
+        output: { type: "string" },
+        schemaMaxLength: 1,
+      }),
+    ).rejects.toThrow(/agent schemaMaxLength was removed.*maxLength\/maxItems inside the schema/su);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("still refuses an empty answer: that is a decomposition signal, not a size", async () => {
+    const { dsl } = runtimeWith("agent-answer-empty", "   ");
+    await expect(dsl.agent("summarize")).rejects.toThrow(/Agent result text is empty/u);
   });
 
   it("aborts the child itself when the fuse expires, instead of abandoning it", async () => {
@@ -166,31 +174,37 @@ describe("per-call agent bounds", () => {
     expect(childSawAbort).toBe(true);
     const ends = getJournal().filter((line) => line.kind === "agent_end");
     expect(ends[0]?.status).toBe("failed");
+    expect(ends[0]?.failureCause).toBe("call-timeout");
+    // And the run says in the operator's words WHY it stopped. A deadline the author
+    // set is not a statement that the child answered badly, and the same wording is
+    // used for every axis so one grep finds every budget stop in a run.
+    const stop = getJournal().find((line) => line.message?.includes("stopped by budget"));
+    expect(stop).toMatchObject({ kind: "log", source: "runtime" });
+    expect(stop?.message).toContain("stopped by budget timeoutMs");
+    expect(stop?.message).toContain("Data received so far is kept");
   });
 
-  it("keeps the bound out of the recorded request so it stays a live gate", async () => {
-    // Two calls that differ only by `maxAnswerChars` are the same request: the
-    // bound is enforced on whatever answer arrives, fresh or replayed, so it must
-    // not fork the replay key the way a child-visible option does.
+  it("keeps two identical prompts on one recorded request", async () => {
     const first = runtimeWith("agent-answer-key-a", "0123456789");
-    await first.dsl.agent("summarize", { maxAnswerChars: 100 });
+    await first.dsl.agent("summarize");
     const second = runtimeWith("agent-answer-key-b", "0123456789");
-    await expect(second.dsl.agent("summarize", { maxAnswerChars: 4 })).rejects.toThrow(/Agent answer is 10/u);
+    await second.dsl.agent("summarize");
 
     expect(second.requests[0]).toEqual(first.requests[0]);
   });
 });
 
 /**
- * T-131 W3/W5 — the per-child axes the package budget contract now defaults, and
- * the single deadline that replaced two racing ones.
+ * The per-child axes a RUN may declare, and the single deadline that replaced two
+ * racing ones. There are no package defaults here: every number in this block is
+ * one a run or a call stated out loud.
  */
-describe("contract-defaulted per-child bounds", () => {
-  it("applies the default timeoutMs to a call that declares none", async () => {
+describe("run-declared per-child bounds", () => {
+  it("applies a run-declared timeoutMs to a call that declares none", async () => {
     const requests: WorkflowAgentRequest[] = [];
     const { dsl } = createWorkflowRuntime({
       runId: "default-timeout",
-      defaultTimeoutMs: DEFAULT_WORKFLOW_BUDGET.timeoutMs,
+      defaultTimeoutMs: 600_000,
       agentRunner: async (request): Promise<WorkflowAgentResult> => {
         requests.push(request);
         return { ok: true, status: "completed", summary: "done", text: "fine", diagnostics: [], agent: request.agent };
@@ -198,14 +212,14 @@ describe("contract-defaulted per-child bounds", () => {
     });
 
     await expect(dsl.agent("work")).resolves.toBe("fine");
-    expect(requests[0]?.timeoutMs).toBe(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    expect(requests[0]?.timeoutMs).toBe(600_000);
   });
 
-  it("lets an explicit per-call fuse narrow the default", async () => {
+  it("lets an explicit per-call fuse narrow the run-declared one", async () => {
     const requests: WorkflowAgentRequest[] = [];
     const { dsl } = createWorkflowRuntime({
       runId: "narrowed-timeout",
-      defaultTimeoutMs: DEFAULT_WORKFLOW_BUDGET.timeoutMs,
+      defaultTimeoutMs: 600_000,
       agentRunner: async (request): Promise<WorkflowAgentResult> => {
         requests.push(request);
         return { ok: true, status: "completed", summary: "done", text: "fine", diagnostics: [], agent: request.agent };
@@ -223,7 +237,7 @@ describe("contract-defaulted per-child bounds", () => {
     expect(requests[0]?.timeoutMs).toBeUndefined();
   });
 
-  it("derives the SDK turn budget from the declared fuse, so the workflow failure wins the race", async () => {
+  it("hands the host the declared fuse unchanged — one deadline, no derivation", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-turn-budget-"));
     mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
     writeFileSync(
@@ -232,8 +246,8 @@ describe("contract-defaulted per-child bounds", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turn-budget" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
-    const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
+    const factoryOptions: Array<{ childTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
+    const createExecutor = (o: { childTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
         async run(request) {
@@ -257,23 +271,21 @@ describe("contract-defaulted per-child bounds", () => {
     });
     const { dsl } = createWorkflowRuntime({
       runId: "turn-budget-run",
-      defaultTimeoutMs: DEFAULT_WORKFLOW_BUDGET.timeoutMs,
+      defaultTimeoutMs: 600_000,
+      defaultMaxTurns: 20,
       agentRunner: runner,
     });
 
     await expect(dsl.agent("work")).resolves.toBe("fine");
-    const turnTimeoutMs = factoryOptions[0]?.turnTimeoutMs;
-    expect(turnTimeoutMs).toBe(
-      workflowSdkTurnTimeoutMs(DEFAULT_WORKFLOW_BUDGET.timeoutMs, DEFAULT_WORKFLOW_BUDGET.turns),
-    );
-    // ORDERING, not only the value: the host kills a child at turnTimeoutMs * maxTurns
-    // (`agent-sdk-host.ts`), and that moment must come strictly after the workflow fuse.
-    expect(turnTimeoutMs! * DEFAULT_WORKFLOW_BUDGET.turns).toBeGreaterThan(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
-    expect(factoryOptions[0]?.cliRequestTimeoutMs).toBe(DEFAULT_WORKFLOW_BUDGET.timeoutMs);
+    // The divide-by-turns, add-a-margin, multiply-back round trip is gone. The host
+    // receives exactly what the run declared, so the two clocks cannot disagree and
+    // no product can overflow Node's maximum delay.
+    expect(factoryOptions[0]?.childTimeoutMs).toBe(600_000);
+    expect(factoryOptions[0]?.cliRequestTimeoutMs).toBe(600_000);
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("threads no turn budget when the call has no fuse, leaving the host default in place", async () => {
+  it("arms no host deadline when the call has no fuse: unbounded means unbounded", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-turn-budget-absent-"));
     mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
     writeFileSync(
@@ -282,8 +294,8 @@ describe("contract-defaulted per-child bounds", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turn-budget-absent" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
-    const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
+    const factoryOptions: Array<{ childTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
+    const createExecutor = (o: { childTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
         async run(request) {
@@ -308,17 +320,17 @@ describe("contract-defaulted per-child bounds", () => {
     const { dsl } = createWorkflowRuntime({ runId: "turn-budget-absent", agentRunner: runner });
 
     await expect(dsl.agent("work")).resolves.toBe("fine");
-    expect(factoryOptions[0]?.turnTimeoutMs).toBeUndefined();
+    expect(factoryOptions[0]?.childTimeoutMs).toBeUndefined();
     rmSync(root, { recursive: true, force: true });
   });
 });
 
 describe("maxTurns as a budget axis", () => {
-  it("carries the contract turn budget on a call that declares nothing", async () => {
+  it("carries a run-declared turn budget on a call that declares nothing", async () => {
     const requests: WorkflowAgentRequest[] = [];
     const { dsl } = createWorkflowRuntime({
       runId: "default-turns",
-      defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
+      defaultMaxTurns: 1000,
       agentRunner: async (request): Promise<WorkflowAgentResult> => {
         requests.push(request);
         return { ok: true, status: "completed", summary: "done", text: "fine", diagnostics: [], agent: request.agent };
@@ -326,14 +338,21 @@ describe("maxTurns as a budget axis", () => {
     });
 
     await expect(dsl.agent("work")).resolves.toBe("fine");
-    expect(requests[0]?.maxTurns).toBe(DEFAULT_WORKFLOW_BUDGET.turns);
+    expect(requests[0]?.maxTurns).toBe(1000);
+  });
+
+  it("carries no turn budget at all when neither the run nor the call declared one", async () => {
+    const { dsl, requests } = runtimeWith("no-turns", "fine");
+
+    await expect(dsl.agent("work")).resolves.toBe("fine");
+    expect(requests[0]?.maxTurns).toBeUndefined();
   });
 
   it("lets a call declare its own turn budget above the former host ceiling", async () => {
     const requests: WorkflowAgentRequest[] = [];
     const { dsl } = createWorkflowRuntime({
       runId: "declared-turns",
-      defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
+      defaultMaxTurns: 1000,
       agentRunner: async (request): Promise<WorkflowAgentResult> => {
         requests.push(request);
         return { ok: true, status: "completed", summary: "done", text: "fine", diagnostics: [], agent: request.agent };
@@ -351,7 +370,7 @@ describe("maxTurns as a budget axis", () => {
       let calls = 0;
       const { dsl } = createWorkflowRuntime({
         runId: "clamped-turns",
-        defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
+        defaultMaxTurns: 1000,
         agentRunner: async () => {
           calls += 1;
           throw new Error("must not run");
@@ -378,7 +397,7 @@ describe("maxTurns as a budget axis", () => {
     expect(two.requests[0]?.maxTurns).toBe(2);
   });
 
-  it("derives the SDK turn budget from the DECLARED turn count, not a constant", async () => {
+  it("gives the host the same deadline whatever the declared turn count is", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "locus-turns-sdk-"));
     mkdirSync(path.join(root, ".agents", "agents"), { recursive: true });
     writeFileSync(
@@ -387,8 +406,8 @@ describe("maxTurns as a budget axis", () => {
       "utf8",
     );
     const h = createHarness(root, { sessionId: "wf-turns-sdk" });
-    const factoryOptions: Array<{ turnTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
-    const createExecutor = (o: { turnTimeoutMs?: number }): AgentExecutor => {
+    const factoryOptions: Array<{ childTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
+    const createExecutor = (o: { childTimeoutMs?: number }): AgentExecutor => {
       factoryOptions.push({ ...o });
       return {
         async run(request) {
@@ -413,13 +432,15 @@ describe("maxTurns as a budget axis", () => {
     const { dsl } = createWorkflowRuntime({
       runId: "turns-sdk-run",
       defaultTimeoutMs: 60_000,
-      defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
       agentRunner: runner,
     });
 
+    // Turn count and wall clock are separate axes. Multiplying one by the other was
+    // what produced a deadline nobody declared and, at the old defaults, one Node
+    // could not represent.
     await expect(dsl.agent("work", { maxTurns: 2 })).resolves.toBe("fine");
-    expect(factoryOptions[0]?.turnTimeoutMs).toBe(workflowSdkTurnTimeoutMs(60_000, 2));
-    expect(factoryOptions[0]!.turnTimeoutMs! * 2).toBeGreaterThan(60_000);
+    await expect(dsl.agent("work", { maxTurns: 2000 })).resolves.toBe("fine");
+    expect(factoryOptions.map((o) => o.childTimeoutMs)).toEqual([60_000, 60_000]);
     rmSync(root, { recursive: true, force: true });
   });
 });

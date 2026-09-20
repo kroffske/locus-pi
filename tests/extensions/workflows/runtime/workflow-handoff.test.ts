@@ -275,6 +275,44 @@ describe("workflow operator handoff", () => {
     });
   });
 
+  it("accepts a handoff with twelve questions, long text, and many options", () => {
+    const declarations: unknown[] = [];
+    const runtime = createWorkflowRuntime({
+      runId: "unbounded-handoff",
+      agentRunner: async () => {
+        throw new Error("must not run");
+      },
+      onAwaitOperator: (declaration) => declarations.push(declaration),
+    });
+
+    runtime.dsl.awaitOperator({
+      reason: "needs input",
+      operatorHandoff: {
+        // Past every product ceiling this contract used to hold: 8 questions,
+        // 20 options, 200-character titles/labels, 500-character prompts.
+        title: "T".repeat(400),
+        questions: Array.from({ length: 12 }, (_, index) => ({
+          kind: "select" as const,
+          id: `question-${index + 1}`,
+          prompt: `${"P".repeat(900)} ${index + 1}?`,
+          options: Array.from({ length: 25 }, (_, optionIndex) => ({
+            label: `${"L".repeat(250)}-${index + 1}-${optionIndex + 1}`,
+          })),
+        })),
+        continuationArtifactRefs: Array.from({ length: 12 }, (_, index) => ({
+          runId: "run",
+          artifactId: `published-${String(index + 1).padStart(4, "0")}`,
+          name: `Design review, round ${index + 1}.md`,
+          sha256: "a".repeat(64),
+        })),
+      },
+    });
+
+    expect(declarations).toHaveLength(1);
+    const declaration = declarations[0] as { operatorHandoff: { questions: unknown[] } };
+    expect(declaration.operatorHandoff.questions).toHaveLength(12);
+  });
+
   it("rejects malformed declarations before publication and distinguishes absent from present malformed", () => {
     const declarations: unknown[] = [];
     const runtime = createWorkflowRuntime({
@@ -493,6 +531,37 @@ describe("workflow operator handoff", () => {
     });
     expect(recovered.status).toBe("claimed");
     expect(readFileSync(source.resultPath, "utf8")).toBe(initialBytes);
+  });
+
+  it("never lets a lease expiry alone authorize a duplicate claim", async () => {
+    const root = project();
+    const source = await sourceRun(root);
+    const claimedAt = new Date("2026-07-25T00:00:00.000Z");
+    // Hours past both lease timers (5-minute prestart, 30-second lock).
+    const muchLater = new Date("2026-07-25T06:00:00.000Z");
+
+    const first = claimWorkflowOperatorHandoff(root, source.handoff, { now: () => claimedAt });
+    if (first.status !== "claimed") throw new Error("expected claim");
+    const second = claimWorkflowOperatorHandoff(root, source.handoff, { now: () => muchLater });
+    if (second.status !== "claimed") throw new Error("expected stale prestart takeover");
+
+    // Expiry made the claim ELIGIBLE for takeover; ownership is what decides. The
+    // displaced holder cannot write beside the winner, and cannot release its claim.
+    expect(() => bindWorkflowHandoffClaim(first.claim, "20260725-000001-displaced")).toThrow(
+      /no longer owns the active claim/u,
+    );
+    expect(() => releaseWorkflowHandoffClaim(first.claim)).toThrow(/no longer owns the active claim/u);
+
+    // Once a continuation run is bound, the clock stops deciding anything: only a
+    // failed or cancelled child releases the claim, and this one is neither.
+    bindWorkflowHandoffClaim(second.claim, "20260725-000002-continuation");
+    expect(claimWorkflowOperatorHandoff(root, source.handoff, { now: () => muchLater })).toMatchObject({
+      status: "active",
+    });
+    expect(projectWorkflowHandoffState(root, source.handoff, { now: () => muchLater })).toMatchObject({
+      status: "running",
+      childRunId: "20260725-000002-continuation",
+    });
   });
 
   it("uses the filesystem claim as the exclusion point across Node processes", async () => {

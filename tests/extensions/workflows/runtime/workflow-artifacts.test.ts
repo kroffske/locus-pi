@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -14,7 +15,11 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it, vi } from "vitest";
-import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
+import {
+  writeAgentRunResultArtifact,
+  type AgentExecutor,
+  type AgentRunRequest,
+} from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
 import {
   createWorkflowArtifactStore,
   readWorkflowArtifactIndex,
@@ -35,6 +40,7 @@ import {
   WorkflowAgentExecutionError,
   type WorkflowAgentRequest,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
+import { hostRequest, runHost } from "../../../fixtures/agent-runtime/agent-failure-probes.js";
 import { createHarness } from "../../../test-harness.js";
 
 const roots: string[] = [];
@@ -57,6 +63,40 @@ function runDir(root: string, runId: string): string {
 }
 
 describe("workflow run artifact store", () => {
+  it("returns child evidence destinations lazily", () => {
+    const root = project(),
+      id = "lazy-child-evidence";
+    const { transcriptDir, resultArtifactsDir } = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: id,
+      runDir: runDir(root, id),
+    }).childEvidenceDestinations("call-0001");
+    assert.deepEqual([existsSync(transcriptDir), existsSync(resultArtifactsDir)], [false, false]);
+  });
+
+  it.each([
+    ["transcripts", "parent"],
+    ["transcripts", "leaf"],
+    ["results", "parent"],
+    ["results", "leaf"],
+  ] as const)("writes no %s evidence through a pre-existing %s symlink", async (zone, link) => {
+    const root = project(),
+      outside = project(),
+      id = `linked-${zone}-${link}`;
+    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
+    const parent = path.join(store.artifactsDir, zone);
+    if (link === "leaf") mkdirSync(parent);
+    symlinkSync(outside, link === "parent" ? parent : path.join(parent, "call-0001"));
+    // The bridge's order: request destinations, real SDK transcript export, real result envelope.
+    const refusal = await (async () => {
+      const destinations = store.childEvidenceDestinations("call-0001");
+      const result = await runHost({ lastAssistantText: "answer" }, { reportsDir: destinations.transcriptDir });
+      writeAgentRunResultArtifact(root, hostRequest(), result, destinations.resultArtifactsDir);
+    })().catch((error: unknown) => error);
+    assert.deepEqual(readdirSync(outside, { recursive: true }), [], "zero outside writes, not merely a late error");
+    assert.match(String(refusal), /Workflow run directory is unsafe/u);
+  });
+
   it("refuses an unclaimed execution directory instead of creating a flat run", () => {
     const root = project();
     const id = "unclaimed-child";
@@ -490,7 +530,37 @@ describe("workflow run artifact store", () => {
     assert.throws(() => current.consumeText(sourceRef), /malformed (?:script identity|disposition)/u);
   });
 
-  it("refuses an indexed source artifact omitted from the terminal handoff projection", () => {
+  it("writes and consumes a 3 MiB text artifact: size is not a policy", () => {
+    const root = project();
+    const sourceRunId = "large-source";
+    const source = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: sourceRunId,
+      runDir: runDir(root, sourceRunId),
+    });
+    const large = "L".repeat(3 * 1024 * 1024);
+    const sourceRef = source.publishText("large.md", large);
+    assert.equal(source.read(sourceRef).byteLength, 3 * 1024 * 1024);
+    writeFileSync(
+      workflowResultFile(runDir(root, sourceRunId)),
+      `${JSON.stringify({
+        runId: sourceRunId,
+        ok: true,
+        result: "done",
+        artifactRefs: [sourceRef],
+        target: { kind: "name", ref: "review", source: "package" },
+      })}\n`,
+    );
+    const current = createWorkflowArtifactStore({
+      projectRoot: root,
+      runId: "large-consumer",
+      runDir: runDir(root, "large-consumer"),
+    });
+
+    assert.equal(current.consumeText(sourceRef).text, large);
+  });
+
+  it("consumes an indexed source artifact omitted from the terminal display projection", () => {
     const root = project();
     const sourceRunId = "projected-source";
     const source = createWorkflowArtifactStore({
@@ -517,7 +587,7 @@ describe("workflow run artifact store", () => {
       runDir: runDir(root, "projection-consumer"),
     });
 
-    assert.throws(() => current.consumeText(omittedRef), /not present in the source run terminal projection/u);
+    assert.equal(current.consumeText(omittedRef).text, "omitted");
     assert.equal(current.consumeText(projectedRef).text, "projected");
   });
 
@@ -576,41 +646,6 @@ describe("workflow run artifact store", () => {
     });
 
     assert.throws(() => current.consumeText(sourceRef), /no valid persisted runId/u);
-  });
-
-  it("refuses malformed optional metadata and unknown persisted fields", () => {
-    const corruptions: Array<[string, (record: Record<string, unknown>) => void]> = [
-      ["callId type", (record) => (record.callId = 42)],
-      ["callId value", (record) => (record.callId = "../escape")],
-      ["stage", (record) => (record.stage = { name: "prepare" })],
-      ["childSessionId", (record) => (record.childSessionId = null)],
-      ["source", (record) => (record.source = { runId: "source" })],
-      ["replaySourceRunId", (record) => (record.replaySourceRunId = [])],
-      ["unknown", (record) => (record.untrusted = true)],
-    ];
-
-    for (const [name, corrupt] of corruptions) {
-      const root = project();
-      const id = `invalid-${name.replaceAll(/[^a-z]+/gu, "-")}`;
-      const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
-      store.publishText("record.md", "bytes");
-      const indexPath = path.join(store.artifactsDir, "index.json");
-      const index = JSON.parse(readFileSync(indexPath, "utf8")) as { artifacts: Array<Record<string, unknown>> };
-      corrupt(index.artifacts[0]!);
-      writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
-
-      const read = readWorkflowArtifactIndex(root, id);
-      assert.equal(read.status, "invalid", name);
-    }
-
-    const root = project();
-    const id = "invalid-index-envelope";
-    const store = createWorkflowArtifactStore({ projectRoot: root, runId: id, runDir: runDir(root, id) });
-    const indexPath = path.join(store.artifactsDir, "index.json");
-    const index = JSON.parse(readFileSync(indexPath, "utf8")) as Record<string, unknown>;
-    index.untrusted = true;
-    writeFileSync(indexPath, `${JSON.stringify(index)}\n`);
-    assert.equal(readWorkflowArtifactIndex(root, id).status, "invalid");
   });
 
   it("keeps missing source indexes side-effect free and rejects missing source target identity", () => {

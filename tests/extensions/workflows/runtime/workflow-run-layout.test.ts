@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, it, vi } from "vitest";
 import type { AgentExecutor, AgentRunRequest } from "../../../../extensions/_shared/agent-runtime/agent-runner.js";
-import { readLoopStatus } from "../../../../extensions/loop/loop-continuation.js";
 import { buildRunDetailBlock } from "../../../../extensions/workflows/run/run-evidence.js";
 import { WorkflowRunViewer } from "../../../../extensions/workflows/run/run-viewer.js";
 import { composeWorkflowChildTask } from "../../../../extensions/workflows/runtime/workflow-agent-bridge.js";
@@ -145,7 +144,7 @@ describe("workflow workspace and run evidence", () => {
     const outputNames = readdirSync(workflowRunOutputsDir(workflowRunDir(root, result.runId))).sort();
     assert.deepEqual(outputNames, ["README.md", "workflow-result.md"]);
     assert.ok(!outputNames.includes("plan.md"));
-    assert.deepEqual(readdirSync(result.runDir).sort(), ["README.md", "attempts", "children", "outputs", "runtime"]);
+    assert.deepEqual(readdirSync(result.runDir).sort(), ["README.md", "outputs", "runtime"]);
     assert.ok(readdirSync(workflowRunRuntimeDir(result.runDir)).includes("journal.ndjson"));
     assert.match(result.runDir, /\.locus-pi\/runs\//u);
   });
@@ -256,11 +255,10 @@ describe("workflow workspace and run evidence", () => {
     assert.deepEqual(readdirSync(outside), []);
   });
 
-  it("creates only outputs and runtime for a safe run id", () => {
+  it("creates only runtime evidence for a safe run id", () => {
     const root = project();
-    const runId = "20260731-010203-abcd";
-    const runDir = ensureWorkflowRunDir(root, runId);
-    assert.deepEqual(readdirSync(runDir).sort(), ["outputs", "runtime"]);
+    const runDir = ensureWorkflowRunDir(root, "20260731-010203-abcd");
+    assert.deepEqual(readdirSync(runDir).sort(), ["runtime"]);
     assert.throws(() => ensureWorkflowRunDir(root, "../escape"), /Invalid workflow run id/u);
   });
 
@@ -520,6 +518,7 @@ describe("workflow workspace and run evidence", () => {
       signal: new AbortController().signal,
       name: "symlink-output",
       onRunStart: ({ runDir }) => {
+        mkdirSync(workflowRunOutputsDir(runDir));
         rmSync(workflowRunOutputsDir(runDir), { recursive: true });
         symlinkSync(elsewhere, workflowRunOutputsDir(runDir));
       },
@@ -654,7 +653,7 @@ describe("grouped run lookup", () => {
     assert.deepEqual(resolveWorkflowRunId(root, childId), { status: "resolved", runId: childId });
   });
 
-  it("refuses latest selection and loop inference when timestamps cannot order root runs", async () => {
+  it("refuses latest selection when timestamps cannot order root runs", () => {
     let tied:
       | {
           root: string;
@@ -691,17 +690,6 @@ describe("grouped run lookup", () => {
       matched: 2,
       candidates: tied.runIds,
     });
-    const loopStatus = await readLoopStatus(tied.root);
-    assert.equal(loopStatus.mode, "blocked");
-    assert.deepEqual(
-      loopStatus.sources.find((source) => source.source === "workflow"),
-      {
-        source: "workflow",
-        availability: "blocked",
-        reason: "latest workflow run is ambiguous across 2 executions; use an exact runId",
-      },
-    );
-    assert.equal(loopStatus.recommendedSourceId, undefined);
   });
 
   it("requires storageRootRunId only for nested result envelopes", () => {

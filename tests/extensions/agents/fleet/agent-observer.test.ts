@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import agents from "../../../../extensions/agents/index.js";
-import { registerLoop } from "../../../../extensions/loop/index.js";
+import workflows from "../../../../extensions/workflows/index.js";
 import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import type { ExtensionCommandContext } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, emit } from "../../../test-harness.js";
@@ -157,7 +157,7 @@ describe("agent observer command", () => {
       expect(h.widgets.get("agents")).not.toBe("");
       h.ctx.ui.setStatus("agents", "stale agent status");
 
-      await emit(h, "input", { text: "/loop status" });
+      await emit(h, "input", { text: "/model-roles" });
 
       expect(h.widgetPayloads.get("agents")).toBeUndefined();
       expect(h.widgets.get("agents")).toBe("");
@@ -167,15 +167,16 @@ describe("agent observer command", () => {
 
   it("lets another command clear stale agent widgets when slash input cleanup is skipped", async () => {
     const h = createHarness();
+    delete h.ctx.ui.custom;
     agents(h.pi);
-    registerLoop(h.pi);
+    workflows(h.pi);
 
     await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
     h.ctx.ui.setStatus("agents", "stale agent status");
 
-    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
+    await h.commands.get("workflows")!.handler("status", h.ctx as ExtensionCommandContext);
 
-    expect(h.widgets.get("loop")).toContain("[VIEW] Loop status");
+    expect(h.widgets.get("workflows")).toContain("[VIEW] Workflow runs");
     expect(h.widgetPayloads.get("agents")).toBeUndefined();
     expect(h.widgets.get("agents")).toBe("");
     expect(h.statuses.has("agents")).toBe(false);

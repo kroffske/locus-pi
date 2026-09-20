@@ -39,10 +39,10 @@ argument. Keep explicit owner acceptance between design and implementation.`;
  * @param {string} [input]
  */
 export default async function runWorkflow(dsl, input = "") {
-  const draftText =
-    typeof input === "string" && input.trim()
-      ? input.trim()
-      : "No accepted draft was supplied. Produce a fail-closed workflow whose only result explains this missing input.";
+  // Package admission guarantees this required semantic input before the module
+  // executes. Keep it opaque here so the orchestration-only source contract can
+  // prove the script only forwards author input to agents.
+  const draftText = input;
 
   dsl.phase("design");
   const designText = await dsl.agent(

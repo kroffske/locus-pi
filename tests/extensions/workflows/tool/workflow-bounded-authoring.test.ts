@@ -133,3 +133,35 @@ describe("standard bounded carry and author-owned records; requires native ast-g
     expect(errors(wrap(body)).length).toBeGreaterThan(0);
   });
 });
+
+describe("opaque execution-report authoring", () => {
+  it("allows whole-report forwarding with either DSL syntax", () => {
+    const body =
+      'const report = await dsl.agent(input, { label: "review", result: "report" }); return dsl.agent(report, { label: "arbiter" });';
+    expect(errors(wrap(body))).toEqual([]);
+    expect(
+      errors(wrap(body).replace("run(dsl, input)", "run({ agent }, input)").replaceAll("dsl.agent", "agent")),
+    ).toEqual([]);
+  });
+  it.each([
+    'result: "typo"',
+    "result: input",
+    'result: "report", choice: ["yes", "no"]',
+    'result: "report", returnVia: "tool"',
+    'result: "report", handoffs: { maxItems: 2 }',
+  ])("rejects hidden or mixed report policy: %s", (opts) => {
+    expect(errors(wrap(`return dsl.agent(input, { label: "review", ${opts} });`)).length).toBeGreaterThan(0);
+  });
+  it("does not impose report policy on unrelated returned records", () => {
+    expect(errors(wrap('return { result: "ordinary application value" };'))).toEqual([]);
+  });
+  it.each([
+    'if (report.status === "completed") return report;',
+    "return report[0];",
+    'if (report === "ready") return report;',
+  ])("rejects interpretation of report content: %s", (body) => {
+    expect(
+      errors(wrap(`const report = await dsl.agent(input, { label: "review", result: "report" }); ${body}`)).length,
+    ).toBeGreaterThan(0);
+  });
+});

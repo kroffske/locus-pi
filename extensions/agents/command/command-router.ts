@@ -8,7 +8,6 @@ import { registerCommandWithUiLifecycle } from "../../_shared/operator/command-u
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "../../_shared/host/pi-api.js";
 import { getCommandText, getProjectRoot } from "../../_shared/host/pi-api.js";
 import { setOperatorWidget } from "../../_shared/operator/widget-render.js";
-import { renderAgentObserverText } from "../../workflows/operator/progress-widget.js";
 import { agentCatalog, refreshAgents } from "../catalog/catalog.js";
 import {
   parseAgentDrillCommand,
@@ -26,6 +25,7 @@ import {
   setAgentsWidget,
 } from "../operator/operator-surface.js";
 import { AGENT_CATALOG_FALLBACK_ROWS, agentCatalogBlock, agentInspectBlock } from "../operator/operator-ui.js";
+import { renderAgentObserverText } from "../operator/agent-observer.js";
 import { executeAgentRunCommand } from "../run/run-launcher.js";
 import { createUnknownAgentReport } from "../run/unknown-agent-report.js";
 

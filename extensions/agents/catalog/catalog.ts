@@ -29,9 +29,13 @@ const AGENT_PARAM_BASE_DESCRIPTION =
   "Optional project/user agent catalog name. Omit to run a clean child session without a role profile.";
 const AGENT_PARAM_CATALOG_HEADING = "Available agents (name — description):";
 
+// No character ceiling on either input field. `task` and `parentContext.inline` are the
+// CALLER'S text — the instructions it wrote and the context it chose to hand over — and a
+// cap here refuses a job before anyone looks at it, on a number this surface invented.
+// `minLength: 1` stays on `task`: an empty instruction is missing, not short.
 export const TaskParams = Type.Object({
   agent: Type.Optional(Type.String({ description: AGENT_PARAM_BASE_DESCRIPTION })),
-  task: Type.String({ description: "Self-contained subagent instructions", minLength: 1, maxLength: 16000 }),
+  task: Type.String({ description: "Self-contained subagent instructions", minLength: 1 }),
   title: Type.Optional(
     Type.String({
       description: "Short work title shown in the live agent row; falls back to the first words of task",
@@ -40,7 +44,7 @@ export const TaskParams = Type.Object({
   ),
   parentContext: Type.Optional(
     Type.Object({
-      inline: Type.Optional(Type.String({ description: "Explicit parent-provided context text", maxLength: 32000 })),
+      inline: Type.Optional(Type.String({ description: "Explicit parent-provided context text" })),
       artifactPath: Type.Optional(Type.String({ description: "Path to an explicit parent context artifact" })),
     }),
   ),

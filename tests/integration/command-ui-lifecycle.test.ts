@@ -1,44 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import agents from "../../extensions/agents/index.js";
-import { registerLoop } from "../../extensions/loop/index.js";
 import model from "../../extensions/model/index.js";
-import { registerPlan } from "../../extensions/plan/index.js";
 import workflows from "../../extensions/workflows/index.js";
-import type {
-  ExtensionCommandContext,
-  ReplacementSessionContext,
-  ReplacementSessionEntryLike,
-} from "../../extensions/_shared/host/pi-api.js";
+import type { ExtensionCommandContext } from "../../extensions/_shared/host/pi-api.js";
 import { pinTransientUiKey, unpinTransientUiKey } from "../../extensions/_shared/operator/command-ui.js";
-import { createHarness, emit, type Harness } from "../test-harness.js";
-
-function stubPlanSession(
-  h: Harness,
-  root: string,
-  entries: ReplacementSessionEntryLike[] = [{ type: "message", role: "assistant", content: "## Goal\nShip it." }],
-): ExtensionCommandContext {
-  const commandCtx = h.ctx as ExtensionCommandContext;
-  commandCtx.newSession = async (opts) => {
-    const replacementCtx: ReplacementSessionContext = {
-      ...h.ctx,
-      session: { id: "plan-child", projectRoot: root, workingDirectory: root },
-      async sendUserMessage() {},
-      async waitForIdle() {},
-      sessionManager: {
-        getEntries() {
-          return entries;
-        },
-      },
-    };
-    await opts?.withSession?.(replacementCtx);
-    return { cancelled: false };
-  };
-  return commandCtx;
-}
+import { createHarness, emit } from "../test-harness.js";
 
 describe("command UI lifecycle", () => {
   it("dismisses the latest passive VIEW with Escape and leaves no raw listener behind", async () => {
@@ -80,12 +50,12 @@ describe("command UI lifecycle", () => {
   it("clears transient widgets and statuses when an unrelated slash command is entered", async () => {
     const h = createHarness();
     agents(h.pi);
-    registerLoop(h.pi);
+    model(h.pi);
 
     await h.commands.get("agent")!.handler("observe", h.ctx as ExtensionCommandContext);
     h.ctx.ui.setStatus("agents", "stale agent status");
 
-    await emit(h, "input", { text: "/loop status" });
+    await emit(h, "input", { text: "/model-roles" });
 
     expect(h.widgetPayloads.get("agents")).toBeUndefined();
     expect(h.widgets.get("agents")).toBe("");
@@ -101,59 +71,6 @@ describe("command UI lifecycle", () => {
 
     expect(h.widgets.get("agents")).toBe("Agent observer: no live rows");
     expect(h.widgetPayloads.get("agents")).not.toBeUndefined();
-  });
-
-  it("clears the transient plan receipt but keeps the persistent mode status before a different command renders", async () => {
-    const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-plan-project-"));
-    const h = createHarness(projectRoot);
-    registerPlan(h.pi);
-    registerLoop(h.pi);
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "command-ui-plan-home-"));
-    const savedHome = process.env["LOCUS_PI_HOME"];
-    const commandCtx = stubPlanSession(h, projectRoot);
-
-    try {
-      process.env["LOCUS_PI_HOME"] = tmpHome;
-      await h.commands.get("plan")!.handler("Investigate the command UI lifecycle", commandCtx);
-
-      expect(h.widgets.get("plan")).toContain("[RESULT] Plan draft");
-      expect(h.widgets.get("plan")).toContain("Plan saved; behavioral plan mode is active.");
-      expect(h.statuses.get("locus")).toContain("MODE");
-    } finally {
-      if (savedHome === undefined) delete process.env["LOCUS_PI_HOME"];
-      else process.env["LOCUS_PI_HOME"] = savedHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-      rmSync(projectRoot, { recursive: true, force: true });
-    }
-
-    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
-
-    expect(h.widgets.get("plan") ?? "").toBe("");
-    expect(h.statuses.get("locus")).toContain("MODE");
-    expect(h.widgets.get("loop")).toContain("[VIEW] Loop status");
-  });
-
-  it("clears a prompt-shelf summary on an unrelated command without mutating its artifact", async () => {
-    const projectRoot = mkdtempSync(path.join(tmpdir(), "command-ui-shelf-project-"));
-    const h = createHarness(projectRoot);
-    registerPlan(h.pi);
-    registerLoop(h.pi);
-
-    try {
-      await h.commands.get("review")!.handler("Keep this review prompt durable", h.ctx);
-      const artifactPath = path.join(projectRoot, ".locus", "runtime", "prompts", "review.md");
-      const saved = readFileSync(artifactPath, "utf8");
-      await h.commands.get("review")!.handler("", h.ctx);
-      expect(h.widgets.get("review")).toContain("[VIEW] Review prompt shelf");
-
-      await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
-
-      expect(h.widgets.get("review") ?? "").toBe("");
-      expect(readFileSync(artifactPath, "utf8")).toBe(saved);
-      expect(h.widgets.get("loop")).toContain("[VIEW] Loop status");
-    } finally {
-      rmSync(projectRoot, { recursive: true, force: true });
-    }
   });
 
   it("keeps a pinned live progress widget alive when a chat message is submitted", async () => {
@@ -183,11 +100,11 @@ describe("command UI lifecycle", () => {
   it("does not clear explicitly persistent command status surfaces", async () => {
     const h = createHarness();
     model(h.pi);
-    registerLoop(h.pi);
+    agents(h.pi);
 
     h.ctx.ui.setStatus("model-roles", "Model roles: DEFAULT=test/fast");
 
-    await h.commands.get("loop")!.handler("status", h.ctx as ExtensionCommandContext);
+    await h.commands.get("agent")!.handler("list", h.ctx as ExtensionCommandContext);
 
     expect(h.statuses.get("model-roles")).toBe("Model roles: DEFAULT=test/fast");
   });

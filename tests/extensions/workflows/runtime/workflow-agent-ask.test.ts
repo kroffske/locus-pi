@@ -22,10 +22,10 @@ import { createHarness } from "../../../test-harness.js";
  *
  * What must be true of the BRIDGE (the tool itself is unit-tested next door):
  * the stock `ask` is excluded from every child, `workflow_ask` is injected only
- * when the stage declared `ask: true`, the wall-clock fuse pauses while the
- * operator is thinking (a 200 ms human wait must not kill a 50 ms-fuse call),
- * the question+answer pair lands as a durable run artifact, and the replay key
- * forks on `ask` so a no-ask record is never served to an asking call.
+ * when the stage declared `ask: true`, an `ask: true` call gets exactly ONE
+ * deadline — wall clock, operator wait included, no hidden allowance — the
+ * question+answer pair lands as a durable run artifact, and the replay key forks
+ * on `ask` so a no-ask record is never served to an asking call.
  */
 
 function completedResult(text: string): AgentRunResult {
@@ -62,7 +62,7 @@ describe("workflow agent bridge — live ask wiring", () => {
     expect(captured[1]?.customTools?.map((tool) => tool.name)).toEqual([WORKFLOW_ASK_TOOL_NAME]);
   });
 
-  it("pauses the fuse while the operator thinks, and records the Q&A artifact", async () => {
+  it("counts the operator wait against the call deadline, records it, and keeps the Q&A artifact", async () => {
     const root = mkdtempSync(path.join(tmpdir(), "workflow-ask-evidence-"));
     const h = createHarness(root);
     const runId = "ask-pause-run";
@@ -98,14 +98,22 @@ describe("workflow agent bridge — live ask wiring", () => {
       prompt: "decide storage",
       tools: ["*"],
       operatorAsk: true,
-      timeoutMs: 50,
+      timeoutMs: 5_000,
       callId: "ask-call-1",
     });
-    // 50 ms fuse, 200 ms human wait: without the pause this dies by call-timeout.
+    // ONE clock. The declared 5 s deadline is wall clock and the 200 ms human wait
+    // is inside it; the fuse no longer pauses, so the call and the SDK host cannot
+    // disagree about how much time has passed and no hidden 24-hour allowance
+    // exists to cover a pause.
     expect(result.failureCause).toBeUndefined();
     expect(result.ok).toBe(true);
     expect(result.text).toContain("Answer: sqlite");
     expect(result.diagnostics.some((line) => line.includes("workflow_ask: operator answered 1/1"))).toBe(true);
+    // The wait is visible evidence: a call that dies on its deadline while a human
+    // was thinking says so instead of looking like a slow model.
+    const waitNote = result.diagnostics.find((line) => line.includes("operator wait of"));
+    expect(waitNote).toBeDefined();
+    expect(waitNote).toContain("counted against the call deadline");
     const index = readWorkflowArtifactIndex(root, runId);
     expect(index.status).toBe("ready");
     if (index.status !== "ready") throw new Error(index.message);
@@ -125,6 +133,48 @@ describe("workflow agent bridge — live ask wiring", () => {
     };
     expect(record.declined).toBe(false);
     expect(record.entries[0]).toMatchObject({ id: "q1", status: "answered", answer: "sqlite" });
+  });
+
+  it("gives an ask: true call one deadline, equal to the declared timeout", async () => {
+    // The defect this pins down: the bridge used to divide the declared fuse by the
+    // turn count, add a per-turn margin, and then add a 24-hour allowance because the
+    // host backstop could not pause during a human wait. The host multiplied that
+    // back, and at ordinary values the product exceeded Node's maximum delay — which
+    // `setTimeout` answers by firing after one millisecond.
+    const h = createHarness();
+    const factoryOptions: Array<{ childTimeoutMs?: number; cliRequestTimeoutMs?: number }> = [];
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      workflowRunId: "ask-one-deadline",
+      createExecutor: (o) => {
+        factoryOptions.push({ ...o });
+        return {
+          async run() {
+            return completedResult("done");
+          },
+        };
+      },
+    });
+
+    const asking = await runner({
+      prompt: "decide",
+      tools: ["*"],
+      operatorAsk: true,
+      timeoutMs: 86_400_000,
+      maxTurns: 1000,
+    });
+    const plain = await runner({ prompt: "decide", tools: ["*"], timeoutMs: 86_400_000, maxTurns: 1000 });
+
+    expect(asking.ok).toBe(true);
+    expect(plain.ok).toBe(true);
+    // One number, the declared one, and `ask: true` does not change it.
+    expect(factoryOptions.map((o) => o.childTimeoutMs)).toEqual([86_400_000, 86_400_000]);
+    for (const options of factoryOptions) {
+      expect(options.childTimeoutMs).toBeLessThanOrEqual(2_147_483_647);
+      expect(options.cliRequestTimeoutMs).toBe(86_400_000);
+    }
   });
 
   it("aborts the current child with a typed cause when operator-answer indexing fails", async () => {

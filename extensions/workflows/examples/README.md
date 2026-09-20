@@ -78,6 +78,6 @@ children declared by that design. Explicit design-only wording may pause after
 design. `Build design: <path>` and `Build approved design: <path>` remain
 Build-only compatibility forms.
 
-The detailed source-shape contract lives in [source contract](../references/source-shape.md#machine-enforced-standard-source-shape).
+The detailed source-shape contract lives in [source contract](../../../docs/workflows/source-shape.md#machine-enforced-standard-source-shape).
 Worked references that must not become Package entries live under
 `../references/` and run only by explicit path.

@@ -1,16 +1,47 @@
+/**
+ * workflow-artifacts.ts — the single mutable artifact store for one run.
+ *
+ * The persisted format lives next door in `workflow-artifact-format.ts`: the
+ * version, the ref/record/index shapes, the strict parsers and the ref identity
+ * projection. This module owns everything that MUTATES or PROVES that format —
+ * index digests, adoption of a child's files, provenance, and continuation
+ * consumption — and re-exports the moved names so existing importers keep one
+ * import site.
+ */
+
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { WorkflowAskEvidenceRecord } from "./workflow-ask-tool.js";
 import { workflowResultFile } from "./workflow-result.js";
 import { parseWorkflowPersistedBinding } from "./workflow-persisted-binding.js";
 import {
+  assertWorkflowArtifactComponent,
+  assertWorkflowArtifactName,
+  assertWorkflowArtifactRef,
+  cloneWorkflowArtifactIndex,
+  cloneWorkflowArtifactRecord,
+  errorMessage,
+  hasUnexpectedFields,
+  isPlainObject,
+  normalizeWorkflowArtifactRelativePath,
+  parseWorkflowArtifactIndex,
+  sameWorkflowArtifactRef,
+  workflowArtifactRef,
+  WORKFLOW_ARTIFACT_INDEX_VERSION,
+  type WorkflowArtifactIndex,
+  type WorkflowArtifactKind,
+  type WorkflowArtifactProvenance,
+  type WorkflowArtifactRecord,
+  type WorkflowArtifactRef,
+} from "./workflow-artifact-format.js";
+import {
   assertWorkflowRunDir,
+  assertWorkflowRunDirectoryPath,
   ensureWorkflowDirectoryNoSymlink,
   assertWorkflowRunId,
   readWorkflowRunFile,
   removeWorkflowRunFile,
   renameWorkflowRunFile,
-  WORKFLOW_SAFE_COMPONENT_PATTERN,
   writeWorkflowRunFile,
   workflowRunArtifactsDir,
   resolveWorkflowRunDir,
@@ -18,42 +49,20 @@ import {
   workflowRunRuntimeDir,
 } from "./workflow-run-layout.js";
 
-export const WORKFLOW_ARTIFACT_INDEX_VERSION = "locus.workflow.artifacts.v1" as const;
-export const DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT = 2 * 1024 * 1024;
-const WORKFLOW_ARTIFACT_COMPONENT_REGEX = new RegExp(WORKFLOW_SAFE_COMPONENT_PATTERN, "u");
-
-export interface WorkflowArtifactRef {
-  runId: string;
-  artifactId: string;
-  name: string;
-  sha256: string;
-}
-
-export type WorkflowArtifactKind =
-  "answer" | "transcript" | "result" | "published" | "primary" | "input" | "operator-ask";
-export type WorkflowArtifactProvenance = "fresh" | "replay" | "published" | "consumed";
-
-export interface WorkflowArtifactRecord extends WorkflowArtifactRef {
-  kind: WorkflowArtifactKind;
-  mediaType: string;
-  size: number;
-  relativePath: string;
-  provenance: WorkflowArtifactProvenance;
-  createdAt: string;
-  callId?: string;
-  toolCallId?: string;
-  sequence?: number;
-  stage?: string;
-  childSessionId?: string;
-  source?: WorkflowArtifactRef;
-  replaySourceRunId?: string;
-}
-
-export interface WorkflowArtifactIndex {
-  version: typeof WORKFLOW_ARTIFACT_INDEX_VERSION;
-  runId: string;
-  artifacts: WorkflowArtifactRecord[];
-}
+/**
+ * The format names this module used to declare itself, kept importable from here so
+ * every existing caller keeps one import site. Only what was already public moves
+ * across: the parsers and the ref helpers stay reachable at their new owner alone,
+ * so no name acquires two import paths.
+ */
+export {
+  WORKFLOW_ARTIFACT_INDEX_VERSION,
+  type WorkflowArtifactIndex,
+  type WorkflowArtifactKind,
+  type WorkflowArtifactProvenance,
+  type WorkflowArtifactRecord,
+  type WorkflowArtifactRef,
+} from "./workflow-artifact-format.js";
 
 export interface WorkflowArtifactSourceTarget {
   kind: "name" | "scriptPath";
@@ -159,17 +168,17 @@ export interface WorkflowArtifactStore extends WorkflowArtifactPorts, WorkflowOp
 
 /** Validate the complete continuation before copying any bytes into the new run. */
 export function assertWorkflowContinuation(value: unknown): asserts value is WorkflowContinuation {
-  if (!isRecord(value)) throw new Error("Workflow continuation must be an object.");
+  if (!isPlainObject(value)) throw new Error("Workflow continuation must be an object.");
   if (hasUnexpectedFields(value, ["originRunId", "artifactRefs"])) {
     throw new Error("Workflow continuation has unexpected fields.");
   }
-  assertSafeComponent(value.originRunId as string, "continuation originRunId");
-  if (!Array.isArray(value.artifactRefs) || value.artifactRefs.length < 1 || value.artifactRefs.length > 8) {
-    throw new Error("Workflow continuation must contain 1-8 artifactRefs.");
+  assertWorkflowArtifactComponent(value.originRunId as string, "continuation originRunId");
+  if (!Array.isArray(value.artifactRefs) || value.artifactRefs.length < 1) {
+    throw new Error("Workflow continuation must contain at least one artifactRef.");
   }
   const identities = new Set<string>();
   for (const candidate of value.artifactRefs) {
-    validateRef(candidate as WorkflowArtifactRef);
+    assertWorkflowArtifactRef(candidate as WorkflowArtifactRef);
     const ref = candidate as WorkflowArtifactRef;
     if (ref.runId !== value.originRunId) {
       throw new Error("Every continuation artifact ref must belong to originRunId.");
@@ -185,7 +194,7 @@ export function consumeWorkflowContinuation(store: WorkflowArtifactStore, value:
   assertWorkflowContinuation(value);
   const artifacts = value.artifactRefs.map((sourceRef) => {
     const consumedArtifact = store.consumeText(sourceRef);
-    return freezeContinuationArtifact({ sourceRef: cloneRef(sourceRef), consumedArtifact });
+    return freezeContinuationArtifact({ sourceRef: workflowArtifactRef(sourceRef), consumedArtifact });
   });
   return Object.freeze({ originRunId: value.originRunId, artifacts: Object.freeze(artifacts) });
 }
@@ -194,8 +203,8 @@ export function continuationJournalProjection(binding: WorkflowBoundContinuation
   return {
     originRunId: binding.originRunId,
     artifacts: binding.artifacts.map(({ sourceRef, consumedArtifact }) => ({
-      sourceRef: cloneRef(sourceRef),
-      consumedRef: cloneRef(consumedArtifact.ref),
+      sourceRef: workflowArtifactRef(sourceRef),
+      consumedRef: workflowArtifactRef(consumedArtifact.ref),
     })),
   };
 }
@@ -205,7 +214,6 @@ export interface CreateWorkflowArtifactStoreOptions {
   runId: string;
   runDir: string;
   now?: () => string;
-  maxTextBytes?: number;
 }
 
 export type WorkflowArtifactIndexRead =
@@ -222,15 +230,15 @@ export function readWorkflowArtifactIndex(
   resolvedRunDir?: string,
 ): WorkflowArtifactIndexRead {
   try {
-    assertSafeComponent(runId, "runId");
+    assertWorkflowArtifactComponent(runId, "runId");
     const runDir = resolvedRunDir ?? resolveWorkflowRunDir(projectRoot, runId);
     const artifactsDir = workflowRunArtifactsDir(runDir);
     const indexPath = path.join(artifactsDir, "index.json");
     if (!workflowRunFileExists(runDir, indexPath)) {
       return { status: "missing", message: `Workflow artifact index is missing for run ${runId}.` };
     }
-    const index = parseIndex(readWorkflowRunFile(runDir, indexPath).toString("utf8"), runId);
-    return { status: "ready", index: cloneIndex(index) };
+    const index = parseWorkflowArtifactIndex(readWorkflowRunFile(runDir, indexPath).toString("utf8"), runId);
+    return { status: "ready", index: cloneWorkflowArtifactIndex(index) };
   } catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
       return { status: "missing", message: `Workflow artifact index is missing for run ${runId}.` };
@@ -247,7 +255,7 @@ export function readWorkflowArtifactRecord(
   resolvedRunDir?: string,
 ): WorkflowArtifactRecordRead {
   try {
-    assertSafeComponent(artifactId, "artifactId");
+    assertWorkflowArtifactComponent(artifactId, "artifactId");
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };
   }
@@ -264,24 +272,20 @@ export function readWorkflowArtifactRecord(
     if (bytes.byteLength !== record.size || sha256(bytes) !== record.sha256) {
       return { status: "tampered", message: `Workflow artifact digest mismatch: ${record.artifactId}` };
     }
-    return { status: "ready", record: cloneRecord(record), bytes };
+    return { status: "ready", record: cloneWorkflowArtifactRecord(record), bytes };
   } catch (error) {
     return { status: "invalid", message: errorMessage(error) };
   }
 }
 
 export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStoreOptions): WorkflowArtifactStore {
-  assertSafeComponent(options.runId, "runId");
+  assertWorkflowArtifactComponent(options.runId, "runId");
   assertWorkflowRunDir(options.projectRoot, options.runId, options.runDir);
   const runtimeDir = workflowRunRuntimeDir(options.runDir);
   const runDir = options.runDir;
   const artifactsDir = workflowRunArtifactsDir(options.runDir);
   const indexPath = path.join(artifactsDir, "index.json");
   const now = options.now ?? (() => new Date().toISOString());
-  const maxTextBytes = options.maxTextBytes ?? DEFAULT_WORKFLOW_TEXT_ARTIFACT_LIMIT;
-  if (!Number.isSafeInteger(maxTextBytes) || maxTextBytes < 1) {
-    throw new Error("Workflow text artifact limit must be a positive safe integer.");
-  }
   ensureWorkflowDirectoryNoSymlink(options.runDir, runtimeDir);
   ensureWorkflowDirectoryNoSymlink(runtimeDir, artifactsDir);
   const existingIndexBytes = workflowRunFileExists(options.runDir, indexPath)
@@ -290,7 +294,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   let index =
     existingIndexBytes === undefined
       ? { version: WORKFLOW_ARTIFACT_INDEX_VERSION, runId: options.runId, artifacts: [] }
-      : parseIndex(existingIndexBytes.toString("utf8"), options.runId);
+      : parseWorkflowArtifactIndex(existingIndexBytes.toString("utf8"), options.runId);
   let indexDigest = existingIndexBytes === undefined ? undefined : sha256(existingIndexBytes);
 
   function verifyIndexUnchanged(): void {
@@ -328,8 +332,8 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     },
   ): WorkflowArtifactRef {
     verifyIndexUnchanged();
-    assertSafeComponent(input.artifactId, "artifactId");
-    assertArtifactName(input.name);
+    assertWorkflowArtifactComponent(input.artifactId, "artifactId");
+    assertWorkflowArtifactName(input.name);
     if (
       input.kind === "operator-ask" &&
       (input.callId === undefined || input.toolCallId === undefined || input.sequence === undefined)
@@ -339,7 +343,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     if (input.kind !== "operator-ask" && (input.toolCallId !== undefined || input.sequence !== undefined)) {
       throw new Error("Workflow non-operator artifact cannot carry operator-ask identity fields.");
     }
-    const relativePath = normalizeRelativePath(input.relativePath);
+    const relativePath = normalizeWorkflowArtifactRelativePath(input.relativePath);
     if (index.artifacts.some((entry) => entry.artifactId === input.artifactId || entry.relativePath === relativePath)) {
       throw new Error(`Duplicate workflow artifact identity: ${input.artifactId}`);
     }
@@ -367,11 +371,11 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
         ...(input.sequence !== undefined ? { sequence: input.sequence } : {}),
         ...(input.stage !== undefined ? { stage: input.stage } : {}),
         ...(input.childSessionId !== undefined ? { childSessionId: input.childSessionId } : {}),
-        ...(input.source !== undefined ? { source: cloneRef(input.source) } : {}),
+        ...(input.source !== undefined ? { source: workflowArtifactRef(input.source) } : {}),
         ...(input.replaySourceRunId !== undefined ? { replaySourceRunId: input.replaySourceRunId } : {}),
       };
       persistIndex({ ...index, artifacts: [...index.artifacts, record] });
-      return refFromRecord(record);
+      return workflowArtifactRef(record);
     } catch (error) {
       if (workflowRunFileExists(options.runDir, destination)) removeWorkflowRunFile(options.runDir, destination);
       throw error;
@@ -389,7 +393,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     childSessionId?: string;
   }): WorkflowArtifactRef {
     const bytes = readArtifactFile(options.runDir, artifactsDir, input.sourcePath);
-    const relativePath = normalizeRelativePath(path.relative(artifactsDir, input.sourcePath));
+    const relativePath = normalizeWorkflowArtifactRelativePath(path.relative(artifactsDir, input.sourcePath));
     if (input.kind === "transcript") validateTranscript(bytes, input.childSessionId);
     return addExistingRecord({ ...input, relativePath, bytes, provenance: "fresh" });
   }
@@ -399,7 +403,6 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     name: string;
     kind: WorkflowArtifactKind;
     mediaType: string;
-    sourcePath: string;
     relativePath: string;
     callId: string;
     provenance: WorkflowArtifactProvenance;
@@ -408,7 +411,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     childSessionId?: string;
   }): WorkflowArtifactRef {
     verifyIndexUnchanged();
-    const relativePath = normalizeRelativePath(input.relativePath);
+    const relativePath = normalizeWorkflowArtifactRelativePath(input.relativePath);
     if (index.artifacts.some((entry) => entry.artifactId === input.artifactId || entry.relativePath === relativePath)) {
       throw new Error(`Duplicate workflow artifact identity: ${input.artifactId}`);
     }
@@ -428,15 +431,15 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       ...(input.childSessionId !== undefined ? { childSessionId: input.childSessionId } : {}),
     };
     persistIndex({ ...index, artifacts: [...index.artifacts, record] });
-    return refFromRecord(record);
+    return workflowArtifactRef(record);
   }
 
   function recordAgentEvidence(input: WorkflowAgentEvidenceInput): WorkflowAgentEvidence {
-    assertSafeComponent(input.callId, "callId");
-    assertArtifactName(input.name);
+    assertWorkflowArtifactComponent(input.callId, "callId");
+    assertWorkflowArtifactName(input.name);
     const evidence: WorkflowAgentEvidence = {};
     if (input.text !== undefined && input.text.trim() !== "") {
-      const bytes = boundedText(input.text, maxTextBytes);
+      const bytes = Buffer.from(input.text, "utf8");
       evidence.answer = addRecord({
         artifactId: `${input.callId}-answer`,
         name: input.name,
@@ -490,7 +493,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     sequence: number,
     record: WorkflowAskEvidenceRecord,
   ): WorkflowArtifactRef {
-    assertSafeComponent(callId, "callId");
+    assertWorkflowArtifactComponent(callId, "callId");
     if (typeof toolCallId !== "string" || toolCallId.trim() === "") {
       throw new Error("Workflow operator-ask evidence requires a non-empty toolCallId.");
     }
@@ -508,7 +511,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       name: `operator-ask-${ordinal}.json`,
       kind: "operator-ask",
       mediaType: "application/json",
-      bytes: boundedText(serialized, maxTextBytes),
+      bytes: Buffer.from(serialized, "utf8"),
       relativePath: path.join("operator-asks", callId, `operator-ask-${ordinal}.json`),
       provenance: "fresh",
       callId,
@@ -523,7 +526,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     stage?: string,
     kind: "published" | "primary" = "published",
   ): WorkflowArtifactRef {
-    assertArtifactName(name);
+    assertWorkflowArtifactName(name);
     if (kind === "primary" && index.artifacts.some((entry) => entry.kind === "primary")) {
       throw new Error("workflow artifact store already contains a primary output");
     }
@@ -535,7 +538,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       name,
       kind,
       mediaType: "text/markdown; charset=utf-8",
-      bytes: boundedText(text, maxTextBytes),
+      bytes: Buffer.from(text, "utf8"),
       relativePath: path.join("published", `${artifactId}-${markdownFilename(name)}`),
       provenance: "published",
       ...(stage !== undefined ? { stage } : {}),
@@ -543,7 +546,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
   }
 
   function consumeText(ref: WorkflowArtifactRef, stage?: string): WorkflowConsumedTextArtifact {
-    validateRef(ref);
+    assertWorkflowArtifactRef(ref);
     if (ref.runId === options.runId) throw new Error("Workflow artifact self-reference is not allowed.");
     const sourceRunDir = resolveWorkflowRunDir(options.projectRoot, ref.runId);
     const resultBytes = readWorkflowRunFile(sourceRunDir, workflowResultFile(sourceRunDir));
@@ -551,12 +554,14 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     const sourceRead = readWorkflowArtifactRecord(options.projectRoot, ref.runId, ref.artifactId, sourceRunDir);
     if (sourceRead.status !== "ready") throw new Error(sourceRead.message);
     const sourceRecord = sourceRead.record;
-    if (!sameRef(sourceRecord, ref)) throw new Error("Workflow artifact reference does not match its source index.");
-    if (!sourceEnvelope.terminal.artifactRefs.some((projected) => sameArtifactRef(projected, ref))) {
-      throw new Error("Workflow artifact reference is not present in the source run terminal projection.");
-    }
+    if (!sameWorkflowArtifactRef(sourceRecord, ref))
+      throw new Error("Workflow artifact reference does not match its source index.");
+    // Admission is the source run's FULL verified index, not the compact projection
+    // result.json carries for display: `readWorkflowArtifactRecord` above proved the
+    // id, the byte digest and the record's provenance, and the envelope read proved
+    // the source run is a real terminal run of a known target. An artifact older than
+    // the newest few therefore stays consumable for as long as its bytes exist.
     if (!sourceRecord.mediaType.startsWith("text/")) throw new Error("Workflow artifact is not text media.");
-    if (sourceRecord.size > maxTextBytes) throw new Error("Workflow text artifact exceeds the configured size limit.");
     const bytes = sourceRead.bytes;
     const text = bytes.toString("utf8");
     const ordinal = index.artifacts.filter((entry) => entry.kind === "input").length + 1;
@@ -569,7 +574,7 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       bytes,
       relativePath: path.join("inputs", `${artifactId}-${markdownFilename(ref.name)}`),
       provenance: "consumed",
-      source: cloneRef(ref),
+      source: workflowArtifactRef(ref),
       ...(stage !== undefined ? { stage } : {}),
     });
     return {
@@ -597,23 +602,22 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
     publishText,
     consumeText,
     childEvidenceDestinations(callId) {
-      assertSafeComponent(callId, "callId");
+      assertWorkflowArtifactComponent(callId, "callId");
       const transcriptDir = path.join(artifactsDir, "transcripts", callId);
       const resultArtifactsDir = path.join(artifactsDir, "results", callId);
-      ensureWorkflowDirectoryNoSymlink(artifactsDir, transcriptDir);
-      ensureWorkflowDirectoryNoSymlink(artifactsDir, resultArtifactsDir);
+      for (const dir of [transcriptDir, resultArtifactsDir]) assertWorkflowRunDirectoryPath(runDir, dir, false);
       return { transcriptDir, resultArtifactsDir, recordOperatorAskEvidence };
     },
     list() {
       verifyIndexUnchanged();
-      return index.artifacts.map(cloneRecord);
+      return index.artifacts.map(cloneWorkflowArtifactRecord);
     },
     read(ref) {
-      validateRef(ref);
+      assertWorkflowArtifactRef(ref);
       if (ref.runId !== options.runId) throw new Error("Workflow artifact belongs to another run.");
       verifyIndexUnchanged();
       const record = index.artifacts.find((entry) => entry.artifactId === ref.artifactId);
-      if (record === undefined || !sameRef(record, ref))
+      if (record === undefined || !sameWorkflowArtifactRef(record, ref))
         throw new Error("Workflow artifact reference does not match its index.");
       const bytes = readArtifactFile(runDir, artifactsDir, path.join(artifactsDir, record.relativePath));
       if (bytes.byteLength !== record.size || sha256(bytes) !== record.sha256) {
@@ -621,109 +625,6 @@ export function createWorkflowArtifactStore(options: CreateWorkflowArtifactStore
       }
       return bytes;
     },
-  };
-}
-
-function parseIndex(raw: string, expectedRunId: string): WorkflowArtifactIndex {
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`Workflow artifact index is corrupt: ${errorMessage(error)}`);
-  }
-  if (
-    !isRecord(value) ||
-    value.version !== WORKFLOW_ARTIFACT_INDEX_VERSION ||
-    value.runId !== expectedRunId ||
-    !Array.isArray(value.artifacts)
-  ) {
-    throw new Error("Workflow artifact index has an invalid envelope.");
-  }
-  if (hasUnexpectedFields(value, ["version", "runId", "artifacts"])) {
-    throw new Error("Workflow artifact index has unexpected fields.");
-  }
-  const artifacts = value.artifacts.map((entry) => parseRecord(entry, expectedRunId));
-  const ids = new Set<string>();
-  const paths = new Set<string>();
-  for (const record of artifacts) {
-    if (ids.has(record.artifactId) || paths.has(record.relativePath))
-      throw new Error("Workflow artifact index has duplicate identities.");
-    ids.add(record.artifactId);
-    paths.add(record.relativePath);
-  }
-  return { version: WORKFLOW_ARTIFACT_INDEX_VERSION, runId: expectedRunId, artifacts };
-}
-
-function parseRecord(value: unknown, runId: string): WorkflowArtifactRecord {
-  if (!isRecord(value) || value.runId !== runId)
-    throw new Error("Workflow artifact index has an invalid record run id.");
-  const required = [
-    "artifactId",
-    "name",
-    "sha256",
-    "kind",
-    "mediaType",
-    "relativePath",
-    "provenance",
-    "createdAt",
-  ] as const;
-  for (const field of required)
-    if (typeof value[field] !== "string") throw new Error(`Workflow artifact record has invalid ${field}.`);
-  const allowed = [
-    "runId",
-    ...required,
-    "size",
-    "callId",
-    "toolCallId",
-    "sequence",
-    "stage",
-    "childSessionId",
-    "source",
-    "replaySourceRunId",
-  ];
-  if (hasUnexpectedFields(value, allowed)) throw new Error("Workflow artifact record has unexpected fields.");
-  if (!Number.isSafeInteger(value.size) || (value.size as number) < 0)
-    throw new Error("Workflow artifact record has invalid size.");
-  validateRef({
-    runId,
-    artifactId: value.artifactId as string,
-    name: value.name as string,
-    sha256: value.sha256 as string,
-  });
-  if (!isArtifactKind(value.kind) || !isProvenance(value.provenance))
-    throw new Error("Workflow artifact record has invalid kind/provenance.");
-  const relativePath = normalizeRelativePath(value.relativePath as string);
-  const callId = optionalSafeComponent(value.callId, "callId");
-  const toolCallId = optionalNonEmptyString(value.toolCallId, "toolCallId");
-  const sequence = optionalPositiveSafeInteger(value.sequence, "sequence");
-  const stage = optionalNonEmptyString(value.stage, "stage");
-  const childSessionId = optionalNonEmptyString(value.childSessionId, "childSessionId");
-  const replaySourceRunId = optionalSafeComponent(value.replaySourceRunId, "replaySourceRunId");
-  if (value.kind === "operator-ask" && (callId === undefined || toolCallId === undefined || sequence === undefined)) {
-    throw new Error("Workflow operator-ask artifact record is missing its stable identity.");
-  }
-  if (value.kind !== "operator-ask" && (toolCallId !== undefined || sequence !== undefined)) {
-    throw new Error("Workflow non-operator artifact record has operator-ask identity fields.");
-  }
-  if (value.source !== undefined) validateRef(value.source as WorkflowArtifactRef);
-  return {
-    runId,
-    artifactId: value.artifactId as string,
-    name: value.name as string,
-    sha256: value.sha256 as string,
-    kind: value.kind as WorkflowArtifactKind,
-    mediaType: value.mediaType as string,
-    size: value.size as number,
-    relativePath,
-    provenance: value.provenance as WorkflowArtifactProvenance,
-    createdAt: value.createdAt as string,
-    ...(callId !== undefined ? { callId } : {}),
-    ...(toolCallId !== undefined ? { toolCallId } : {}),
-    ...(sequence !== undefined ? { sequence } : {}),
-    ...(stage !== undefined ? { stage } : {}),
-    ...(childSessionId !== undefined ? { childSessionId } : {}),
-    ...(value.source !== undefined ? { source: cloneRef(value.source as WorkflowArtifactRef) } : {}),
-    ...(replaySourceRunId !== undefined ? { replaySourceRunId } : {}),
   };
 }
 
@@ -742,7 +643,7 @@ function parseSourceRunEnvelope(
   } catch (error) {
     throw new Error(`Source workflow run is not usable: ${runId}: ${errorMessage(error)}`);
   }
-  if (!isRecord(value) || value.ok !== true || !isRecord(value.target)) {
+  if (!isPlainObject(value) || value.ok !== true || !isPlainObject(value.target)) {
     throw new Error(`Source workflow run is not usable: ${runId}`);
   }
   let persistedRunId: string;
@@ -772,8 +673,8 @@ function parseSourceRunEnvelope(
     }
     try {
       artifactRefs = value.artifactRefs.map((ref) => {
-        validateRef(ref as WorkflowArtifactRef);
-        return cloneRef(ref as WorkflowArtifactRef);
+        assertWorkflowArtifactRef(ref as WorkflowArtifactRef);
+        return workflowArtifactRef(ref as WorkflowArtifactRef);
       });
     } catch {
       throw new Error(`Source workflow run has invalid artifact references: ${runId}`);
@@ -786,48 +687,6 @@ function parseSourceRunEnvelope(
       artifactRefs,
     },
   };
-}
-
-function optionalSafeComponent(value: unknown, field: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string") throw new Error(`Workflow artifact record has invalid ${field}.`);
-  assertSafeComponent(value, field);
-  return value;
-}
-
-function optionalNonEmptyString(value: unknown, field: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim() === "") {
-    throw new Error(`Workflow artifact record has invalid ${field}.`);
-  }
-  return value;
-}
-
-function optionalPositiveSafeInteger(value: unknown, field: string): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || (value as number) < 1) {
-    throw new Error(`Workflow artifact record has invalid ${field}.`);
-  }
-  return value as number;
-}
-
-function hasUnexpectedFields(value: Record<string, unknown>, allowed: readonly string[]): boolean {
-  const allowedSet = new Set(allowed);
-  return Object.keys(value).some((key) => !allowedSet.has(key));
-}
-
-function validateRef(ref: WorkflowArtifactRef): void {
-  if (!isRecord(ref)) throw new Error("Workflow artifact reference must be an object.");
-  assertSafeComponent(ref.runId, "runId");
-  assertSafeComponent(ref.artifactId, "artifactId");
-  assertArtifactName(ref.name);
-  if (typeof ref.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(ref.sha256)) {
-    throw new Error("Workflow artifact reference has an invalid sha256.");
-  }
-  const keys = Object.keys(ref);
-  if (keys.some((key) => !["runId", "artifactId", "name", "sha256"].includes(key))) {
-    throw new Error("Workflow artifact reference has unexpected fields.");
-  }
 }
 
 function readArtifactFile(runDir: string, artifactsDir: string, file: string): Buffer {
@@ -843,7 +702,7 @@ function validateTranscript(bytes: Buffer, childSessionId?: string): void {
   if (firstLine === "") throw new Error("Child transcript header is missing.");
   const header = JSON.parse(firstLine) as unknown;
   if (
-    !isRecord(header) ||
+    !isPlainObject(header) ||
     header.type !== "session" ||
     (childSessionId !== undefined && header.id !== childSessionId)
   ) {
@@ -851,41 +710,23 @@ function validateTranscript(bytes: Buffer, childSessionId?: string): void {
   }
 }
 
-function boundedText(text: string, limit: number): Buffer {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.byteLength > limit) throw new Error(`Workflow text artifact exceeds ${limit} bytes.`);
-  return bytes;
-}
-
-function normalizeRelativePath(value: string): string {
-  const normalized = path.normalize(value);
-  if (
-    normalized === "." ||
-    path.isAbsolute(normalized) ||
-    normalized.startsWith(`..${path.sep}`) ||
-    normalized === ".."
-  ) {
-    throw new Error("Workflow artifact relative path is unsafe.");
-  }
-  return normalized;
-}
-
-function assertSafeComponent(value: unknown, field: string): asserts value is string {
-  if (typeof value !== "string" || !WORKFLOW_ARTIFACT_COMPONENT_REGEX.test(value))
-    throw new Error(`Invalid workflow artifact ${field}: ${JSON.stringify(value)}`);
-}
-
-function assertArtifactName(value: unknown): asserts value is string {
-  assertSafeComponent(value, "name");
-}
+/**
+ * The longest filename component this derivation emits. Not a policy about the
+ * name — the full label stays in the index and in every ref — but the real limit
+ * common filesystems enforce on one component (255 bytes), left room for the
+ * `artifactId` prefix and an extension.
+ */
+const MAX_ARTIFACT_FILENAME_COMPONENT_CHARS = 120;
 
 function safeFilename(value: string): string {
-  return (
+  const base =
     value
       .toLowerCase()
       .replace(/[^a-z0-9._-]+/gu, "-")
-      .replace(/^-+|-+$/gu, "") || "artifact"
-  );
+      .replace(/^-+|-+$/gu, "") || "artifact";
+  return base.length > MAX_ARTIFACT_FILENAME_COMPONENT_CHARS
+    ? base.slice(0, MAX_ARTIFACT_FILENAME_COMPONENT_CHARS).replace(/-+$/u, "")
+    : base;
 }
 
 function markdownFilename(value: string): string {
@@ -897,22 +738,14 @@ function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function refFromRecord(record: WorkflowArtifactRecord): WorkflowArtifactRef {
-  return { runId: record.runId, artifactId: record.artifactId, name: record.name, sha256: record.sha256 };
-}
-
-function cloneRef(ref: WorkflowArtifactRef): WorkflowArtifactRef {
-  return { ...ref };
-}
-
 function freezeContinuationArtifact(input: {
   sourceRef: WorkflowArtifactRef;
   consumedArtifact: WorkflowConsumedTextArtifact;
 }): WorkflowContinuationArtifact {
-  const sourceRef = Object.freeze(cloneRef(input.sourceRef));
+  const sourceRef = Object.freeze(workflowArtifactRef(input.sourceRef));
   const consumed = input.consumedArtifact;
   const consumedArtifact = Object.freeze({
-    ref: Object.freeze(cloneRef(consumed.ref)),
+    ref: Object.freeze(workflowArtifactRef(consumed.ref)),
     text: consumed.text,
     source: Object.freeze({
       runId: consumed.source.runId,
@@ -922,59 +755,11 @@ function freezeContinuationArtifact(input: {
         ...(Object.prototype.hasOwnProperty.call(consumed.source.terminal, "result")
           ? { result: consumed.source.terminal.result }
           : {}),
-        artifactRefs: Object.freeze(consumed.source.terminal.artifactRefs.map((ref) => Object.freeze(cloneRef(ref)))),
+        artifactRefs: Object.freeze(
+          consumed.source.terminal.artifactRefs.map((ref) => Object.freeze(workflowArtifactRef(ref))),
+        ),
       }),
     }),
   });
   return Object.freeze({ sourceRef, consumedArtifact });
-}
-
-function cloneRecord(record: WorkflowArtifactRecord): WorkflowArtifactRecord {
-  return { ...record, ...(record.source !== undefined ? { source: cloneRef(record.source) } : {}) };
-}
-
-function cloneIndex(index: WorkflowArtifactIndex): WorkflowArtifactIndex {
-  return { ...index, artifacts: index.artifacts.map(cloneRecord) };
-}
-
-function sameRef(record: WorkflowArtifactRecord, ref: WorkflowArtifactRef): boolean {
-  return (
-    record.runId === ref.runId &&
-    record.artifactId === ref.artifactId &&
-    record.name === ref.name &&
-    record.sha256 === ref.sha256
-  );
-}
-
-function sameArtifactRef(left: WorkflowArtifactRef, right: WorkflowArtifactRef): boolean {
-  return (
-    left.runId === right.runId &&
-    left.artifactId === right.artifactId &&
-    left.name === right.name &&
-    left.sha256 === right.sha256
-  );
-}
-
-function isArtifactKind(value: unknown): value is WorkflowArtifactKind {
-  return (
-    value === "answer" ||
-    value === "transcript" ||
-    value === "result" ||
-    value === "published" ||
-    value === "primary" ||
-    value === "input" ||
-    value === "operator-ask"
-  );
-}
-
-function isProvenance(value: unknown): value is WorkflowArtifactProvenance {
-  return value === "fresh" || value === "replay" || value === "published" || value === "consumed";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

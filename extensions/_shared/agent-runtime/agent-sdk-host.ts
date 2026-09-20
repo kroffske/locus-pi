@@ -9,7 +9,8 @@ import type {
   AgentRunResult,
 } from "./agent-runner.js";
 import { agentRunDisplayName, agentRunResultIdentity } from "./agent-runner.js";
-import { EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
+import { AGENT_BUDGET_UNBOUNDED, EXECUTED_MODEL_UNAVAILABLE } from "./agent-runner.js";
+import { scheduleLongTimeout } from "../runtime/long-timer.js";
 import { modelSelectorFromModel } from "../model/live-model-display.js";
 import {
   createAgentExecutionPromptCapsule,
@@ -54,6 +55,9 @@ export const AGENT_SDK_UNAVAILABLE_DIAGNOSTIC = "agent-sdk-host:unavailable";
 /** Stable substring shared by AgentSdkUnavailableError messages. */
 export const AGENT_SDK_UNAVAILABLE_HINT = "Pi SDK host";
 
+/** Public opt-in for readable child-session renders. JSONL evidence is unconditional. */
+export const HTML_TRANSCRIPTS_ENV = "LOCUS_PI_HTML_TRANSCRIPTS";
+
 const DEFAULT_AGENT_SDK_ABORT_TIMEOUT_MS = 5_000;
 
 /** Raised when the installed Pi host cannot provide a usable `createAgentSession`. */
@@ -86,12 +90,23 @@ export interface SdkAgentSessionLike {
    * for. Structurally opaque: `modelSelectorFromModel` formats it.
    */
   readonly model?: unknown;
+  /** Current effective reasoning effort, as reported by the child session. */
+  readonly thinkingLevel?: ThinkingLevel;
   /** Pi conversation history; optional for structural mocks. */
   readonly messages?: readonly unknown[];
   subscribe(listener: (event: SdkAgentSessionEventLike) => void): () => void;
   prompt(text: string, options?: { source?: string; streamingBehavior?: "steer" | "followUp" }): Promise<void>;
   getSessionStats(): SdkSessionStatsLike;
   getLastAssistantText(): string | undefined;
+  /**
+   * Pi's `Agent` loop object. `beforeToolCall` and `shouldStopAfterTurn` are public
+   * mutable admission hooks on it (`@earendil-works/pi-agent-core`, `agent.d.ts`), and
+   * they are the only seam that can refuse the NEXT action rather than react to one that
+   * already ran. Optional because a structural mock or an older peer may not expose it;
+   * without it the budgets fall back to counting events and aborting, which stops the
+   * child one action late.
+   */
+  readonly agent?: SdkAgentAdmissionHooksLike;
   /** Pi 0.83 host readback. Required for fresh tool-free Fusion sessions. */
   getActiveToolNames?(): string[];
   /** Pi AgentSession API; restriction applies at the next agent turn. */
@@ -113,6 +128,19 @@ export interface SdkAgentSessionLike {
   dispose(): void;
   abort?(): Promise<void>;
 }
+/** The two pre-dispatch admission hooks this host installs on a child's agent loop. */
+export interface SdkAgentAdmissionHooksLike {
+  /** Runs before a tool executes; `{ block: true }` means the tool never runs. */
+  beforeToolCall?:
+    | ((
+        context: unknown,
+        signal?: AbortSignal,
+      ) => Promise<{ block?: boolean; reason?: string; terminate?: boolean } | undefined>)
+    | undefined;
+  /** Runs after a turn; `true` ends the loop before the next generation starts. */
+  shouldStopAfterTurn?: ((context: unknown, signal?: AbortSignal) => boolean | Promise<boolean>) | undefined;
+}
+
 export interface SdkCreateSessionResultLike {
   session: SdkAgentSessionLike;
 }
@@ -158,8 +186,19 @@ export interface SdkCreateSessionOptionsLike {
 
 export type CreateAgentSessionFactory = (options: SdkCreateSessionOptionsLike) => Promise<SdkCreateSessionResultLike>;
 
-/** Per-turn wall-clock budget for the child agent before the run is force-stopped. */
-export const DEFAULT_AGENT_SDK_TURN_TIMEOUT_MS = 120_000;
+/**
+ * There is no package-default wall clock for a child agent. A caller that wants one
+ * passes `childTimeoutMs`, and that value IS the deadline — one number, applied
+ * once. Absent, the host arms no timer and the run header reads `unbounded`: the
+ * previous `120_000 x (maxTurns ?? 5)` invented a ten-minute deadline nobody chose
+ * and made two independent fuses race.
+ *
+ * The option was called `turnTimeoutMs` and was multiplied by the request's turn
+ * count. It was never applied per turn — the host multiplied it into a single
+ * deadline immediately — so the name described arithmetic rather than behaviour,
+ * and the arithmetic is what overflowed Node's maximum delay once a caller derived
+ * the per-turn value by dividing its own fuse. One number in, one deadline out.
+ */
 
 export interface AgentSdkSessionExecutorOptions {
   /** Inject a fake factory in unit tests; defaults to a guarded dynamic import. */
@@ -174,11 +213,14 @@ export interface AgentSdkSessionExecutorOptions {
   /** Deterministic timestamps in tests. */
   now?: () => string;
   /**
-   * Override the wall-clock timeout (ms) applied to the whole child turn. The
-   * effective budget is this value times the request's `maxTurns`. Set a small
-   * value in tests to exercise the timeout fail-closed path deterministically.
+   * Explicit wall clock for the WHOLE child (ms), applied exactly as given. Omit it
+   * and the child runs without a host deadline. Set a small value in tests to
+   * exercise the timeout fail-closed path deterministically.
+   *
+   * A span longer than Node's maximum timer delay is honoured as a chain of
+   * representable waits, so a deliberately long deadline is never clamped to 1 ms.
    */
-  turnTimeoutMs?: number;
+  childTimeoutMs?: number;
   /** Exact caller deadline for a CLI-backed provider, separate from the SDK backstop. */
   cliRequestTimeoutMs?: number;
   /** Maximum wait for the SDK abort acknowledgement before evidence persistence continues. */
@@ -205,7 +247,7 @@ export interface AgentSdkSessionExecutorOptions {
   liveExecution?: AgentLiveExecutionHandle;
   /** Reports the one exact execution used by this run to callers that need post-boundary attribution. */
   onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
-  /** Optional explicit env for prompt-building; defaults to process.env. */
+  /** Optional explicit env for prompt-building and child evidence settings; defaults to process.env. */
   promptEnv?: NodeJS.ProcessEnv;
 }
 
@@ -217,7 +259,10 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
       ...(options.cliRequestTimeoutMs === undefined ? {} : { cliRequestTimeoutMs: options.cliRequestTimeoutMs }),
     });
   const now = options.now ?? (() => new Date().toISOString());
-  const turnTimeoutMs = options.turnTimeoutMs ?? DEFAULT_AGENT_SDK_TURN_TIMEOUT_MS;
+  const childTimeoutMs = options.childTimeoutMs;
+  if (childTimeoutMs !== undefined && (!Number.isSafeInteger(childTimeoutMs) || childTimeoutMs < 1)) {
+    throw new Error("childTimeoutMs must be a positive safe integer when provided");
+  }
   const abortTimeoutMs = options.abortTimeoutMs ?? DEFAULT_AGENT_SDK_ABORT_TIMEOUT_MS;
   if (!Number.isFinite(abortTimeoutMs) || abortTimeoutMs < 0) {
     throw new Error("abortTimeoutMs must be a non-negative finite number when provided");
@@ -278,7 +323,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
           createSession,
           now,
           options.reportsDir,
-          turnTimeoutMs,
+          childTimeoutMs,
           abortTimeoutMs,
           maxToolCalls,
           model,
@@ -298,6 +343,7 @@ export function createAgentSdkSessionExecutor(options: AgentSdkSessionExecutorOp
 /** Filled by the child-session run once a session exists; empty when none was created. */
 interface ExecutedModelObservation {
   executedModel?: string;
+  executedThinking?: ThinkingLevel;
   activeToolNames?: string[];
 }
 
@@ -315,7 +361,7 @@ async function runWithSdkSession(
   createSession: CreateAgentSessionFactory,
   now: () => string,
   reportsDirOverride: string | undefined,
-  turnTimeoutMs: number,
+  childTimeoutMs: number | undefined,
   abortTimeoutMs: number,
   maxToolCalls: number | undefined,
   model: unknown,
@@ -331,7 +377,7 @@ async function runWithSdkSession(
     createSession,
     now,
     reportsDirOverride,
-    turnTimeoutMs,
+    childTimeoutMs,
     abortTimeoutMs,
     maxToolCalls,
     model,
@@ -344,6 +390,7 @@ async function runWithSdkSession(
   return {
     ...result,
     ...(observed.executedModel === undefined ? {} : { executedModel: observed.executedModel }),
+    ...(observed.executedThinking === undefined ? {} : { executedThinking: observed.executedThinking }),
     ...(observed.activeToolNames === undefined ? {} : { activeToolNames: observed.activeToolNames }),
   };
 }
@@ -354,7 +401,7 @@ async function runChildSession(
   createSession: CreateAgentSessionFactory,
   now: () => string,
   reportsDirOverride: string | undefined,
-  turnTimeoutMs: number,
+  childTimeoutMs: number | undefined,
   abortTimeoutMs: number,
   maxToolCalls: number | undefined,
   model: unknown,
@@ -378,16 +425,22 @@ async function runChildSession(
     // Clear the request-side display model: no session was ever built, so leaving the
     // selector on the row shows an operator a model that never ran (see the note on
     // the `createSession` failure paths below).
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", { status: "cancelled", finalAnswer: reason });
     return cancelledResult(request, reason);
   }
 
-  // Validate the actual timer before constructing a session. Node turns an
-  // overflowing delay into 1 ms, which would abort a legitimate long child.
-  const turnBudgetMs = turnTimeoutMs * request.maxTurns;
-  if (!Number.isSafeInteger(turnBudgetMs) || turnBudgetMs < 1 || turnBudgetMs > 2_147_483_647) {
-    const reason = "Child timer budget cannot be represented by Node timers; lower maxTurns or turnTimeoutMs.";
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", finalAnswer: reason, errors: [reason] });
+  // Check the deadline before constructing a session. Length is no longer a reason
+  // to refuse — a span above Node's maximum delay runs as a chain of representable
+  // waits — so the only rejection left is a number no clock could count.
+  // `undefined` is not a failure: it means no caller asked for a wall clock.
+  const turnBudgetMs = childTimeoutMs;
+  if (turnBudgetMs !== undefined && (!Number.isSafeInteger(turnBudgetMs) || turnBudgetMs < 1)) {
+    const reason = "Child timer budget cannot be represented by Node timers; supply a positive whole childTimeoutMs.";
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      finalAnswer: reason,
+      errors: [reason],
+    });
     return failedResult(request, reason, "run-policy-blocked", [reason]);
   }
 
@@ -415,6 +468,14 @@ async function runChildSession(
     request.additionalExcludeTools === undefined || request.additionalExcludeTools.length === 0
       ? baseExcludedTools
       : [...new Set([...baseExcludedTools, ...request.additionalExcludeTools])];
+  // `tools: ["*"]` sends NO tool allowlist to the host, so "all tools" is what the
+  // request looks like — while the excludes above still apply. Name them in the
+  // run's diagnostics, which is the durable capability receipt written by
+  // `writeAgentRunResultArtifact`, so "all tools" is never a claim the record
+  // cannot support.
+  if (effectiveTools === undefined && excludedTools.length > 0) {
+    diagnostics.push(`Tool access "*" means every host tool except: ${[...excludedTools].sort().join(", ")}.`);
+  }
   const sessionOptions: SdkCreateSessionOptionsLike = {
     cwd,
     evidenceSessionDir: path.join(
@@ -432,10 +493,21 @@ async function runChildSession(
   if (model !== undefined && model !== null) sessionOptions.model = model;
   if (thinkingLevel !== undefined) sessionOptions.thinkingLevel = thinkingLevel;
   const appendSystemPrompt = appendDirectSpawnBoundary(capsule.agentSystemPrompt);
+  // The one tool a tool-free child may keep: the shaped-result receipt.
+  //
+  // "Tool-free" means the child cannot ACT — no host tools, no extensions, no skills, no
+  // discovered resources. The return tool does nothing outside the session: it records the
+  // value the caller declared a contract for. Clearing it too meant a tool-free Fusion with
+  // a shaped judge ran every member, then failed the judge for a transport the run could
+  // have known about before the first token, which is the outcome this refusal exists to
+  // prevent. Pi's registry is built from the allowlist, so the name has to be in `tools`
+  // as well as in `customTools`; the readback below still proves the child has nothing else.
+  const toolFreeReturnToolNames =
+    request.responseAcceptance === undefined ? [] : [...request.responseAcceptance.toolNames];
   if (request.capabilityMode === "tool-free") {
     sessionOptions.noTools = "all";
-    sessionOptions.tools = [];
-    sessionOptions.customTools = [];
+    sessionOptions.tools = toolFreeReturnToolNames;
+    sessionOptions.customTools = customTools.filter((tool) => toolFreeReturnToolNames.includes(tool.name));
     sessionOptions.resourceLoaderOptions = {
       noExtensions: true,
       noSkills: true,
@@ -462,7 +534,7 @@ async function runChildSession(
       // ran — the live panel is the surface they actually watch, and a failed row
       // reading "test/fast" is indistinguishable from one that ran on test/fast and
       // errored. Clear it: absent is honest, invented is not.
-      agentLiveStore.patchExecutionWithoutModel(execution, {
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
         status: "error",
         errors: [error.message],
         finalAnswer: error.message,
@@ -474,7 +546,11 @@ async function runChildSession(
       ]);
     }
     const reason = errorMessage(error);
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      errors: [reason],
+      finalAnswer: reason,
+    });
     // Catch-all: this branch also carries a bad model id, a rejected tool allowlist and any
     // option-assembly bug. None of those is transient, so none of them may be retried.
     return failedResult(request, reason, "unclassified", [...diagnostics, reason]);
@@ -493,20 +569,36 @@ async function runChildSession(
       if (activeToolNames !== undefined) observed.activeToolNames = activeToolNames;
     } catch (error) {
       const reason = `Active tool readback failed before child prompt: ${errorMessage(error)}`;
-      agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+        status: "error",
+        errors: [reason],
+        finalAnswer: reason,
+      });
       disposeQuietly(session);
       return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
     }
   }
   if (request.capabilityMode === "tool-free" && activeToolNames === undefined) {
     const reason = "Tool-free Fusion requires AgentSession.getActiveToolNames() before child prompt.";
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      errors: [reason],
+      finalAnswer: reason,
+    });
     disposeQuietly(session);
     return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
   }
-  if (request.capabilityMode === "tool-free" && activeToolNames!.length > 0) {
-    const reason = `Tool-free Fusion child exposed active tools before prompt: ${activeToolNames!.join(", ")}.`;
-    agentLiveStore.patchExecutionWithoutModel(execution, { status: "error", errors: [reason], finalAnswer: reason });
+  const unexpectedToolFreeTools =
+    request.capabilityMode === "tool-free"
+      ? activeToolNames!.filter((name) => !toolFreeReturnToolNames.includes(name))
+      : [];
+  if (unexpectedToolFreeTools.length > 0) {
+    const reason = `Tool-free Fusion child exposed active tools before prompt: ${unexpectedToolFreeTools.join(", ")}.`;
+    agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
+      status: "error",
+      errors: [reason],
+      finalAnswer: reason,
+    });
     disposeQuietly(session);
     return failedResult(request, reason, "unclassified", [...diagnostics, reason], undefined, childSession);
   }
@@ -518,6 +610,7 @@ async function runChildSession(
   // put "executedModel" on a call that spent no tokens, which is the same
   // requested-vs-executed conflation this task exists to remove, one step later.
   const sessionModelSelector = modelSelectorFromModel(session.model) ?? EXECUTED_MODEL_UNAVAILABLE;
+  const sessionThinkingLevel = session.thinkingLevel;
   const requestedSelector = modelSelectorFromModel(model);
   let childOutputStats: AgentChildOutputStats | undefined;
   let childTrace: AgentChildTrace | undefined;
@@ -525,17 +618,25 @@ async function runChildSession(
   const preserveChildTrace = async (): Promise<AgentChildTrace | undefined> => {
     if (!childTraceAttempted) {
       childTraceAttempted = true;
-      childTrace = await exportEvidence(session, request, now, reportsDirOverride, diagnostics, {
-        ...(agentLiveStore.rowForExecution(execution)?.displayName === undefined
-          ? {}
-          : { displayName: agentLiveStore.rowForExecution(execution)!.displayName! }),
-        ...(liveLabel === undefined ? {} : { label: liveLabel }),
-      });
+      childTrace = await exportEvidence(
+        session,
+        request,
+        now,
+        reportsDirOverride,
+        diagnostics,
+        {
+          ...(agentLiveStore.rowForExecution(execution)?.displayName === undefined
+            ? {}
+            : { displayName: agentLiveStore.rowForExecution(execution)!.displayName! }),
+          ...(liveLabel === undefined ? {} : { label: liveLabel }),
+        },
+        promptEnv,
+      );
     }
     return childTrace;
   };
   /**
-   * Terminal row patch that may only leave a model on the row once one executed.
+   * Terminal row patch: a model stays only once one executed, an effort only once read back.
    *
    * `observed.executedModel` is this file's single proof of execution, so the row and
    * the result are held to the same evidence: a run that ends before the child was
@@ -544,7 +645,9 @@ async function runChildSession(
    * of leaving an operator a terminal row indistinguishable from one that ran.
    */
   const patchTerminalRow = (patch: Partial<Omit<AgentLiveRow, "id" | "model" | "thinking">>): void => {
-    if (observed.executedModel === undefined) agentLiveStore.patchExecutionWithoutModel(execution, patch);
+    if (observed.executedModel === undefined) agentLiveStore.patchExecutionWithoutReadback(execution, "model", patch);
+    else if (observed.executedThinking === undefined)
+      agentLiveStore.patchExecutionWithoutReadback(execution, "thinking", patch);
     else agentLiveStore.patchExecution(execution, patch);
   };
   try {
@@ -563,6 +666,7 @@ async function runChildSession(
       // reports nothing the row keeps its display value rather than showing the
       // `unavailable` sentinel, which is evidence and not a model name (D6/D7).
       ...(sessionModelSelector !== EXECUTED_MODEL_UNAVAILABLE ? { model: sessionModelSelector } : {}),
+      ...(sessionThinkingLevel !== undefined ? { thinking: sessionThinkingLevel } : {}),
     });
 
     // MUST guard the gap between session creation and prompting: an abort that
@@ -574,7 +678,7 @@ async function runChildSession(
       // Clear the label rather than leave the readback standing: the session was
       // BUILT on that model and never prompted, so a terminal row naming it claims an
       // execution that did not happen — the same conflation as echoing the request.
-      agentLiveStore.patchExecutionWithoutModel(execution, { status: "cancelled", finalAnswer: reason });
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", { status: "cancelled", finalAnswer: reason });
       const preservedTrace = await preserveChildTrace();
       return withChildTrace(cancelledResult(request, reason, diagnostics, childSession), preservedTrace);
     }
@@ -595,7 +699,7 @@ async function runChildSession(
       // Both values are in `reason`, which is where a mismatch belongs. The ROW gets
       // neither: the requested model did not run and the built-on model was never
       // prompted, so any label here names a model that executed nothing.
-      agentLiveStore.patchExecutionWithoutModel(execution, {
+      agentLiveStore.patchExecutionWithoutReadback(execution, "model", {
         status: "error",
         errors: [reason],
         finalAnswer: reason,
@@ -630,8 +734,16 @@ async function runChildSession(
         active === undefined ||
         acceptance.toolNames.some((name) => !active.includes(name))
       ) {
+        // CAPABILITY, refused before the child is prompted: the session exists but has not
+        // been given a single token of work, so nothing is spent on an answer this
+        // transport could not carry back. There is deliberately no fallback — the text
+        // transport that used to parse a shaped value out of a final message is gone, and
+        // quietly reverting to it is exactly the silent degradation this refusal prevents.
         const reason =
-          "Same-session output acceptance requires registered return tools and host tool-set readback/restriction";
+          "Transport cannot carry a shaped result: same-session output acceptance requires the return tool to be " +
+          "registered on the child session plus host tool-set readback (getActiveToolNames) and restriction " +
+          "(setActiveToolsByName). This host provides neither, and there is no text fallback. " +
+          "Use a plain text call on this transport, or run the shaped call on a host that supports it.";
         patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
         await preserveChildTrace();
         return withChildTrace(
@@ -649,8 +761,8 @@ async function runChildSession(
       acceptance.bindToolRestriction(restrictAcceptanceTools);
     }
 
-    const ledger: ChildTurnLedger = { toolCalls: 0, assistantTurns: 0, toolNames: new Set() };
-    const deadline = Date.now() + turnBudgetMs;
+    const ledger: ChildTurnLedger = { toolCalls: 0, admittedToolCalls: 0, assistantTurns: 0, toolNames: new Set() };
+    const deadline = turnBudgetMs === undefined ? undefined : Date.now() + turnBudgetMs;
     let acceptedOutput:
       Extract<ReturnType<NonNullable<typeof acceptance>["inspect"]>, { status: "accepted" }> | undefined;
     let acceptanceFailure: string | undefined;
@@ -665,7 +777,10 @@ async function runChildSession(
       ledger,
       request.maxTurns,
     );
-    if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+    if (turn.promptAccepted) {
+      observed.executedModel = sessionModelSelector;
+      if (sessionThinkingLevel !== undefined) observed.executedThinking = sessionThinkingLevel;
+    }
     while (
       acceptance !== undefined &&
       turn.settlement === "completed" &&
@@ -682,11 +797,11 @@ async function runChildSession(
         acceptanceFailureCause = decision.failureCause ?? "output-contract-exhausted";
         break;
       }
-      if (Date.now() >= deadline) {
+      if (deadline !== undefined && Date.now() >= deadline) {
         turn = { ...turn, settlement: "timed_out" };
         break;
       }
-      if (ledger.assistantTurns >= request.maxTurns) {
+      if (request.maxTurns !== undefined && ledger.assistantTurns >= request.maxTurns) {
         turn = { ...turn, settlement: "turn_limit" };
         break;
       }
@@ -695,13 +810,16 @@ async function runChildSession(
         session,
         decision.prompt,
         signal,
-        Math.max(1, deadline - Date.now()),
+        deadline === undefined ? undefined : Math.max(1, deadline - Date.now()),
         maxToolCalls,
         execution,
         ledger,
         request.maxTurns,
       );
-      if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+      if (turn.promptAccepted) {
+        observed.executedModel = sessionModelSelector;
+        if (sessionThinkingLevel !== undefined) observed.executedThinking = sessionThinkingLevel;
+      }
     }
     if (signal.aborted) turn = { ...turn, settlement: "aborted" };
 
@@ -715,7 +833,10 @@ async function runChildSession(
     // prompt is still in flight and no child event has ever arrived. A turn that was
     // dispatched and then timed out DID execute, which is why promotion sits here
     // rather than after the settlement branches.
-    if (turn.promptAccepted) observed.executedModel = sessionModelSelector;
+    if (turn.promptAccepted) {
+      observed.executedModel = sessionModelSelector;
+      if (sessionThinkingLevel !== undefined) observed.executedThinking = sessionThinkingLevel;
+    }
 
     if (
       turn.settlement === "aborted" ||
@@ -727,7 +848,7 @@ async function runChildSession(
       await abortChild(session, abortTimeoutMs);
       await preserveChildTrace();
       if (turn.settlement === "timed_out") {
-        const reason = `Child agent turn exceeded the ${turnBudgetMs}ms budget and was aborted.`;
+        const reason = `Child agent turn exceeded the ${String(turnBudgetMs)}ms budget and was aborted.`;
         patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, "host-turn-timeout", [...diagnostics, reason], undefined, childSession),
@@ -735,7 +856,7 @@ async function runChildSession(
         );
       }
       if (turn.settlement === "turn_limit") {
-        const reason = `Child exceeded its cumulative ${request.maxTurns} assistant-turn budget`;
+        const reason = `Child exceeded its cumulative ${String(request.maxTurns)} assistant-turn budget`;
         patchTerminalRow({ status: "error", errors: [reason], finalAnswer: reason });
         return withChildTrace(
           failedResult(request, reason, "assistant-turn-budget", [...diagnostics, reason], undefined, childSession),
@@ -777,7 +898,7 @@ async function runChildSession(
     const providerFailure = assistantProviderFailure(session.messages);
     if (providerFailure !== undefined) {
       const currentErrors = agentLiveStore.rowForExecution(execution)?.errors ?? [];
-      agentLiveStore.patchExecution(execution, {
+      patchTerminalRow({
         status: "error",
         childSessionId: childSession.id,
         errors: unique([...currentErrors, providerFailure]),
@@ -805,7 +926,7 @@ async function runChildSession(
     }
     const parsed = parseAgentText(text ?? "");
     if (!parsed.ok) {
-      agentLiveStore.patchExecution(execution, {
+      patchTerminalRow({
         status: "error",
         childSessionId: childSession.id,
         finalAnswer: parsed.reason,
@@ -832,7 +953,7 @@ async function runChildSession(
       status: "completed",
     };
     const evidence = evaluateEvidence(evidenceInput);
-    agentLiveStore.patchExecution(execution, {
+    patchTerminalRow({
       status: "done",
       childSessionId: childSession.id,
       finalAnswer: parsed.text,
@@ -884,6 +1005,13 @@ async function runChildSession(
 type ChildTurnSettlement = "completed" | "aborted" | "timed_out" | "tool_limit" | "turn_limit";
 interface ChildTurnLedger {
   toolCalls: number;
+  /**
+   * Tool calls ADMITTED by the pre-dispatch hook, counted independently of the event
+   * stream. `tool_execution_start` is emitted before the hook runs, so an event count
+   * includes the call this host is about to refuse; admission is the number that decides
+   * whether the next tool may run at all.
+   */
+  admittedToolCalls: number;
   assistantTurns: number;
   toolNames: Set<string>;
 }
@@ -918,10 +1046,10 @@ async function driveChildTurn(
   session: SdkAgentSessionLike,
   kickoff: string,
   signal: AbortSignal,
-  turnBudgetMs: number,
+  turnBudgetMs: number | undefined,
   maxToolCalls: number | undefined,
   execution: AgentLiveExecutionHandle,
-  ledger: ChildTurnLedger = { toolCalls: 0, assistantTurns: 0, toolNames: new Set() },
+  ledger: ChildTurnLedger = { toolCalls: 0, admittedToolCalls: 0, assistantTurns: 0, toolNames: new Set() },
   maxAssistantTurns?: number,
 ): Promise<ChildTurnObservation> {
   // Subscribe BEFORE prompting so a fast agent_end is never missed.
@@ -944,6 +1072,18 @@ async function driveChildTurn(
   let resolveTurnLimit: () => void = () => {};
   const turnLimited = new Promise<"turn_limit">((resolve) => {
     resolveTurnLimit = () => resolve("turn_limit");
+  });
+  // Admission BEFORE dispatch. The event counters below stay as they are — they are the
+  // evidence, and the settlement they resolve is unchanged — but on their own they only
+  // learn about the over-budget action once the child has already taken it. These hooks
+  // refuse the next one instead: the (N+1)-th tool never executes, and the turn after the
+  // last declared one is never generated. The named budget stop and everything received
+  // so far are untouched either way.
+  const restoreAdmission = installChildBudgetAdmission(session, ledger, {
+    ...(maxToolCalls === undefined ? {} : { maxToolCalls }),
+    ...(maxAssistantTurns === undefined ? {} : { maxAssistantTurns }),
+    onToolBudgetReached: () => resolveToolLimit(),
+    onTurnBudgetReached: () => resolveTurnLimit(),
   });
   const unsubscribe = session.subscribe((event) => {
     try {
@@ -991,15 +1131,20 @@ async function driveChildTurn(
         )
       : () => {};
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let cancelTimer: (() => void) | undefined;
   let onAbort: (() => void) | undefined;
   try {
     const aborted = new Promise<"aborted">((resolve) => {
       onAbort = () => resolve("aborted");
       signal.addEventListener("abort", onAbort, { once: true });
     });
+    // No budget, no timer: an undeclared wall clock is unbounded, never a
+    // zero-delay abort. A budget above Node's maximum delay is a chain of
+    // representable waits, never a clamp to one millisecond.
     const timedOut = new Promise<"timed_out">((resolve) => {
-      timer = setTimeout(() => resolve("timed_out"), turnBudgetMs);
+      if (turnBudgetMs !== undefined) {
+        cancelTimer = scheduleLongTimeout(turnBudgetMs, () => resolve("timed_out"), "childTimeoutMs");
+      }
     });
     // A turn is "complete" only when agent_end fires; prompt() racing here means a
     // hung prompt() cannot block the abort/timeout branches from winning.
@@ -1014,9 +1159,80 @@ async function driveChildTurn(
   } finally {
     unregisterInput();
     unsubscribe();
-    if (timer !== undefined) clearTimeout(timer);
+    restoreAdmission();
+    cancelTimer?.();
     if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
   }
+}
+
+/**
+ * Install the pre-dispatch budget admission on a child's agent loop, returning a
+ * restore function.
+ *
+ * Both hooks CHAIN: Pi's own `beforeToolCall` bridges the `tool_call` extension event, so
+ * replacing it outright would silence every extension handler on the child. An inherited
+ * block wins, and only after it declines does the budget decide.
+ *
+ * A host without the loop object (a structural mock, an older peer) gets no hooks and
+ * keeps the event-counted behaviour: the budget is still enforced, one action late.
+ */
+function installChildBudgetAdmission(
+  session: SdkAgentSessionLike,
+  ledger: ChildTurnLedger,
+  budget: {
+    maxToolCalls?: number;
+    maxAssistantTurns?: number;
+    onToolBudgetReached: () => void;
+    onTurnBudgetReached: () => void;
+  },
+): () => void {
+  const agent = session.agent;
+  if (agent === undefined || typeof agent !== "object") return () => {};
+  if (budget.maxToolCalls === undefined && budget.maxAssistantTurns === undefined) return () => {};
+  const previousBeforeToolCall = agent.beforeToolCall;
+  const previousShouldStop = agent.shouldStopAfterTurn;
+  const maxToolCalls = budget.maxToolCalls;
+  const maxAssistantTurns = budget.maxAssistantTurns;
+  if (maxToolCalls !== undefined) {
+    agent.beforeToolCall = async (context, abortSignal) => {
+      const inherited =
+        typeof previousBeforeToolCall === "function"
+          ? await previousBeforeToolCall.call(agent, context, abortSignal)
+          : undefined;
+      if (inherited?.block === true) return inherited;
+      if (ledger.admittedToolCalls >= maxToolCalls) {
+        budget.onToolBudgetReached();
+        return {
+          block: true,
+          reason:
+            `Child agent reached its ${String(maxToolCalls)} tool-call budget; ` +
+            "this call was refused before it ran. Everything already produced is kept.",
+          terminate: true,
+        };
+      }
+      ledger.admittedToolCalls += 1;
+      return inherited;
+    };
+  }
+  if (maxAssistantTurns !== undefined) {
+    agent.shouldStopAfterTurn = async (context, abortSignal) => {
+      const inherited =
+        typeof previousShouldStop === "function" ? await previousShouldStop.call(agent, context, abortSignal) : false;
+      if (inherited === true) return true;
+      if (ledger.assistantTurns < maxAssistantTurns) return false;
+      // Only when the loop WOULD continue. A final turn with no tool results ends on its
+      // own, and calling this a turn-budget stop there would turn an ordinary completion
+      // into a failure.
+      const results = isRecord(context) ? context.toolResults : undefined;
+      if (!Array.isArray(results) || results.length === 0) return false;
+      budget.onTurnBudgetReached();
+      return true;
+    };
+  }
+  return () => {
+    if (maxToolCalls !== undefined) agent.beforeToolCall = previousBeforeToolCall;
+    if (maxAssistantTurns !== undefined) agent.shouldStopAfterTurn = previousShouldStop;
+  };
 }
 
 function sdkToolEventName(event: unknown): string | undefined {
@@ -1181,6 +1397,7 @@ async function exportEvidence(
   reportsDirOverride: string | undefined,
   diagnostics: string[],
   identity: { displayName?: string; label?: string },
+  env: NodeJS.ProcessEnv | undefined,
 ): Promise<AgentChildTrace | undefined> {
   const reportsDir = reportsDirOverride ?? path.join(runtimeStateDir(request.projectRoot ?? process.cwd()), "reports");
   const stamp = sanitizeStamp(now());
@@ -1205,13 +1422,15 @@ async function exportEvidence(
       throw new Error(`exported JSONL session header does not match child ${session.sessionId}`);
     }
     diagnostics.push(`JSONL evidence exported: ${realExportedPath}`);
-    const htmlPath = await exportHtmlRender(
-      session,
-      realReportsDir,
-      realExportedPath,
-      diagnostics,
-      agentEvidenceTitle(request, identity),
-    );
+    const htmlPath = htmlTranscriptsEnabled(env)
+      ? await exportHtmlRender(
+          session,
+          realReportsDir,
+          realExportedPath,
+          diagnostics,
+          agentEvidenceTitle(request, identity),
+        )
+      : undefined;
     return {
       path: realExportedPath,
       format: "pi-session-jsonl",
@@ -1222,6 +1441,11 @@ async function exportEvidence(
     diagnostics.push(`JSONL export failed: ${errorMessage(error)}`);
     return undefined;
   }
+}
+
+/** Only the literal value `1` enables automatic HTML rendering. */
+export function htmlTranscriptsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[HTML_TRANSCRIPTS_ENV]?.trim() === "1";
 }
 
 /** Named warning prefix for every reason a session has no readable render. */
@@ -1325,7 +1549,7 @@ function createSdkSessionRecord(request: AgentRunRequest, childSessionId: string
       source: "agent-sdk-session-host",
       executionMode: request.executionMode,
       ...(request.executionMode === "named" ? { agentName: request.agent.name } : {}),
-      maxTurns: request.maxTurns,
+      maxTurns: request.maxTurns ?? AGENT_BUDGET_UNBOUNDED,
       depth: request.depth,
       maxDepth: request.maxDepth,
     },

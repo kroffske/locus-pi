@@ -26,12 +26,7 @@ import {
   type WorkflowAgentResult,
   type WorkflowJournalLine,
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
-import {
-  parseModelSelector,
-  resolveWorkflowModel,
-  type WorkflowModelRegistrySource,
-} from "../../../../extensions/_shared/model/workflow-model-resolve.js";
-import type { ModelLike } from "../../../../extensions/_shared/host/pi-api.js";
+import type { ModelLike, ThinkingLevel } from "../../../../extensions/_shared/host/pi-api.js";
 import { createHarness, type Harness } from "../../../test-harness.js";
 import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../../model-roles-fixture.js";
 
@@ -44,6 +39,11 @@ import { restoreGlobalModelRolesHome, writeGlobalModelRoles } from "../../../mod
  * so `createSession` is observed by value rather than believed.
  *
  * A real Pi peer honoring the model remains live-run evidence.
+ *
+ * ROUTING only. The selector grammar and the host registry lookup this suite stands
+ * on belong to the shared resolver and are proven in
+ * `tests/shared/model/workflow-model-resolve.test.ts`; what is decided here is which
+ * declaration wins, what a refusal says, and what the run evidence records.
  */
 
 const FAST: ModelLike = { provider: "test", id: "fast", name: "Test Fast" };
@@ -86,11 +86,10 @@ function tieredProject(): string {
   return root;
 }
 
+type ExecutorOptions = Parameters<NonNullable<Parameters<typeof createWorkflowAgentRunner>[0]["createExecutor"]>>[0];
+
 interface SdkProbe {
-  createExecutor: (o: {
-    model?: unknown;
-    thinkingLevel?: SdkCreateSessionOptionsLike["thinkingLevel"];
-  }) => AgentExecutor;
+  createExecutor: (o: ExecutorOptions) => AgentExecutor;
   /** Every `createSession` call, in order. Length 0 proves no child was ever spawned. */
   captured: SdkCreateSessionOptionsLike[];
 }
@@ -100,21 +99,20 @@ interface SdkProbe {
  *
  * `createAgentSdkSessionExecutor` is the real one, so a passing assertion covers the
  * whole path bridge → boundary → executor → `createSession`, not just the bridge's
- * intention.
+ * intention. `readsBackThinking: false` is a peer whose session names no effort.
  */
-function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
+function sdkProbe(sessionModel?: unknown, answer = "tier answer", readsBackThinking = true): SdkProbe {
   const captured: SdkCreateSessionOptionsLike[] = [];
   const reportsDir = mkdtempSync(path.join(tmpdir(), "locus-model-tiers-reports-"));
-  const createExecutor = (o: {
-    model?: unknown;
-    thinkingLevel?: SdkCreateSessionOptionsLike["thinkingLevel"];
-  }): AgentExecutor =>
+  const createExecutor = (o: ExecutorOptions): AgentExecutor =>
     createAgentSdkSessionExecutor({
       ...(o.model !== undefined ? { model: o.model } : {}),
       ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
+      ...(o.live !== undefined ? { live: o.live } : {}),
       createSession: async (options) => {
         captured.push(options);
-        return { session: fakeSession(sessionModel, answer) };
+        const thinking = readsBackThinking ? options.thinkingLevel : undefined;
+        return { session: fakeSession(sessionModel, answer, thinking, options) };
       },
       reportsDir,
       now: () => "fixed",
@@ -122,21 +120,55 @@ function sdkProbe(sessionModel?: unknown, answer = "tier answer"): SdkProbe {
   return { createExecutor, captured };
 }
 
-function fakeSession(model: unknown, answer = "tier answer"): SdkAgentSessionLike {
+/**
+ * A child session on a host that CAN carry a shaped result: it registers the custom tools
+ * it was given, reports its active tool set back, and — when a `workflow_return` tool is
+ * present — submits the scripted answer through it, the way a real child would. Without
+ * that readback the host refuses every shaped call by capability, which is a different
+ * test from the ones here.
+ */
+function fakeSession(
+  model: unknown,
+  answer = "tier answer",
+  thinkingLevel?: ThinkingLevel,
+  options?: { customTools?: Array<{ name: string; execute: (...args: never[]) => unknown }> },
+): SdkAgentSessionLike {
   const exportDir = mkdtempSync(path.join(tmpdir(), "locus-model-tiers-export-"));
   let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
+  const returnTool = options?.customTools?.find((tool) => tool.name === "workflow_return");
+  let activeTools = (options?.customTools ?? []).map((tool) => tool.name);
   return {
     sessionId: "tier-child",
     // Absent on purpose when the caller passes nothing: an older peer or a
     // structural mock exposes no model, and that must record as `unavailable`.
     ...(model !== undefined ? { model } : {}),
+    ...(thinkingLevel !== undefined ? { thinkingLevel } : {}),
     subscribe(fn) {
       listener = fn;
       return () => {
         listener = undefined;
       };
     },
+    getActiveToolNames() {
+      return [...activeTools];
+    },
+    setActiveToolsByName(names: string[]) {
+      activeTools = [...names];
+    },
     async prompt() {
+      if (returnTool !== undefined) {
+        let value: unknown = answer;
+        try {
+          value = JSON.parse(answer);
+        } catch {
+          // A non-JSON scripted answer is submitted verbatim, as a child would.
+        }
+        (returnTool.execute as (id: string, input: unknown, signal: AbortSignal) => unknown)(
+          "tool-call-1",
+          { value },
+          new AbortController().signal,
+        );
+      }
       listener?.({ type: "agent_end", willRetry: false });
     },
     getSessionStats() {
@@ -182,97 +214,6 @@ async function harnessWithRoles(roles?: Record<string, string>): Promise<Harness
   h.ctx.model = STRONG;
   return h;
 }
-
-// ---------------------------------------------------------------------------
-// W1 — the selector grammar, which OD3 settled as "real thinking levels only"
-// ---------------------------------------------------------------------------
-
-describe("model selector grammar", () => {
-  it("splits a plain provider/id selector", () => {
-    expect(parseModelSelector("openai/gpt-5")).toEqual({ provider: "openai", id: "gpt-5" });
-  });
-
-  it.each(["off", "minimal", "low", "medium", "high", "xhigh"])(
-    "strips the real thinking level %s and keeps it for display",
-    (level) => {
-      expect(parseModelSelector(`openai/gpt-5:${level}`)).toEqual({
-        provider: "openai",
-        id: "gpt-5",
-        thinking: level,
-      });
-    },
-  );
-
-  it("keeps a suffix that is not a thinking level as part of the id", () => {
-    // The two parsers used to disagree here: this module stripped the LITERAL
-    // string ":thinking" while the roles table stripped real levels. One grammar
-    // now, and the literal word is just an id suffix that will fail to resolve.
-    expect(parseModelSelector("openai/gpt-5:thinking")).toEqual({ provider: "openai", id: "gpt-5:thinking" });
-  });
-
-  it.each(["smol", "slow", "default"])("treats the slash-free token %s as a role, not a selector", (token) => {
-    expect(parseModelSelector(token)).toBeUndefined();
-  });
-
-  it.each(["", "/", "openai/", "/gpt-5", "openai/:high"])("refuses the malformed selector %j", (selector) => {
-    expect(parseModelSelector(selector)).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// W1 — resolution goes through the host registry and never returns "undefined,
-// figure it out yourself"
-// ---------------------------------------------------------------------------
-
-describe("registry resolution", () => {
-  it("resolves a configured model to the registry's own object", async () => {
-    const h = await harnessWithRoles();
-    const resolution = await resolveWorkflowModel("test/fast", h.ctx);
-
-    expect(resolution).toMatchObject({ ok: true, selector: "test/fast", provider: "test", id: "fast" });
-    expect(resolution.ok && resolution.model).toEqual(FAST);
-  });
-
-  it("strips the thinking level BEFORE the registry lookup", async () => {
-    const seen: Array<[string, string]> = [];
-    const source: WorkflowModelRegistrySource = {
-      modelRegistry: {
-        find(provider, id) {
-          seen.push([provider, id]);
-          return provider === "test" && id === "fast" ? FAST : undefined;
-        },
-      },
-    } as WorkflowModelRegistrySource;
-
-    const resolution = await resolveWorkflowModel("test/fast:low", source);
-
-    expect(seen).toEqual([["test", "fast"]]);
-    expect(resolution).toMatchObject({ ok: true, thinking: "low" });
-  });
-
-  it("names an unknown model instead of returning nothing", async () => {
-    const h = await harnessWithRoles();
-    const resolution = await resolveWorkflowModel("test/absent", h.ctx);
-
-    expect(resolution.ok).toBe(false);
-    expect(resolution).toMatchObject({ reason: "unknown-model" });
-    expect(!resolution.ok && resolution.message).toContain('"test/absent"');
-    expect(!resolution.ok && resolution.message).toContain('provider "test" has no model "absent"');
-  });
-
-  it("names an unparseable selector", async () => {
-    const h = await harnessWithRoles();
-    const resolution = await resolveWorkflowModel("smol", h.ctx);
-
-    expect(resolution).toMatchObject({ ok: false, reason: "unparseable-selector" });
-  });
-
-  it("names a host with no model registry rather than guessing", async () => {
-    const resolution = await resolveWorkflowModel("test/fast", {} as WorkflowModelRegistrySource);
-
-    expect(resolution).toMatchObject({ ok: false, reason: "no-model-registry" });
-  });
-});
 
 // ---------------------------------------------------------------------------
 // W2 / W3 / W12 — the resolved tier reaches the child session
@@ -462,6 +403,45 @@ describe("the declared tier reaches the child session", () => {
     expect(result.status).toBe("completed");
     expect(result.modelRoleFallback).toBeUndefined();
     expect(probe.captured[0]?.model).toEqual(STRONG);
+  });
+
+  it("inherits the parent reasoning effort instead of falling through to the host default", async () => {
+    // The user's global/default route is deliberately low, while this live parent
+    // session is medium. A model-less agent declared no override, so both model and
+    // effort must inherit from the live parent as one contract.
+    const h = await harnessWithRoles({ default: "test/fast:low" });
+    h.pi.setThinkingLevel?.("medium");
+    const probe = sdkProbe(STRONG);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({ runId: "thinking-inherit", agentRunner: runner });
+
+    await expect(dsl.agent("work", { agent: "bare" })).resolves.toBe("tier answer");
+
+    expect(probe.captured[0]).toMatchObject({ model: STRONG, thinkingLevel: "medium" });
+    expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBe("medium");
+  });
+
+  it("keeps an explicit role reasoning override above the parent and journals the host readback", async () => {
+    const h = await harnessWithRoles({ smol: "test/fast:high" });
+    h.pi.setThinkingLevel?.("medium");
+    const probe = sdkProbe(FAST);
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+    });
+    const { dsl, getJournal } = createWorkflowRuntime({ runId: "thinking-role", agentRunner: runner });
+
+    await expect(dsl.agent("work", { agent: "bare", modelRole: "smol" })).resolves.toBe("tier answer");
+
+    expect(probe.captured[0]).toMatchObject({ model: FAST, thinkingLevel: "high" });
+    expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBe("high");
   });
 
   it("resolves a declared role WITHOUT the purpose fallback chain", async () => {
@@ -1028,6 +1008,36 @@ describe("executed-model evidence", () => {
     const end = getJournal().find((line) => line.kind === "agent_end");
     expect(end?.executedModel).toBe("unavailable");
     expect(end?.executedModel).not.toBe("test/fast");
+    expect(end?.model).toBeUndefined();
+  });
+
+  it("does not substitute requested thinking when the child exposes no thinking readback", async () => {
+    const h = await harnessWithRoles();
+    h.pi.setThinkingLevel?.("medium");
+    const probe = sdkProbe(FAST, "tier answer", false);
+    const runId = "thinking-unavailable";
+    const runner = createWorkflowAgentRunner({
+      pi: h.pi,
+      ctx: h.ctx,
+      signal: new AbortController().signal,
+      createExecutor: probe.createExecutor,
+      workflowRunId: runId,
+    });
+    // Projected line by line as the workflow tool does, so the executor row sits under its anchor.
+    const onEvent = (line: WorkflowJournalLine) => applyWorkflowJournalLineToAgentLiveStore(line);
+    const { dsl, getJournal } = createWorkflowRuntime({ runId, agentRunner: runner, onEvent });
+
+    await expect(dsl.agent("work", { agent: "bare", model: "test/fast:high" })).resolves.toBe("tier answer");
+
+    expect(probe.captured[0]?.thinkingLevel).toBe("high");
+    const start = getJournal().find((line) => line.kind === "agent_start")!;
+    expect(start.thinking).toBe("high"); // the request, seeded onto the anchor
+    expect(getJournal().find((line) => line.kind === "agent_end")?.thinking).toBeUndefined();
+    const anchor = agentLiveStore.rows.get(workflowAgentLiveRowId(start));
+    expect(anchor).toMatchObject({ status: "done", model: "test/fast" });
+    expect(anchor?.thinking).toBeUndefined();
+    // The anchor is a real parent: the SDK host's executor row ran under it.
+    expect([...agentLiveStore.rows.values()].some((row) => row.parentRowId === anchor?.id)).toBe(true);
   });
 
   it("records the degradation on agent_end so a reader sees the quiet fallback", async () => {
@@ -1061,20 +1071,21 @@ describe("executed-model evidence", () => {
    * because the defect needed both halves to be visible.
    */
   it("keeps the readback on the error line when a script validator throws after the child ran", async () => {
-    const h = await harnessWithRoles({ smol: "test/fast" });
-    const probe = sdkProbe(FAST, '{"count":3}');
+    const h = await harnessWithRoles();
+    const probe = sdkProbe(FAST, '{"count":3}', false);
     const runner = createWorkflowAgentRunner({
       pi: h.pi,
       ctx: h.ctx,
       signal: new AbortController().signal,
       createExecutor: probe.createExecutor,
+      workflowRunId: "tier-validator-threw",
     });
     const { dsl, getJournal } = createWorkflowRuntime({ runId: "tier-validator-threw", agentRunner: runner });
 
     await expect(
       (dsl.agent as (prompt: string, opts: unknown) => Promise<unknown>)("cheap work", {
         agent: "bare",
-        modelRole: "smol",
+        model: "test/fast:high",
         schema: COUNT_SCHEMA,
         validate: () => {
           throw new Error("validator exploded after the child had already answered");
@@ -1091,8 +1102,9 @@ describe("executed-model evidence", () => {
     for (const line of journal) applyWorkflowJournalLineToAgentLiveStore(line);
     const start = journal.find((line) => line.kind === "agent_start")!;
     const row = agentLiveStore.rows.get(workflowAgentLiveRowId(start));
-    expect(row?.status).toBe("error");
-    expect(row?.model).toBe("test/fast");
+    expect(row).toMatchObject({ status: "error", model: "test/fast" });
+    expect(row?.thinking).toBeUndefined(); // the requested `high` was never read back
+    expect([...agentLiveStore.rows.values()].some((child) => child.parentRowId === row?.id)).toBe(true);
   });
 
   it("round-trips usage on the sole error line when a validator throws after execution", async () => {
@@ -1110,6 +1122,9 @@ describe("executed-model evidence", () => {
         agent: request.agent,
         executedModel: "test/fast",
         usage: { input: 20, output: 10, totalTokens: 30, costTotal: 0 },
+        ...(request.returnContract === undefined
+          ? {}
+          : { outputAcceptance: { source: "tool" as const, attempts: 1, toolName: "workflow_return" as const } }),
       }),
     });
 

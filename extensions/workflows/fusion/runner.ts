@@ -2,11 +2,16 @@
 
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "../../_shared/host/pi-api.js";
-import { getProjectRoot, getWorkingDirectory } from "../../_shared/host/pi-api.js";
+import { getProjectRoot, getWorkingDirectory, isOneShotHostMode } from "../../_shared/host/pi-api.js";
 import type { WorkflowAgentBridgeOptions } from "../runtime/workflow-agent-bridge.js";
 import { createWorkflowAgentPreflight, createWorkflowAgentRunner } from "../runtime/workflow-agent-bridge.js";
+import { workflowArtifactRef } from "../runtime/workflow-artifact-format.js";
 import { createWorkflowArtifactStore, type WorkflowArtifactRef } from "../runtime/workflow-artifacts.js";
-import { DEFAULT_WORKFLOW_BUDGET, formatWorkflowBudgetPrelude } from "../runtime/workflow-budget.js";
+import {
+  formatWorkflowBudgetPrelude,
+  resolveWorkflowBudget,
+  workflowBudgetEnvelope,
+} from "../runtime/workflow-budget.js";
 import { claimNewWorkflowRun } from "../runtime/workflow-journal.js";
 import {
   acquireWorkflowRootLease,
@@ -25,13 +30,12 @@ import {
   type WorkflowResultPersistence,
 } from "../runtime/workflow-result.js";
 import {
-  createWorkflowRuntime,
   type WorkflowFusionContext,
   type WorkflowFusionJudge,
   type WorkflowFusionMember,
   type WorkflowFusionMode,
-  type WorkflowJournalLine,
-} from "../runtime/workflow-runtime.js";
+} from "../runtime/workflow-fusion.js";
+import { createWorkflowRuntime, type WorkflowJournalLine } from "../runtime/workflow-runtime.js";
 
 export interface DirectFusionRunOptions {
   pi: ExtensionAPI;
@@ -63,6 +67,7 @@ export interface DirectFusionRunResult {
 }
 
 export async function runDirectFusion(options: DirectFusionRunOptions): Promise<DirectFusionRunResult> {
+  const budget = resolveWorkflowBudget(undefined, isOneShotHostMode(options.ctx)).budget;
   const projectRoot = getProjectRoot(options.ctx);
   const workingDirectory = getWorkingDirectory(options.ctx);
   const {
@@ -75,7 +80,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     runId: mintedRunId,
     kind: "log",
     source: "runtime",
-    message: formatWorkflowBudgetPrelude(DEFAULT_WORKFLOW_BUDGET),
+    message: formatWorkflowBudgetPrelude(budget),
   }));
   options.onEvent?.(prelude);
 
@@ -99,13 +104,8 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     preflightAgentRequests: createWorkflowAgentPreflight(bridgeOptions),
     artifactPorts: artifactStore,
     journal: journalSink,
-    maxConcurrentAgents: DEFAULT_WORKFLOW_BUDGET.concurrency,
-    maxTotalAgentInvocations: DEFAULT_WORKFLOW_BUDGET.totalAgents,
-    runtimeMs: DEFAULT_WORKFLOW_BUDGET.runtimeMs,
-    defaultTimeoutMs: DEFAULT_WORKFLOW_BUDGET.timeoutMs,
-    defaultMaxToolCalls: DEFAULT_WORKFLOW_BUDGET.toolCalls,
-    defaultMaxTurns: DEFAULT_WORKFLOW_BUDGET.turns,
-    defaultMaxAnswerChars: DEFAULT_WORKFLOW_BUDGET.answerChars,
+    maxConcurrentAgents: budget.concurrency,
+    ...(budget.totalAgents === undefined ? {} : { maxTotalAgentInvocations: budget.totalAgents }),
     ...(options.onEvent === undefined ? {} : { onEvent: options.onEvent }),
   });
   const workspaceLease = acquireWorkflowRootLease({ projectRoot, output: workspace, rootRunId: runId });
@@ -187,7 +187,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
       result: prepared,
       ...(finalError === undefined ? {} : { error: finalError }),
       journal,
-      budget: { applied: DEFAULT_WORKFLOW_BUDGET, peakConcurrency: runtime.peakAgentConcurrency() },
+      budget: { applied: budget, peakConcurrency: runtime.peakAgentConcurrency() },
     },
     artifactStore,
   );
@@ -207,12 +207,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     .list()
     .filter((record) => record.kind === "answer" || record.kind === "published" || record.kind === "primary")
     .slice(-20)
-    .map((record) => ({
-      runId: record.runId,
-      artifactId: record.artifactId,
-      name: record.name,
-      sha256: record.sha256,
-    }));
+    .map((record) => workflowArtifactRef(record));
   const intendedPersistence: WorkflowResultPersistence = { ok: true, path: workflowResultFile(runDir) };
   const resultPersistence = writeWorkflowResultJson(runDir, {
     runId,
@@ -225,6 +220,7 @@ export async function runDirectFusion(options: DirectFusionRunOptions): Promise<
     journal,
     ...(artifactRefs.length === 0 ? {} : { artifactRefs }),
     resultPersistence: intendedPersistence,
+    budget: workflowBudgetEnvelope(budget),
   });
   const persistenceError = resultPersistence.ok ? undefined : resultPersistence.message;
   const returnedError = finalError ?? persistenceError;

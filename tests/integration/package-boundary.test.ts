@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 import { packagedWorkflowNames } from "../../extensions/workflows/runtime/workflow-discovery.js";
+import { verifyInstalledWorkflowDocs } from "../docs/helpers/installed-workflow-docs.js";
 import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {
@@ -351,7 +352,16 @@ describe("npm public package boundary", () => {
     // `skills/.ignore` rides along under `skills/` and is counted here.
     // Adaptive authoring replaces the omnibus manual with focused references and
     // adds a public authoring guide, two runnable source examples and style cards.
-    expect(dryRun.files).toHaveLength(264);
+    // Error diagnostics add one shared writer and one shared diagnostic reference.
+    // T-218 owner extractions (one packed module each, behavior unchanged):
+    //   W2 source literals · W3 artifact format · W6 workspace + workspace state
+    //   W4 journal event format · W16 progress-render + agent-observer
+    //   W15 source diagnostics/bindings/provenance/value-rules · W7 execution state + groups
+    //   W5 run snapshot reader · W12 saved child · W8 agent contract/call/attempt · W9 agent output
+    //   W13 resume + admission · W10 fusion · W14 finalization · W11 agent model
+    // Seventeen topical workflow pages replace the old monolith with bookmark pointers.
+    // The public environment-variable reference documents optional local features.
+    expect(dryRun.files).toHaveLength(259);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -368,9 +378,9 @@ describe("npm public package boundary", () => {
     }
   });
 
-  it("ships nine active entrypoints, their manifests, and complete local imports", () => {
+  it("ships six active entrypoints, their manifests, and complete local imports", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
-    expect(pkg.pi.extensions).toHaveLength(9);
+    expect(pkg.pi.extensions).toHaveLength(6);
 
     for (const entrypoint of pkg.pi.extensions) {
       const normalizedEntrypoint = entrypoint.replace(/^\.\//, "");
@@ -486,6 +496,11 @@ describe("npm public package boundary", () => {
     expect(packedPaths.has("skills/locus-pi-workflow-implement-task/SKILL.md")).toBe(false);
   });
 
+  it("ships the public environment-variable reference", () => {
+    const packedPaths = new Set(dryRun.files.map((file) => file.path));
+    expect(packedPaths.has("docs/environment-variables.md")).toBe(true);
+  });
+
   it("keeps every relative link in a packed Markdown file resolvable inside the installed package", () => {
     const packedPaths = new Set(dryRun.files.map((file) => file.path));
 
@@ -506,7 +521,7 @@ describe("npm public package boundary", () => {
     expect(deadMarkdownLinks(root, { name: "the npm package", files: packedPaths })).toEqual([]);
   });
 
-  it("loads every declared entrypoint from an unpacked real tarball", () => {
+  it("loads every declared entrypoint and workflow documentation from an unpacked real tarball", () => {
     const temporaryRoot = mkdtempSync(path.join(tmpdir(), "locus-pi-pack-boundary-"));
     try {
       const packOutput = execFileSync(
@@ -521,6 +536,11 @@ describe("npm public package boundary", () => {
       execFileSync("tar", ["-xzf", path.join(temporaryRoot, packed.filename), "-C", unpackRoot]);
 
       const packageRoot = path.join(unpackRoot, "package");
+      verifyInstalledWorkflowDocs(
+        packageRoot,
+        temporaryRoot,
+        packed.files.map((file) => file.path),
+      );
       symlinkSync(path.join(root, "node_modules"), path.join(packageRoot, "node_modules"), "dir");
       const entrypointUrls = pkg.pi.extensions.map(
         (entrypoint) => pathToFileURL(path.join(packageRoot, entrypoint)).href,

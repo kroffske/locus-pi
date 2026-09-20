@@ -1,6 +1,6 @@
 # Choose a workflow shape
 
-Default substantive implementation to adaptive slices. Choose by the required control decision, not by agent count. Read one card, then [design-and-build.md](design-and-build.md).
+First resolve specification creation, specification revision or implementation; ask only if the request is ambiguous. Author implementation after the user examines the actual specification and asks for it. Default substantive implementation to adaptive slices. Choose by the required control decision, not by agent count. Read one card, then [design-and-build.md](design-and-build.md).
 
 | Form                                        | When                                   | Default call cost                                  |
 | ------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
@@ -12,7 +12,7 @@ Default substantive implementation to adaptive slices. Choose by the required co
 
 Crash replay is a runtime capability, not another graph pattern. Generated source is a way to obtain a graph, not semantic continuation. Candidate search, councils and fixed fan-out are fixed-graph techniques unless the design explicitly adds refinement. No universal judge is injected.
 
-[Structured results](structured-results.md) covers a same-agent shaped answer — choice, closed string, handoffs or compatibility schema through `returnVia: "tool"`. It is an output contract inside a card's graph, not a fifth graph form.
+[Structured results](structured-results.md) covers a same-agent shaped answer — choice, closed string, handoffs or compatibility schema, all accepted in the child's own session. Read it before handing an arbiter decision to a router: it covers decision ownership and the evidence the next agent actually receives. It is an output contract inside a card's graph, not a fifth graph form.
 
 ## Start from the user's current problem
 

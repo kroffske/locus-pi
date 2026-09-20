@@ -72,8 +72,16 @@ export function renderAgentToolResultCard(
   if (options.expanded && typeof details.childSessionId === "string") {
     technicalLines.push(`session: ${details.childSessionId}`);
   }
-  if (options.expanded && typeof details.resultArtifact === "string") {
+  if (
+    (options.expanded || status === "error" || status === "cancelled") &&
+    typeof details.resultArtifact === "string"
+  ) {
     technicalLines.push(`result: ${details.resultArtifact}`);
+  }
+  if (!options.isPartial && (status === "error" || status === "cancelled")) {
+    if (typeof details.failureCause === "string") technicalLines.push(`cause: ${details.failureCause}`);
+    if (typeof details.errorLogPath === "string") technicalLines.push(`errors: ${details.errorLogPath}`);
+    if (typeof details.errorLogWarning === "string") technicalLines.push(details.errorLogWarning);
   }
   const failureReason = failureReasonLine(result, status, options.isPartial);
   if (failureReason !== undefined) technicalLines.push(failureReason);
@@ -256,7 +264,7 @@ function agentToolCardStatus(value: unknown, isPartial: boolean, isError: boolea
   if (isPartial) return "working";
   if (value === "completed") return "done";
   if (value === "cancelled") return "cancelled";
-  if (value === "failed" || value === "blocked") return "error";
+  if (value === "failed" || value === "blocked" || value === "storage-failed") return "error";
   return isError ? "error" : "done";
 }
 

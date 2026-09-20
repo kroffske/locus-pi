@@ -11,11 +11,11 @@ These are design-time choices written in the reviewed design. They are not new f
 
 Example authoring requests:
 
-> Create a workflow for task directory `.tasks/example`. Use adaptive slices and outcome-led briefs. Preserve owner acceptance between design and implementation. Build the source; do not run it.
+> Create a workflow for task directory `.tasks/example`. Use adaptive slices and outcome-led briefs. Implement the user-selected specification; define initial slices and completion outcomes while authoring. Build the source; do not run it.
 
 > Create a fixed workflow for this exact three-stage export. Use procedural briefs because the importer requires the documented command order. Do not run it.
 
-Outcome-led briefs state role, expected result, SOURCES and essential constraints. They give the agent enough context and leave method selection to it. Use headings when helpful, not as a repeated template. Never remove acceptance criteria or unresolved risks to shorten a prompt. [Procedural briefs](procedural-briefs.md) is the separate detail reference; graph style remains an independent choice.
+The default assumes capable models making substantive decisions, including arbitration of review findings. Preserve existing session/user routing; this is not permission to change models or billing routes. Outcome-led briefs state role, expected result, SOURCES and essential constraints. They give the agent enough context and leave method selection to it. Use headings when helpful, not as a repeated template. Never remove acceptance criteria or unresolved risks to shorten a prompt. [Procedural briefs](procedural-briefs.md) is the separate detail reference; graph style remains an independent choice.
 
 ## Folder-level context
 
@@ -29,7 +29,7 @@ Run Pi in the target repository. A path mentioned in a prompt does not change th
 /workflows run adaptive-slices --output-dir .tasks/example/artifacts/implementation -- .tasks/example
 ```
 
-Choose a fresh output directory for an independent run. Agents create their working documents there; source does not read paths or files. See [runtime inputs](../../../extensions/workflows/REFERENCE.md#workflow-input-and-host-continuation).
+Choose a fresh output directory for an independent run. Agents create their working documents there; source does not read paths or files. See [runtime inputs](../../../docs/workflows/authoring.md#workflow-input-and-host-continuation).
 
 ## Executor selection
 
@@ -43,4 +43,4 @@ Keep literal responsibility labels (`review`, `correct`) and human work titles. 
 
 Claude Code calls the setting **Dynamic workflow size**, key `workflowSizeGuideline`. Values are `small` (aim below 5 agents), `medium` (below 15, default), `large` (below 50), and `unrestricted` (no guideline). It advises the author about agent count; it is not prompt length, reasoning effort, tokens, or an enforced run limit. See the [official size documentation](https://code.claude.com/docs/en/workflows#set-a-size-guideline).
 
-Locus Pi does not implement that setting. State a size preference in the authoring request if wanted. Record the chosen graph and worst-case calls in the design; never cut required review/QA to satisfy a cosmetic target. Existing runtime budgets and task-derived slice/correction bounds remain separate. Procedural prompts being better for weaker models is an evaluation hypothesis, not a supported guarantee.
+Locus Pi does not implement that setting. State a size preference in the authoring request if wanted. Record the chosen graph and worst-case calls in the design; never cut required review/QA to satisfy a cosmetic target. Explicit run budgets (unbounded when undeclared) and task-derived slice/correction bounds remain separate. Procedural prompts being better for weaker models is an evaluation hypothesis, not a supported guarantee.

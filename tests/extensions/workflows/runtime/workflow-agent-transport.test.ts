@@ -1,10 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   AGENT_FAILURE_CAUSES,
-  executeAgentRunBoundary,
   type AgentExecutor,
   type AgentFailureCause,
   type AgentRunRequest,
@@ -13,9 +12,6 @@ import {
   AGENT_SDK_UNAVAILABLE_DIAGNOSTIC,
   AgentSdkUnavailableError,
   createAgentSdkSessionExecutor,
-  type CreateAgentSessionFactory,
-  type SdkAgentSessionEventLike,
-  type SdkAgentSessionLike,
 } from "../../../../extensions/_shared/agent-runtime/agent-sdk-host.js";
 import { agentLiveStore } from "../../../../extensions/_shared/agent-runtime/agent-live-store.js";
 import {
@@ -36,343 +32,32 @@ import {
 } from "../../../../extensions/workflows/runtime/workflow-runtime.js";
 import { runWorkflowScript } from "../../../../extensions/workflows/runtime/workflow-runner.js";
 import type { WorkflowReplayController } from "../../../../extensions/workflows/runtime/workflow-replay.js";
-import type { AgentDefinition } from "../../../../extensions/_shared/agent-runtime/agents.js";
-import {
-  createWorkflowReturnController,
-  normalizeWorkflowReturnContract,
-} from "../../../../extensions/workflows/runtime/workflow-return.js";
 import { createHarness } from "../../../test-harness.js";
+import {
+  bridgeProject,
+  completed,
+  hostRequest,
+  retriesOn,
+  runAcceptanceHost,
+  runtimeOver,
+  scriptedRuntime,
+  tmpReportsDir,
+} from "../../../fixtures/agent-runtime/agent-failure-probes.js";
 
 /**
- * T-130 W1 — the machine-readable failure cause.
+ * T-130 — how the machine-readable failure cause travels, once it has been produced.
  *
- * `status` tells a reader "failed" and nothing else: a turn timeout, a tool-call
- * budget breach, a provider error and a mid-turn throw all arrive as one status plus
- * an English sentence. Everything downstream that must tell those apart — the retry
- * of W2 first — would otherwise have to match on that sentence.
+ * Producing each member of the closed list is a separate, self-contained claim and
+ * lives in `workflow-agent-failure-causes.test.ts`; the shared host's own extra
+ * classification calls live in `tests/shared/agent-runtime/agent-failure-cause-host.test.ts`.
+ * What is left here is the transport: the bridge adaptation around ONE call (identity,
+ * cancellation precedence, the fail-closed sdk-unavailable throw, what is NOT read as a
+ * cause), the runtime's readback of a cause it did not produce, the cumulative
+ * assistant-turn ledger, the retry allowlist, and the bounded transport retry itself.
  *
- * So each case here drives ONE real failure through the layer that knows its cause
- * and asserts the declared member, never the prose. Coverage is enforced, not
- * eyeballed: `observed` accumulates every member these tests actually produced, and
- * the last case fails if any member of the closed list was never exercised.
+ * The fakes are shared with those suites through `tests/fixtures/agent-runtime/agent-failure-probes.ts`
+ * so a change to the fake child cannot make one suite prove something the others do not.
  */
-
-const observed = new Set<AgentFailureCause>();
-
-function record<T extends { failureCause?: AgentFailureCause }>(result: T): T {
-  if (result.failureCause !== undefined) observed.add(result.failureCause);
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Host-level fakes (the same insurance-not-proof shape as agent-sdk-host.test.ts)
-// ---------------------------------------------------------------------------
-
-const reviewer: AgentDefinition = {
-  name: "reviewer",
-  description: "Review code",
-  allowedTools: ["read", "search", "yield"],
-  tools: ["read", "search", "yield"],
-  risk: "medium",
-  readOnly: true,
-  source: "project",
-  filePath: "/repo/.agents/agents/reviewer.md",
-};
-
-function hostRequest(): AgentRunRequest {
-  return {
-    executionMode: "named",
-    agent: reviewer,
-    task: "Review this change",
-    parentSessionId: "parent-session",
-    projectRoot: "/repo",
-    workingDirectory: "/repo",
-    maxTurns: 5,
-    depth: 0,
-    maxDepth: 1,
-    allowedTools: ["read", "search", "yield"],
-    approvalTier: "allow",
-  };
-}
-
-interface FakeSessionConfig {
-  lastAssistantText: string | undefined;
-  toolCalls?: number;
-  toolResults?: number;
-  /** prompt() resolves but the terminal turn event never fires: only the fuse ends the turn. */
-  neverEnds?: boolean;
-  /** prompt() rejects, which lands in the catch around the whole turn. */
-  promptError?: string;
-  messages?: readonly unknown[];
-  events?: SdkAgentSessionEventLike[];
-}
-
-function fakeSession(config: FakeSessionConfig): SdkAgentSessionLike {
-  const exportDir = mkdtempSync(path.join(tmpdir(), "locus-transport-export-"));
-  let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
-  return {
-    sessionId: "sdk-child",
-    ...(config.messages !== undefined ? { messages: config.messages } : {}),
-    subscribe(fn) {
-      listener = fn;
-      return () => {
-        listener = undefined;
-      };
-    },
-    async prompt() {
-      if (config.promptError !== undefined) throw new Error(config.promptError);
-      for (const event of config.events ?? []) listener?.(event);
-      if (config.neverEnds !== true) listener?.({ type: "agent_end", willRetry: false });
-    },
-    getSessionStats() {
-      return { sessionId: "sdk-child", toolCalls: config.toolCalls ?? 0, toolResults: config.toolResults ?? 0 };
-    },
-    getLastAssistantText() {
-      return config.lastAssistantText;
-    },
-    exportToJsonl(outputPath) {
-      const target = outputPath ?? path.join(exportDir, "session.jsonl");
-      writeFileSync(target, "{}\n", "utf8");
-      return target;
-    },
-    dispose: vi.fn(),
-    abort: vi.fn(async () => {}),
-  };
-}
-
-function tmpReportsDir(): string {
-  return mkdtempSync(path.join(tmpdir(), "locus-transport-reports-"));
-}
-
-async function runHost(
-  config: FakeSessionConfig,
-  options: { turnTimeoutMs?: number; maxToolCalls?: number; aborted?: boolean } = {},
-) {
-  const session = fakeSession(config);
-  const createSession: CreateAgentSessionFactory = async () => ({ session });
-  const executor = createAgentSdkSessionExecutor({
-    createSession,
-    reportsDir: tmpReportsDir(),
-    now: () => "fixed",
-    ...(options.turnTimeoutMs !== undefined ? { turnTimeoutMs: options.turnTimeoutMs } : {}),
-    ...(options.maxToolCalls !== undefined ? { maxToolCalls: options.maxToolCalls } : {}),
-  });
-  const controller = new AbortController();
-  if (options.aborted === true) controller.abort();
-  return record(await executor.run(hostRequest(), controller.signal));
-}
-
-// ---------------------------------------------------------------------------
-// Bridge-level project (a real catalog, a fake child)
-// ---------------------------------------------------------------------------
-
-function bridgeProject(): string {
-  const root = mkdtempSync(path.join(tmpdir(), "locus-transport-bridge-"));
-  const agents = path.join(root, ".agents", "agents");
-  mkdirSync(agents, { recursive: true });
-  writeFileSync(
-    path.join(agents, "default.md"),
-    "---\nname: default\ndescription: Transport test agent\nevidence:\n  mode: none\n---\nAnswer briefly.\n",
-    "utf8",
-  );
-  return root;
-}
-
-/** One runtime over a scripted agent runner; every result is recorded for the coverage gate. */
-function runtimeOver(runId: string, results: WorkflowAgentResult[]) {
-  const seen: WorkflowAgentResult[] = [];
-  let index = 0;
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner: async (): Promise<WorkflowAgentResult> => {
-      const next = results[Math.min(index, results.length - 1)]!;
-      index += 1;
-      seen.push(next);
-      return next;
-    },
-  });
-  return { ...runtime, seen };
-}
-
-function completed(text: string): WorkflowAgentResult {
-  return { ok: true, status: "completed", summary: "done", text, diagnostics: [], agent: "default" };
-}
-
-let retryProbes = 0;
-
-/**
- * Does the RUNTIME re-ask on this cause?
- *
- * Asked through the public DSL, never through a classifier helper: the retry policy is a
- * BEHAVIOUR of the package, and an exported predicate a test can pin is not the same thing —
- * it can keep answering correctly while the loop that was supposed to consult it stops
- * doing so. Two children means the cause is in the transport class; one means it is not.
- */
-async function retriesOn(cause: AgentFailureCause | undefined): Promise<boolean> {
-  retryProbes += 1;
-  const failure: WorkflowAgentResult = {
-    ok: false,
-    status: "failed",
-    summary: "scripted failure for the retry probe",
-    diagnostics: [],
-    agent: "default",
-    ...(cause === undefined ? {} : { failureCause: cause }),
-  };
-  const { dsl, requests } = scriptedRuntime(`retry-probe-${String(retryProbes)}`, [failure, completed("second")]);
-  await dsl.agent("work", { attempts: 2 }).catch(() => undefined);
-  return requests.length > 1;
-}
-
-describe("agent failure cause — host", () => {
-  it("names the host turn budget as a transport failure", async () => {
-    const result = await runHost({ lastAssistantText: undefined, neverEnds: true }, { turnTimeoutMs: 5 });
-
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("host-turn-timeout");
-    expect(await retriesOn(result.failureCause)).toBe(true);
-  });
-
-  it("names the tool-call budget, and it is not transport", async () => {
-    const result = await runHost(
-      {
-        lastAssistantText: undefined,
-        toolCalls: 4,
-        toolResults: 3,
-        neverEnds: true,
-        events: [
-          { type: "tool_execution_start", toolName: "bash" },
-          { type: "tool_execution_start", toolName: "bash" },
-          { type: "tool_execution_start", toolName: "bash" },
-          { type: "tool_execution_start", toolName: "bash" },
-        ],
-      },
-      { turnTimeoutMs: 60_000, maxToolCalls: 3 },
-    );
-
-    expect(result.reason).toContain("tool-call budget");
-    expect(result.failureCause).toBe("tool-call-budget");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("names a provider-side assistant failure", async () => {
-    agentLiveStore.reset();
-    try {
-      const result = await runHost({
-        lastAssistantText: undefined,
-        messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: "provider exploded" }],
-      });
-
-      expect(result.reason).toBe("provider exploded");
-      expect(result.failureCause).toBe("provider-error");
-      expect(await retriesOn(result.failureCause)).toBe(false);
-    } finally {
-      agentLiveStore.reset();
-    }
-  });
-
-  it("refuses a provider-truncated assistant answer", async () => {
-    agentLiveStore.reset();
-    try {
-      const result = await runHost({
-        lastAssistantText: "This answer ends in the midd",
-        messages: [{ role: "assistant", content: [], stopReason: "length" }],
-      });
-
-      expect(result.status).toBe("failed");
-      expect(result.reason).toContain("output-token limit");
-      expect(result.reason).toContain("refusing the truncated answer");
-      expect(result.failureCause).toBe("provider-error");
-      expect(await retriesOn(result.failureCause)).toBe(false);
-    } finally {
-      agentLiveStore.reset();
-    }
-  });
-
-  it("names an unreadable final answer", async () => {
-    const result = await runHost({ lastAssistantText: undefined });
-
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("unparseable-answer");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("names operator cancellation, and never treats it as a dropped channel", async () => {
-    const result = await runHost({ lastAssistantText: "unused" }, { aborted: true });
-
-    expect(result.status).toBe("cancelled");
-    expect(result.failureCause).toBe("cancelled");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("names a missing SDK substrate", async () => {
-    const executor = createAgentSdkSessionExecutor({
-      createSession: async () => {
-        throw new AgentSdkUnavailableError("no substrate here");
-      },
-      reportsDir: tmpReportsDir(),
-      now: () => "fixed",
-    });
-
-    const result = record(await executor.run(hostRequest(), new AbortController().signal));
-
-    expect(result.status).toBe("blocked");
-    expect(result.failureCause).toBe("sdk-unavailable");
-  });
-
-  it("leaves an unproven createSession throw unclassified rather than guessing transport", async () => {
-    const executor = createAgentSdkSessionExecutor({
-      createSession: async () => {
-        // A bad model id and an option-assembly bug land in this same branch.
-        throw new Error("model 'nope/nope' is not registered");
-      },
-      reportsDir: tmpReportsDir(),
-      now: () => "fixed",
-    });
-
-    const result = record(await executor.run(hostRequest(), new AbortController().signal));
-
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("unclassified");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("leaves an unproven mid-turn throw unclassified", async () => {
-    const result = await runHost({ lastAssistantText: undefined, promptError: "kaboom inside the turn" });
-
-    expect(result.status).toBe("failed");
-    expect(result.reason).toContain("kaboom inside the turn");
-    expect(result.failureCause).toBe("unclassified");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-});
-
-describe("agent failure cause — run boundary", () => {
-  it("names a request the run policy refused before any child existed", async () => {
-    const harness = createHarness(bridgeProject(), { sessionId: "transport-policy" });
-    let childRuns = 0;
-    const executor: AgentExecutor = {
-      async run() {
-        childRuns += 1;
-        throw new Error("must not run");
-      },
-    };
-
-    const result = record(
-      await executeAgentRunBoundary({
-        pi: harness.pi,
-        ctx: harness.ctx,
-        // maxTurns 0 is refused by validateRunPolicy, so no executor is ever reached.
-        request: { ...hostRequest(), maxTurns: 0 },
-        executor,
-        signal: new AbortController().signal,
-      }),
-    );
-
-    expect(childRuns).toBe(0);
-    expect(result.status).toBe("blocked");
-    expect(result.failureCause).toBe("run-policy-blocked");
-  });
-});
 
 describe("agent failure cause — bridge", () => {
   it("round-trips the live execution petname through persisted agent_end evidence", async () => {
@@ -424,78 +109,6 @@ describe("agent failure cause — bridge", () => {
     });
     expect(readWorkflowRunSummary(root, runId)).toMatchObject({ agentsEnded: 1, lastKind: "agent_end" });
     rmSync(root, { recursive: true, force: true });
-  });
-
-  it("names an unknown catalog agent as an author error", async () => {
-    const harness = createHarness(bridgeProject(), { sessionId: "transport-unknown-agent" });
-    const runner = createWorkflowAgentRunner({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      createExecutor: (): AgentExecutor => ({
-        async run() {
-          throw new Error("must not run");
-        },
-      }),
-    });
-
-    const result = record(await runner({ prompt: "work", agent: "nowhere-agent" }));
-
-    expect(result.summary).toContain("Unknown agent");
-    expect(result.failureCause).toBe("unknown-agent");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("names a workspace that could not be resolved", async () => {
-    const harness = createHarness(bridgeProject(), { sessionId: "transport-workspace" });
-    const runner = createWorkflowAgentRunner({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      createExecutor: (): AgentExecutor => ({
-        async run() {
-          throw new Error("must not run");
-        },
-      }),
-    });
-
-    // A workspace handle with no workspace manager configured: allocation, not transport.
-    const result = record(await runner({ prompt: "work", agent: "default", workspaceHandle: "ws-1" }));
-
-    expect(result.summary).toContain("workspace manager");
-    expect(result.failureCause).toBe("workspace-allocation");
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("names its own per-call fuse as a transport failure", async () => {
-    const harness = createHarness(bridgeProject(), { sessionId: "transport-fuse" });
-    const runner = createWorkflowAgentRunner({
-      pi: harness.pi,
-      ctx: harness.ctx,
-      signal: new AbortController().signal,
-      createExecutor: (): AgentExecutor => ({
-        // Never finishes on its own: only the call fuse can end it.
-        async run(_request, signal) {
-          await new Promise<void>((resolve) => {
-            if (signal.aborted) resolve();
-            else signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-          return {
-            status: "cancelled" as const,
-            agentName: "default",
-            reason: "aborted",
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
-    });
-
-    const result = record(await runner({ prompt: "hang", agent: "default", timeoutMs: 25 }));
-
-    expect(result.summary).toContain("timeout and was aborted");
-    expect(result.failureCause).toBe("call-timeout");
-    expect(await retriesOn(result.failureCause)).toBe(true);
   });
 
   it("keeps an earlier run cancellation when the call deadline passes during executor unwind", async () => {
@@ -668,7 +281,7 @@ describe("agent failure cause — bridge", () => {
       }),
     });
 
-    const result = record(await runner({ prompt: "work", agent: "default" }));
+    const result = await runner({ prompt: "work", agent: "default" });
 
     expect(result.ok).toBe(false);
     expect(result.status).toBe("blocked");
@@ -703,57 +316,17 @@ describe("agent failure cause — bridge", () => {
 });
 
 describe("agent failure cause — runtime", () => {
-  it("names an empty answer, and keeps it out of the transport class", async () => {
-    const { dsl, getJournal } = runtimeOver("transport-empty", [
-      { ok: true, status: "completed", summary: "done", text: "   ", diagnostics: [], agent: "default" },
-    ]);
+  it("names the transport as the reason a shaped call could not be carried", async () => {
+    // No `answer-too-long` case exists any more: nothing produces that cause. This is the
+    // capability refusal that replaced the text fallback — a host that completed the child
+    // without a workflow_return receipt cannot carry a shaped result at all.
+    const { dsl, getJournal } = runtimeOver("transport-no-receipt", [completed('{"count":3}')]);
 
-    await expect(dsl.agent("summarize")).rejects.toThrow(/Agent result text is empty\./u);
+    await expect(dsl.agent("count", { schema: { type: "object", properties: {} } })).rejects.toThrow(
+      /Transport cannot carry a shaped result/u,
+    );
     const end = getJournal().find((line) => line.kind === "agent_end");
-    expect(end?.failureCause).toBe("empty-answer");
-    observed.add("empty-answer");
-  });
-
-  it("names an over-long answer against the call's own bound", async () => {
-    const { dsl, getJournal } = runtimeOver("transport-too-long", [completed("0123456789")]);
-
-    await expect(dsl.agent("summarize", { maxAnswerChars: 4 })).rejects.toThrow(/Agent answer is 10 characters/u);
-    const end = getJournal().find((line) => line.kind === "agent_end");
-    expect(end?.failureCause).toBe("answer-too-long");
-    observed.add("answer-too-long");
-  });
-
-  it("names a replayed answer the current script validator rejects", async () => {
-    // A recorded answer that the CURRENT validator refuses: the runtime fails the run
-    // closed rather than re-asking, because a second prompt would miss at this ordinal.
-    const replay: WorkflowReplayController = {
-      beginAgentAttempt: () => ({ replayed: true, text: '```json\n{"count":1}\n```' }),
-      recordAgentAttempt: () => {},
-      resolveValue: (_kind, produce) => produce(),
-      counts: () => ({ replayedCalls: 1, freshCalls: 0 }),
-    };
-    const { dsl, getJournal } = createWorkflowRuntime({
-      runId: "transport-script-rejected",
-      agentRunner: async () => {
-        throw new Error("a replayed call must not reach a child");
-      },
-      replay,
-    });
-
-    await expect(
-      dsl.agent("count", {
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          required: ["count"],
-          properties: { count: { type: "integer" } },
-        },
-        validate: (value) => ((value as { count: number }).count === 3 ? [] : ["count: expected 3"]),
-      }),
-    ).rejects.toThrow(/rejected by the workflow script/u);
-    const end = getJournal().find((line) => line.kind === "agent_end");
-    expect(end?.failureCause).toBe("script-rejected");
-    observed.add("script-rejected");
+    expect(end?.failureCause).toBe("output-contract-unavailable");
   });
 
   it("reads a result written before the field existed as unclassified, never as retryable", async () => {
@@ -775,7 +348,6 @@ describe("agent failure cause — runtime", () => {
     const end = getJournal().find((line) => line.kind === "agent_end");
     expect(end?.status).toBe("failed");
     expect(end?.failureCause).toBe("unclassified");
-    observed.add("unclassified");
   });
 
   it("puts no cause on a completed call", async () => {
@@ -786,195 +358,11 @@ describe("agent failure cause — runtime", () => {
     expect(end?.status).toBe("completed");
     expect(end?.failureCause).toBeUndefined();
   });
-
-  it("declares ask-unavailable when a stage asks with no operator UI (T-167 fail-closed)", async () => {
-    // The bridge is the layer that knows this cause: a `workflow_ask` call in a
-    // no-UI parent must END the call with a named refusal, never leave refusal
-    // prose in the child's context (the recorded fabrication probe).
-    const h = createHarness(undefined, { mode: "print" });
-    const runner = createWorkflowAgentRunner({
-      pi: h.pi,
-      ctx: h.ctx,
-      signal: new AbortController().signal,
-      createExecutor: () => ({
-        async run(request, signal) {
-          const tool = request.customTools?.find((candidate) => candidate.name === "workflow_ask");
-          expect(tool).toBeDefined();
-          const toolResult = await tool!.execute(
-            "call-1",
-            { questions: [{ question: "Which way?", options: [{ label: "A" }] }] },
-            signal,
-          );
-          expect(toolResult.isError).toBe(true);
-          await new Promise<void>((resolve) => {
-            if (signal.aborted) resolve();
-            else signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-          return {
-            status: "cancelled",
-            agentName: "sub-agent",
-            reason: "aborted",
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
-    });
-    const result = record(await runner({ prompt: "decide", tools: ["*"], operatorAsk: true }));
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("ask-unavailable");
-    expect(result.summary).toMatch(/failed closed/u);
-    // Not retryable: re-asking with no UI would re-fail identically.
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
-
-  it("declares ask-evidence-persistence when an operator answer cannot be indexed", async () => {
-    const root = mkdtempSync(path.join(tmpdir(), "workflow-ask-persistence-cause-"));
-    const h = createHarness(root);
-    const runner = createWorkflowAgentRunner({
-      pi: h.pi,
-      ctx: h.ctx,
-      signal: new AbortController().signal,
-      workflowRunId: "ask-persistence-cause",
-      evidenceDestinations: () => ({
-        transcriptDir: path.join(root, "transcripts"),
-        resultArtifactsDir: path.join(root, "results"),
-        recordOperatorAskEvidence() {
-          throw new Error("injected operator-ask index failure");
-        },
-      }),
-      askRequestQuestion: async () => ({ status: "answered", kind: "custom", answer: "operator answer" }),
-      createExecutor: () => ({
-        async run(request, signal) {
-          const tool = request.customTools?.find((candidate) => candidate.name === "workflow_ask");
-          await tool!.execute("tool-call-1", { questions: [{ question: "Which way?", options: [] }] }, signal);
-          return {
-            status: "cancelled",
-            agentName: "sub-agent",
-            reason: "aborted",
-            diagnostics: [],
-            lifecycleEntryIds: [],
-          };
-        },
-      }),
-    });
-
-    const result = record(await runner({ prompt: "decide", tools: ["*"], operatorAsk: true, callId: "call-0001" }));
-
-    expect(result.failureCause).toBe("ask-evidence-persistence");
-    expect(result.text).toBeUndefined();
-    expect(await retriesOn(result.failureCause)).toBe(false);
-  });
 });
 
-describe("same-session output acceptance — the causes the return contract owns", () => {
-  /**
-   * One real return controller per case: the causes below are produced by the
-   * production acceptance object, not by a stub that merely names them.
-   */
-  async function runAcceptanceHost(config: {
-    submissions?: (readonly unknown[])[];
-    maxAttempts?: number;
-    maxTurns?: number;
-    workTurns?: number[];
-    withRestriction?: boolean;
-  }) {
-    const contract = normalizeWorkflowReturnContract({
-      output: { type: "string", singleLine: true },
-      repair: { maxAttempts: config.maxAttempts ?? 1 },
-    });
-    const { tool, acceptance } = createWorkflowReturnController(contract);
-    const exportDir = mkdtempSync(path.join(tmpdir(), "locus-transport-acceptance-"));
-    let active = ["read", tool.name];
-    let prompts = 0;
-    let listener: ((event: SdkAgentSessionEventLike) => void) | undefined;
-    const session: SdkAgentSessionLike = {
-      sessionId: "sdk-child",
-      subscribe(fn) {
-        listener = fn;
-        return () => {
-          listener = undefined;
-        };
-      },
-      async prompt() {
-        const submission = config.submissions?.[prompts];
-        prompts += 1;
-        for (let i = 0; i < (config.workTurns?.[prompts - 1] ?? 1); i += 1) listener?.({ type: "turn_start" });
-        if (submission !== undefined) {
-          listener?.({ type: "tool_execution_start", toolName: tool.name, toolCallId: `t${prompts}` });
-          for (const value of submission) {
-            await tool.execute(`t${prompts}`, { value }, new AbortController().signal);
-          }
-        }
-        listener?.({ type: "agent_end", willRetry: false });
-      },
-      getSessionStats: () => ({ sessionId: "sdk-child", toolCalls: prompts, toolResults: prompts }),
-      getLastAssistantText: () => "narrative the host must not accept",
-      getActiveToolNames: () => active,
-      ...(config.withRestriction === false
-        ? {}
-        : {
-            setActiveToolsByName(names: string[]) {
-              active = [...names];
-            },
-          }),
-      exportToJsonl(outputPath) {
-        const target = outputPath ?? path.join(exportDir, "session.jsonl");
-        writeFileSync(target, `${JSON.stringify({ type: "session", id: "sdk-child" })}\n`, "utf8");
-        return target;
-      },
-      dispose: vi.fn(),
-      abort: vi.fn(async () => {}),
-    };
-    const executor = createAgentSdkSessionExecutor({
-      createSession: async () => ({ session }),
-      reportsDir: tmpReportsDir(),
-      now: () => "fixed",
-    });
-    const result = record(
-      await executor.run(
-        {
-          ...hostRequest(),
-          ...(config.maxTurns === undefined ? {} : { maxTurns: config.maxTurns }),
-          customTools: [tool],
-          responseAcceptance: acceptance,
-        },
-        new AbortController().signal,
-      ),
-    );
-    return { result, prompts: () => prompts };
-  }
-
-  it("exhausts the contract when every submission stays invalid", async () => {
-    const { result } = await runAcceptanceHost({ submissions: [["multi\nline"]] });
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("output-contract-exhausted");
-    expect(result.text).toBeUndefined();
-  });
-
-  it("refuses a second, different proposal as a protocol conflict", async () => {
-    const { result } = await runAcceptanceHost({ submissions: [["first answer", "second answer"]] });
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("output-contract-conflict");
-  });
-
-  it("fails before the first prompt when the host cannot restrict the tool set", async () => {
-    const { result, prompts } = await runAcceptanceHost({
-      submissions: [["only answer"]],
-      withRestriction: false,
-    });
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("output-contract-unavailable");
-    expect(prompts()).toBe(0);
-  });
-
-  it("stops at the cumulative assistant-turn budget instead of clarifying forever", async () => {
-    const { result } = await runAcceptanceHost({ submissions: [], maxAttempts: 3, maxTurns: 1 });
-    expect(result.status).toBe("failed");
-    expect(result.failureCause).toBe("assistant-turn-budget");
-  });
-
+describe("same-session output acceptance — the cumulative turn ledger", () => {
+  // The four causes the return contract owns are produced in the cause matrix; what is
+  // left here is the ledger those causes are counted on, over the same real controller.
   it.each([
     { maxTurns: 20, cycles: 21, status: "failed" },
     { maxTurns: 1000, cycles: 25, status: "completed" },
@@ -1005,13 +393,6 @@ describe("same-session output acceptance — the causes the return contract owns
 });
 
 describe("agent failure cause — the list is closed and covered", () => {
-  it("exercised every member of AGENT_FAILURE_CAUSES", () => {
-    // A member nobody produced is a member nobody can trust: either the site that
-    // sets it is unreachable, or the enum grew without a case proving where it comes from.
-    const missing = AGENT_FAILURE_CAUSES.filter((cause) => !observed.has(cause));
-    expect(missing).toEqual([]);
-  });
-
   it("keeps the transport allowlist to the two causes the child never answered on", async () => {
     const transport: AgentFailureCause[] = [];
     for (const cause of AGENT_FAILURE_CAUSES) if (await retriesOn(cause)) transport.push(cause);
@@ -1040,29 +421,8 @@ function transportFailure(cause: "host-turn-timeout" | "call-timeout" = "host-tu
 /** A project-workspace call with an explicit transport retry budget. */
 const RETRYABLE_CALL = { attempts: 2 } as const;
 
-/** Drive a runtime over a scripted sequence of results and count the child calls. */
-function scriptedRuntime(runId: string, results: WorkflowAgentResult[], extra: Record<string, unknown> = {}) {
-  const requests: Array<{ prompt: string; callId?: string; tools?: string[] }> = [];
-  let index = 0;
-  const runtime = createWorkflowRuntime({
-    runId,
-    agentRunner: async (request): Promise<WorkflowAgentResult> => {
-      requests.push({
-        prompt: request.prompt,
-        ...(request.callId !== undefined ? { callId: request.callId } : {}),
-        ...(request.tools !== undefined ? { tools: request.tools } : {}),
-      });
-      const next = results[Math.min(index, results.length - 1)]!;
-      index += 1;
-      return next;
-    },
-    ...extra,
-  });
-  return { ...runtime, requests };
-}
-
 describe("agent attempts — declaration", () => {
-  it.each([0, 1.5, -1, 4])("refuses attempts=%s before any child starts", async (attempts) => {
+  it.each([0, 1.5, -1])("refuses attempts=%s before any child starts", async (attempts) => {
     let children = 0;
     const { dsl } = createWorkflowRuntime({
       runId: `attempts-invalid-${String(attempts)}`,
@@ -1073,16 +433,18 @@ describe("agent attempts — declaration", () => {
     });
 
     await expect(dsl.agent("work", { ...RETRYABLE_CALL, attempts })).rejects.toThrow(
-      /agent attempts must be a safe integer between 1 and 3/u,
+      /agent attempts must be a positive safe integer/u,
     );
     // Refused, not clamped, and nothing was spawned to find that out.
     expect(children).toBe(0);
   });
 
-  it("accepts the ceiling exactly", async () => {
+  it("accepts an explicitly requested retry count with no ceiling", async () => {
+    // The former ceiling of three existed because the deleted text-repair loop MULTIPLIED
+    // it. With one physical child per attempt, the run's own invocation budget bounds it.
     const { dsl, requests } = scriptedRuntime("attempts-ceiling", [completed("fine")]);
 
-    await expect(dsl.agent("work", { attempts: 3 })).resolves.toBe("fine");
+    await expect(dsl.agent("work", { attempts: 7 })).resolves.toBe("fine");
     expect(requests).toHaveLength(1);
   });
 
@@ -1601,7 +963,7 @@ describe("agent attempts — replay", () => {
   });
 });
 
-describe("agent attempts — the D13 product with the shape-repair loop", () => {
+describe("agent attempts — one shaped call is one physical child", () => {
   const COUNT_SCHEMA = {
     type: "object",
     additionalProperties: false,
@@ -1609,7 +971,18 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     properties: { count: { type: "integer" } },
   };
 
-  it("multiplies the shape loop: transport-fail → off-shape → transport-fail → valid", async () => {
+  /** A host that carries a shaped result on every completed answer. */
+  function shapedCompleted(text: string): WorkflowAgentResult {
+    return {
+      ...completed(text),
+      outputAcceptance: { source: "tool", attempts: 1, toolName: "workflow_return" },
+    };
+  }
+
+  it("no longer multiplies: a transport retry then ONE accepted shaped answer", async () => {
+    // The deleted product. `attempts` used to multiply SCHEMA_MAX_ATTEMPTS, so one script
+    // call could cost `attempts x 3` children, each charged to the run's cap. With the
+    // shape accepted in-session, a shaped call costs exactly its transport attempts.
     const { controller, begun } = (() => {
       const begunKeys: string[] = [];
       const ctrl: WorkflowReplayController = {
@@ -1625,79 +998,79 @@ describe("agent attempts — the D13 product with the shape-repair loop", () => 
     })();
 
     const sequence: WorkflowAgentResult[] = [
-      transportFailure(), // shape attempt 1, physical attempt 1 — discarded
-      completed('```json\n{"count":"three"}\n```'), // shape attempt 1, physical 2 — off shape
-      transportFailure(), // shape attempt 2, physical 1 — discarded
-      completed('```json\n{"count":3}\n```'), // shape attempt 2, physical 2 — valid
+      transportFailure(), // physical attempt 1 — the child never answered
+      shapedCompleted('{"count":3}'), // physical attempt 2 — accepted in its own session
     ];
     const { dsl, requests, getJournal } = scriptedRuntime("attempts-grid", sequence, { replay: controller });
 
-    await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).resolves.toEqual({
-      count: 3,
-    });
+    await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).resolves.toEqual({ count: 3 });
 
-    // Four physical children for one script-level call: attempts × shape attempts.
-    expect(requests).toHaveLength(4);
-    // Each is a distinct agent call with its own identity and its own cap charge.
-    expect(requests.map((request) => request.callId)).toEqual(["call-0001", "call-0002", "call-0003", "call-0004"]);
-    // One replay ordinal per SHAPED attempt: each shape attempt carries its own prompt,
-    // so it is its own logical call; the transport retries inside it are not.
-    expect(begun).toHaveLength(2);
-    expect(new Set(begun).size).toBe(2);
+    expect(requests).toHaveLength(2);
+    expect(requests.map((request) => request.callId)).toEqual(["call-0001", "call-0002"]);
+    // ONE replay ordinal: the two physical attempts are one logical call, sending the
+    // identical prompt, because there is no per-shape-attempt prompt any more.
+    expect(begun).toHaveLength(1);
     const ends = getJournal().filter((line) => line.kind === "agent_end");
-    expect(ends.map((line) => line.status)).toEqual(["failed", "completed", "failed", "completed"]);
+    expect(ends.map((line) => line.status)).toEqual(["failed", "completed"]);
   });
 
-  it("ends the run on transport exhaustion instead of spending the next shape attempt", async () => {
+  it("ends the run on transport exhaustion rather than accepting a later answer", async () => {
     const { dsl, requests } = scriptedRuntime("attempts-exhaustion-precedence", [
       transportFailure(),
       transportFailure(),
-      completed('```json\n{"count":3}\n```'),
+      shapedCompleted('{"count":3}'),
     ]);
 
-    // The child never answered, so there is nothing for the shape loop to repair.
+    // The child never answered, so there is nothing to accept.
     await expect(dsl.agent("count them", { attempts: 2, schema: COUNT_SCHEMA })).rejects.toThrow(
       /budget and was aborted/u,
     );
     expect(requests).toHaveLength(2);
   });
 
-  it("reads the option only in the logical call, never inside the shape loop", () => {
-    // A transport retry that leaked into the shape budget would re-ask a child that
-    // ANSWERED, which is the one thing the retry must never do. This pins WHERE the
-    // option is read, by function, rather than by how the file happens to be laid out.
-    const source = readFileSync(
-      path.join(process.cwd(), "extensions", "workflows", "runtime", "workflow-runtime.ts"),
-      "utf8",
+  it("reads the option only in the logical call, and keeps the deleted loop deleted", () => {
+    // A transport retry that leaked into a shape budget would re-ask a child that ANSWERED,
+    // the one thing the retry must never do. Call, physical attempt and shaped output are
+    // separate owners now, so this pins the read to the call module by NAME across all five.
+    const modules = ["workflow-agent-call.ts", "workflow-agent-attempt.ts", "workflow-agent-contract.ts", "workflow-runtime.ts", "workflow-agent-output.ts"]; // prettier-ignore
+    const sourceOf = (name: string): string =>
+      readFileSync(path.join(process.cwd(), "extensions", "workflows", "runtime", name), "utf8");
+    const logicalStart = sourceOf(modules[0]!)
+      .split("\n")
+      .findIndex((line) => line.includes("async function runAgentAttempt("));
+    expect(logicalStart, "expected the logical call to own runAgentAttempt").toBeGreaterThanOrEqual(0);
+    expect(sourceOf("workflow-agent-attempt.ts")).toContain("async function runPhysicalAgentAttempt(");
+
+    // Read exactly once across every module of the agent call, inside the logical call.
+    const optionRead = /\bopts\??\.attempts\b/u;
+    const reads = modules.flatMap((name) =>
+      sourceOf(name)
+        .split("\n")
+        .flatMap((line, index) => (optionRead.test(line) ? [{ name, index }] : [])),
     );
-    const lines = source.split("\n");
-    const lineOf = (needle: string): number => {
-      const index = lines.findIndex((line) => line.includes(needle));
-      expect(index, `expected to find ${needle}`).toBeGreaterThanOrEqual(0);
-      return index;
-    };
-    const logicalStart = lineOf("async function runAgentAttempt(");
-    const physicalStart = lineOf("async function runPhysicalAgentAttempt(");
-    const shapedStart = lineOf("async function agentDsl(prompt: string, opts?: WorkflowAgentAnyOptions)");
-    const shapedEnd = lineOf("async function parallel<T>(");
-    expect(logicalStart).toBeLessThan(physicalStart);
-    expect(physicalStart).toBeLessThan(shapedStart);
-    expect(shapedStart).toBeLessThan(shapedEnd);
+    expect(reads).toEqual([{ name: modules[0], index: expect.any(Number) as number }]);
+    expect(reads[0]!.index).toBeGreaterThan(logicalStart);
 
-    // The declared option is read exactly once, inside the logical call.
-    const optionReads = lines
-      .map((line, index) => ({ line, index }))
-      .filter((entry) => /\bopts\??\.attempts\b/u.test(entry.line));
-    expect(optionReads).toHaveLength(1);
-    expect(optionReads[0]!.index).toBeGreaterThan(logicalStart);
-    expect(optionReads[0]!.index).toBeLessThan(physicalStart);
-
-    // The shape loop never sees it, and the transport loop never sees the shape budget.
-    const shapedBody = lines.slice(shapedStart, shapedEnd).join("\n");
-    expect(shapedBody).not.toMatch(/\bopts\??\.attempts\b/u);
-    const transportBody = lines.slice(logicalStart, physicalStart).join("\n");
-    expect(transportBody).not.toContain("SCHEMA_MAX_ATTEMPTS");
-    expect(transportBody).not.toContain("checkAgentSchema(");
+    // The legacy text transport is gone from the runtime, not merely unused: a dormant
+    // second structured path is a path something will quietly fall back to. Checked across
+    // all four modules, so the split cannot be where one of them comes back.
+    for (const removed of [
+      "SCHEMA_MAX_ATTEMPTS =",
+      "function checkAgentSchema",
+      "function coerceExactChoiceAnswer",
+      "function withSchemaContract",
+      "function parseJsonFromText",
+      "function stripJsonFences",
+      // `schemaMaxLength` is deliberately NOT in this list any more: the runtime names it
+      // to refuse it, which is the opposite of implementing it. The behaviour is pinned
+      // in `workflow-agent-bounds.test.ts` ("refuses schemaMaxLength by name at the DSL
+      // boundary"), where a source-string absence could never have shown that the option
+      // was silently dropped instead.
+    ]) {
+      for (const name of modules) {
+        expect(sourceOf(name), `${removed} must stay deleted from ${name}`).not.toContain(removed);
+      }
+    }
   });
 });
 

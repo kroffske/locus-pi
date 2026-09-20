@@ -38,12 +38,23 @@ authorization. A further refusal stays a refusal with fresh diagnostics. This
 explicit continuation is not a hidden retry or an unbounded automatic loop.
 The read-only gate records findings; it does not become the correction owner.
 
+### Missing tools in an external child
+
+Inspect the actual child launch arguments and tool schema before changing the
+workflow. Pi `tools: ["*"]` cannot undo an adapter's restricted CLI tools. Repair
+the owning adapter or profile under existing authorization, then prove shell/git,
+read and temporary report writing through that same transport before retrying the
+review. Do not spend more review rounds on an unchanged technical obstacle.
+A reviewer may repair technical prerequisites without editing reviewed product
+source; product corrections still need fresh independent review.
+
 ### Provider admission failures
 
 Read the provider error and actual executed route before changing the workflow.
 HTTP 402 with `limit_source: openrouter_key_limit` is a provider key allowance
 failure, not a handoff-length error, an implementation verdict or missing repeat
-owner approval. Raising `maxItemChars` or `maxTurns` cannot repair it. A requested
+owner approval. Raising `maxTurns` cannot repair it, and there is no item-length
+option left to raise. A requested
 `max_tokens` may come from SDK model metadata rather than the workflow prompt.
 
 First check whether that provider/transport was intended. Apply an already
@@ -59,7 +70,7 @@ after the cause is resolved.
 
 An absent process with no child completion or terminal result is an unconfirmed
 call. Preserve its journal, replay, transcript and partial artifacts. Read the
-canonical [reconciliation path](../../../extensions/workflows/references/recovery-and-continuation.md#reconcile-an-unconfirmed-call)
+canonical [reconciliation path](../../../docs/workflows/recovery-and-continuation.md#reconcile-an-unconfirmed-call)
 before editing source: it requires assessing current effects and any reusable
 prerequisites. Direct interrupted recovery does not admit an unfinished child.
 
@@ -127,6 +138,14 @@ replay identity. Do not redesign the graph or sweep completed stages as part of
 this repair. A raw-value example is a correction aid, not proof that the next
 model will submit the right shape; strict validation remains required.
 
+A large answer is never the cause. The runtime has no answer-size policy, so a
+stopped shaped call means one of three named things: the value still missed the
+contract after its clarification turns (`[workflow:return]` journals how many),
+the transport could not host `workflow_return` (`output-contract-unavailable`:
+run it on a host that can, or make the call plain text — not a script bug), or
+an explicit budget stopped the run. Do not shorten the answer, ask for a
+character limit in the prompt, or add a size option the runtime refuses by name.
+
 ### Turn-budget failures
 
 `Child exceeded its cumulative ... assistant-turn budget` counts SDK model
@@ -135,25 +154,28 @@ tool use before its first result. It does not mean the workflow restarted or
 the agent attempted that many `workflow_return` calls. Read the failing child's
 transcript and journal to distinguish useful work from format repair or a loop.
 
-For legitimate work, use the supported explicit `maxTurns` allowance on the
-unfinished suffix. Keep other budgets and the original completion criteria.
-When a runtime default changed, preserve each completed call's recorded
-effective value explicitly: a prefix recorded with 20 turns needs `maxTurns: 20`
-under the new default. Verify actual prefix reuse before resuming; changing all
-calls to the new allowance would change their request keys. The
-[runtime reference](../../../extensions/workflows/REFERENCE.md)
-owns current values and timer constraints.
+For legitimate work, raise the explicit `maxTurns` on the unfinished suffix
+with a one-line reason. Keep other budgets and the original completion criteria.
+There is no package default: an undeclared `maxTurns` is unbounded. A completed
+call keeps the value its record was written with (a prefix recorded with
+`maxTurns: 20` keeps `maxTurns: 20`); changing every call to the new allowance
+would change their request keys and end reuse. Verify actual prefix reuse before
+resuming. The [runtime reference](../../../docs/workflows/index.md)
+owns the axis list and timer constraints.
 
-Ordinary narrative still uses plain text. A singleton `handoffs` report that
-exceeds a guessed character limit is a separate authoring defect; increasing
-turns does not fix it. Use `choice` for a routing decision and `handoffs` only
-for discovered work units, including sequential slice queues.
+Ordinary narrative still uses plain text. A narrative report wrapped in a
+singleton `handoffs` is a separate authoring defect; there is no character limit
+to exceed, and increasing turns does not fix it. Use `choice` for a routing
+decision and `handoffs` only for discovered work units, including sequential
+slice queues.
 
 ### Prefix and invocation limits
 
 Owned by [locus-pi-workflow-run](../../locus-pi-workflow-run/SKILL.md#declare-one-outcome-before-launching):
 strict prefix matching and its named misses, `unnamed-node`, the `fusion()`
-boundary, and the `totalAgents` fuse that replayed answers still spend.
+boundary, the `return-contract-changed` boundary of a run recorded before the
+current return contract, and explicit `totalAgents`, which replayed answers do
+not spend.
 
 ## Do not promise stronger recovery
 
@@ -165,4 +187,4 @@ Ordinary terminal resume, a real `awaiting_operator` continuation, and explicit 
 
 A larger legitimate work list is not a reason to erase completed agent work. Do not insert a new total-call cap and do not automatically raise an existing bound. Preserve user choices. Run-level operational changes and changes to one call's prompt, model or options have different identities; do not replace them with a blanket whole-source equality rule.
 
-Canonical owners: [runtime reference](../../../extensions/workflows/REFERENCE.md#continuing-a-repaired-workflow), [recovery and continuation](../../../extensions/workflows/references/recovery-and-continuation.md) and [execution controls](../../../extensions/workflows/references/execution-controls.md).
+Canonical owners: [runtime reference](../../../docs/workflows/replay.md#continuing-a-repaired-workflow), [recovery and continuation](../../../docs/workflows/recovery-and-continuation.md) and [execution controls](../../../docs/workflows/dsl.md).

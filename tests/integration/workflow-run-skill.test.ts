@@ -65,9 +65,14 @@ describe("shipped workflow run skill", () => {
       "Editing the stopped workflow first is allowed and\n  expected",
       "Changed source bytes no longer\n  end a resume",
       "The first fresh call ends reuse for the whole run",
-      // The fusion boundary is named, with the case it costs.
-      "ends the\n  run with `fusion resume cannot mix recorded and fresh agent calls`",
-      "no longer replays a fusion tail that sat\n  after a recorded failure",
+      // The fusion boundary is named, and what it refuses is a MIXED panel: a whole
+      // fresh panel after the divergence point is ordinary work, not a terminal error.
+      "runs as an ordinary fresh panel",
+      "What stays refused is a MIXED panel",
+      "`fusion resume cannot mix recorded and fresh agent calls`",
+      "A fully replayed panel is not charged against `totalAgents`",
+      // The real replay boundary of this release, plain-text calls included.
+      "re-runs from its first\n  agent call, whatever that call is",
       // Reuse is proven from the new run, and a fresh-call count proves nothing.
       "`divergedAtNode` names the node",
       "`freshCalls` alone proves nothing",

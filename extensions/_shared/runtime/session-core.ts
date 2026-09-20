@@ -8,7 +8,6 @@ export const SESSION_ENTRY_TYPES = [
   "custom",
   "custom_message",
   "decision",
-  "todo_write",
   "compact_summary",
   "branch_summary",
   "child_run",
@@ -55,10 +54,6 @@ export type SessionEntryPayloadByType = {
     question?: string;
     answer?: unknown;
     status: "answered" | "cancelled" | "deferred";
-    metadata?: Record<string, unknown>;
-  };
-  todo_write: {
-    phases: unknown[];
     metadata?: Record<string, unknown>;
   };
   compact_summary: {
@@ -367,9 +362,6 @@ export function validateSessionEntryInput(input: SessionEntryInput): ValidationR
       break;
     case "decision":
       requireEnum(payload, "status", ["answered", "cancelled", "deferred"], errors);
-      break;
-    case "todo_write":
-      if (!Array.isArray(payload.phases)) errors.push("payload.phases must be an array");
       break;
     case "compact_summary":
       requireString(payload, "summary", errors);

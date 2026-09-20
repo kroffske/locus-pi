@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   type AgentRunRequest,
@@ -33,6 +36,15 @@ function fullRequest(input: Partial<AgentRunRequest>): AgentRunRequest {
 }
 
 describe("agent runner contract", () => {
+  it("invents no turn budget when the caller declares none", () => {
+    const request = createAgentRunRequest(reviewer, "Task", { approvalTier: "allow" });
+    expect(request.maxTurns).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(request, "maxTurns")).toBe(false);
+    expect(validateRunPolicy(fullRequest({}))).toBeUndefined();
+    // A caller that wants a stop still gets exactly the one it named.
+    expect(createAgentRunRequest(reviewer, "Task", { maxTurns: 3 }).maxTurns).toBe(3);
+  });
+
   it("blocks without an executor while recording child lifecycle entries", async () => {
     const h = createHarness("/repo", { sessionId: "parent-session" });
     const store = new MemorySessionStore({
@@ -45,6 +57,8 @@ describe("agent runner contract", () => {
       ctx: h.ctx,
       sessionStore: store,
       request: createAgentRunRequest(reviewer, "Review this change", { approvalTier: "allow" }),
+      // See the approval case below: an unwritable envelope is its own reported failure now.
+      resultArtifactsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-runner-artifacts-")),
     });
 
     expect(result).toMatchObject({
@@ -67,10 +81,14 @@ describe("agent runner contract", () => {
 
   it("enforces budgets, depth, and allowed tools before creating a child run", () => {
     for (const maxTurns of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(validateRunPolicy(fullRequest({ maxTurns }))).toBe("maxTurns must be a positive safe integer.");
+      expect(validateRunPolicy(fullRequest({ maxTurns }))).toBe(
+        "maxTurns must be a positive safe integer when declared.",
+      );
     }
     expect(validateRunPolicy(fullRequest({ maxTurns: 1000 }))).toBeUndefined();
-    expect(validateRunPolicy(fullRequest({ depth: 1, maxDepth: 1 }))).toBe("Agent run depth limit reached.");
+    expect(validateRunPolicy(fullRequest({ depth: 1, maxDepth: 1 }))).toBe(
+      "Direct child-agent nesting depth for this scheduler is reached; no deeper managed child is started.",
+    );
     expect(validateRunPolicy(fullRequest({ allowedTools: ["read", "bash"] }))).toBe(
       "Requested tools exceed the agent definition allow-list.",
     );
@@ -84,11 +102,15 @@ describe("agent runner contract", () => {
       now: () => "2026-06-02T00:00:00.000Z",
     });
 
+    // A real directory for the result envelope: `/repo` does not exist, and a run that
+    // cannot store its envelope is now reported as a storage failure rather than under
+    // its execution status. This case is about approvals, so let the write succeed.
     const result = await executeAgentRunBoundary({
       pi: h.pi,
       ctx: h.ctx,
       sessionStore: store,
       request: createAgentRunRequest(reviewer, "Review this change", { approvalTier: "prompt" }),
+      resultArtifactsDir: mkdtempSync(path.join(tmpdir(), "locus-agent-runner-artifacts-")),
     });
 
     expect(result).toMatchObject({

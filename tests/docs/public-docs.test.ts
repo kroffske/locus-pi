@@ -5,11 +5,13 @@ import { defaultExtensionManifests, root } from "../contracts/helpers/package-co
 
 const expectedDocs = [
   "architecture.md",
+  "environment-variables.md",
   "extensions.md",
   "getting-started.md",
   "locus-pi-workflows.md",
   "third-party-notices.md",
   "tui-design.md",
+  "workflows",
   "workflows.md",
 ];
 
@@ -55,8 +57,10 @@ describe("public documentation topology", () => {
     const readme = readFileSync(path.join(root, "README.md"), "utf8");
     for (const relativePath of [
       "docs/getting-started.md",
+      "docs/environment-variables.md",
       "docs/extensions.md",
       "docs/workflows.md",
+      "docs/workflows/index.md",
       "docs/locus-pi-workflows.md",
       "docs/tui-design.md",
       "docs/architecture.md",

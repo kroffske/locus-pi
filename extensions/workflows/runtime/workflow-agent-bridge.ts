@@ -26,20 +26,9 @@ import {
 import { agentLiveStore, type AgentLiveExecutionHandle } from "../../_shared/agent-runtime/agent-live-store.js";
 import { EXECUTED_MODEL_UNAVAILABLE } from "../../_shared/agent-runtime/agent-runner.js";
 import { discoverAgentDefinitions } from "../../_shared/agent-runtime/agents.js";
-import type { ModelRoleResolution } from "../../_shared/model/model-settings.js";
-import {
-  DEFAULT_MODEL_ROLES,
-  formatAssignment,
-  loadModelRolesState,
-  resolveAgentModelPreference,
-  malformedRoleAssignmentNote,
-  resolveDeclaredModelRole,
-  unassignedAgentTierNote,
-  unassignedRoleNote,
-  type ModelRolesState,
-} from "../../_shared/model/model-settings.js";
+import { loadModelRolesState } from "../../_shared/model/model-settings.js";
 import { resolveLiveModelDisplay } from "../../_shared/model/live-model-display.js";
-import { workflowSlotKey } from "./workflow-runtime.js";
+import { workflowSlotKey, WORKFLOW_SHAPED_TRANSPORT_REFUSAL } from "./workflow-agent-contract.js";
 import { workflowAgentLiveRowId, workflowAgentLiveChildRowId } from "./workflow-live.js";
 import type {
   WorkflowAgentPreflight,
@@ -48,8 +37,9 @@ import type {
   WorkflowAgentResult,
   WorkflowUsage,
   WorkspaceMode,
-} from "./workflow-runtime.js";
-import { DEFAULT_WORKFLOW_BUDGET, workflowSdkTurnTimeoutMs } from "./workflow-budget.js";
+} from "./workflow-agent-contract.js";
+import { assertRepresentableTimeoutMs } from "./workflow-budget.js";
+import { scheduleLongTimeout } from "../../_shared/runtime/long-timer.js";
 import {
   createWorkflowAskTool,
   WORKFLOW_ASK_NO_UI_MESSAGE,
@@ -57,17 +47,12 @@ import {
   type WorkflowAskToolDeps,
 } from "./workflow-ask-tool.js";
 import { createWorkflowModelResolver, type WorkflowModelResolver } from "../../_shared/model/workflow-model-resolve.js";
+import { resolveWorkflowTier } from "./workflow-agent-model.js";
+import { transportHostsSessionTools } from "../../_shared/model/session-tool-transport.js";
 import type { AgentDefinition, PermissionMode } from "../../_shared/agent-runtime/agents.js";
 import type { AgentFailureCause } from "../../_shared/agent-runtime/agent-failure-cause.js";
 import type { WorkflowChildEvidenceDestinations } from "./workflow-artifacts.js";
 import { captureRepositoryCheckScripts } from "../../_shared/agent-runtime/agent-read-only-policy.js";
-
-/** Extra per-turn SDK-backstop headroom for `ask: true` calls. The backstop timer
- *  cannot pause while a human is thinking; the bridge's own fuse (which DOES pause)
- *  stays the authority on effective run time, and this allowance keeps the backstop
- *  from firing first during a wait. A single wait longer than this still dies by
- *  the backstop — a named, documented residual, not a silent one. */
-const WORKFLOW_ASK_TURN_WAIT_ALLOWANCE_MS = 24 * 60 * 60 * 1000;
 
 /** Named refusal for an `ask: true` stage under the run-level no-operator mode.
  *  Method-agnostic wording on purpose: the mode forbids operator input as such. */
@@ -117,9 +102,9 @@ export interface WorkflowAgentBridgeOptions {
     thinkingLevel?: ThinkingLevel;
     live?: AgentSdkSessionExecutorOptions["live"];
     maxToolCalls?: number;
-    /** SDK turn budget derived from the call's declared `timeoutMs` (D4), so the
-     *  host's own child deadline can only ever fire after the workflow fuse. */
-    turnTimeoutMs?: number;
+    /** The child's whole wall clock, exactly as declared. No derivation: the bridge
+     *  fuse and the host deadline are the same number, so neither can surprise the other. */
+    childTimeoutMs?: number;
     cliRequestTimeoutMs?: number;
     reportsDir?: string;
     onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
@@ -235,6 +220,11 @@ export function createWorkflowAgentPreflight(options: WorkflowAgentBridgeOptions
       };
       const tier = await resolveWorkflowTier({ req, agent, modelRoles, resolveModelFn });
       if (tier.kind === "refused") throw new Error(tier.message);
+      // Same capability check the runner makes, moved to the one place a composition
+      // can still refuse for free: before the first member spends anything.
+      if (request.expectsShapedResult === true && tier.kind === "resolved" && !transportHostsSessionTools(tier.model)) {
+        throw new Error(WORKFLOW_SHAPED_TRANSPORT_REFUSAL);
+      }
     }
   };
 }
@@ -354,6 +344,28 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         ...(req.label !== undefined ? { label: req.label } : {}),
       };
     }
+    // 3b. CAPABILITY, decided on the model this call just resolved and BEFORE any
+    //     child exists. A shaped result travels as a `workflow_return` receipt on the
+    //     child session; a transport that never hosts Pi tools cannot register it or
+    //     read the tool set back, so the call would be paid for and then refused at
+    //     the end for a reason that was knowable at the start. The refusal is the
+    //     same cause and the same sentence the host emits later, so a script that
+    //     branches on `output-contract-unavailable` sees one behaviour, not two.
+    if (req.returnContract !== undefined && tier.kind === "resolved" && !transportHostsSessionTools(tier.model)) {
+      return {
+        ok: false,
+        status: "failed",
+        failureCause: "output-contract-unavailable",
+        summary: WORKFLOW_SHAPED_TRANSPORT_REFUSAL,
+        diagnostics: [
+          WORKFLOW_SHAPED_TRANSPORT_REFUSAL,
+          `Refused before the child started: ${tier.selector} routes through a transport that does not host session tools.`,
+        ],
+        ...resultIdentity,
+        workspaceMode,
+        ...(req.label !== undefined ? { label: req.label } : {}),
+      };
+    }
     const modelRoleResolution = tier.roleResolution;
     const liveModel = resolveLiveModelDisplay({
       pi,
@@ -439,11 +451,9 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     }
 
     // 4. Build the request
-    // The turn budget is declared by the runtime (package contract or per-call
-    // option) and only falls back here when an embedder configured neither. It was
-    // a literal `5` invisible to authors while the child's whole wall clock is
-    // computed from it.
-    const maxTurns = req.maxTurns ?? DEFAULT_WORKFLOW_BUDGET.turns;
+    // No fallback. A turn budget nobody declared is unbounded, and the host says so
+    // in its own header rather than inheriting a number invisible to the author.
+    const maxTurns = req.maxTurns;
     const childTask = composeWorkflowChildTask(req.prompt, options.workflowWorkspaceDir, {
       pwd: worktreePath ?? projectRoot,
       projectRoot,
@@ -459,8 +469,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     // call below is in flight; its fuse and abort hooks are late-bound `let`
     // bindings because the fuse they drive is created further down, next to the
     // abort controller it shares.
-    let pauseAskFuse: () => void = () => {};
-    let resumeAskFuse: () => void = () => {};
+    let askWaitStarted: () => void = () => {};
+    let askWaitEnded: () => void = () => {};
     let failAskCall: (message: string, cause: WorkflowAskFailureCause) => void = () => {};
     const askNotes: string[] = [];
     let askEvidenceCounter = 0;
@@ -473,8 +483,8 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
               agent: executionName,
               label: req.label,
             }),
-            onWaitStart: () => pauseAskFuse(),
-            onWaitEnd: () => resumeAskFuse(),
+            onWaitStart: () => askWaitStarted(),
+            onWaitEnd: () => askWaitEnded(),
             failCall: (message, cause) => failAskCall(message, cause),
             ...(options.askRequestQuestion !== undefined ? { requestQuestion: options.askRequestQuestion } : {}),
             recordEvidence: (record) => {
@@ -497,13 +507,15 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
           })
         : undefined;
     const returnController =
-      req.returnContract === undefined ? undefined : createWorkflowReturnController(req.returnContract);
+      req.returnContract === undefined
+        ? undefined
+        : createWorkflowReturnController(req.returnContract, req.returnValidate);
     const customTools = [
       ...(askTool === undefined ? [] : [askTool]),
       ...(returnController === undefined ? [] : [returnController.tool]),
     ];
     const requestInput = {
-      maxTurns,
+      ...(maxTurns === undefined ? {} : { maxTurns }),
       approvalTier,
       allowedTools: req.capabilityMode === "tool-free" ? [] : ["*"],
       ...(req.capabilityMode === undefined ? {} : { capabilityMode: req.capabilityMode }),
@@ -548,28 +560,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         : createAgentRunRequest(agent, childTask, requestInput);
 
     // 5. Build the executor via the injectable factory
-    const createExecutorFn =
-      options.createExecutor ??
-      ((o: {
-        model?: unknown;
-        thinkingLevel?: ThinkingLevel;
-        live?: AgentSdkSessionExecutorOptions["live"];
-        maxToolCalls?: number;
-        turnTimeoutMs?: number;
-        cliRequestTimeoutMs?: number;
-        reportsDir?: string;
-        onLiveExecution?: (execution: AgentLiveExecutionHandle) => void;
-      }) =>
-        createAgentSdkSessionExecutor({
-          ...(o.model !== undefined ? { model: o.model } : {}),
-          ...(o.thinkingLevel !== undefined ? { thinkingLevel: o.thinkingLevel } : {}),
-          ...(o.live !== undefined ? { live: o.live } : {}),
-          ...(o.maxToolCalls !== undefined ? { maxToolCalls: o.maxToolCalls } : {}),
-          ...(o.turnTimeoutMs !== undefined ? { turnTimeoutMs: o.turnTimeoutMs } : {}),
-          ...(o.cliRequestTimeoutMs !== undefined ? { cliRequestTimeoutMs: o.cliRequestTimeoutMs } : {}),
-          ...(o.reportsDir !== undefined ? { reportsDir: o.reportsDir } : {}),
-          ...(o.onLiveExecution !== undefined ? { onLiveExecution: o.onLiveExecution } : {}),
-        }));
+    const createExecutorFn = options.createExecutor ?? createAgentSdkSessionExecutor;
     const workflowParentRowId =
       options.workflowRunId !== undefined
         ? workflowAgentLiveRowId({
@@ -611,32 +602,37 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       noMcp: permissionMode === "restricted",
     };
     let liveExecution: AgentLiveExecutionHandle | undefined;
-    // ONE wall clock per child. The SDK host kills a child at `turnTimeoutMs * maxTurns`
-    // whether or not anyone asked it to, so leaving that budget at its own default made
-    // two independent deadlines race and the operator's failure text nondeterministic.
-    // Here the declared fuse is the authority and the SDK budget is derived from it,
-    // strictly above it — a backstop that cannot fire first (D4). An `ask: true` call
-    // widens the backstop by a fixed wait allowance: the backstop cannot pause during
-    // a human wait, while the fuse below can and does.
-    const turnTimeoutMs =
-      req.timeoutMs === undefined
-        ? undefined
-        : req.operatorAsk === true
-          ? workflowSdkTurnTimeoutMs(req.timeoutMs, maxTurns) + WORKFLOW_ASK_TURN_WAIT_ALLOWANCE_MS
-          : workflowSdkTurnTimeoutMs(req.timeoutMs, maxTurns);
+    // ONE wall clock per child, and the host receives THE SAME NUMBER the author wrote.
+    //
+    // What used to happen here: the declared fuse was divided by the turn count, a
+    // five-second margin was added per turn, the host multiplied it back, and an
+    // `ask: true` call added a 24-hour allowance on top. That product overflowed Node's
+    // maximum delay for ordinary inputs — the defect L50 names — and it bought nothing,
+    // because the host never applied the per-turn value per turn: it multiplied it into
+    // one deadline immediately. So there is no derivation left. The declared timeout is
+    // the deadline, here and in the host.
+    //
+    // Checked BEFORE the child starts, so an unusable number is an authoring error the
+    // operator reads at once rather than a child that dies on a clamped timer.
+    if (req.timeoutMs !== undefined) assertRepresentableTimeoutMs(req.timeoutMs, "agent timeoutMs");
+    const childTimeoutMs = req.timeoutMs;
     const executor = createExecutorFn({
       // `perCallModel ?? resolvedRoleModel ?? ctx.model`, collapsed into the one term
       // `resolveWorkflowTier` already computed. The parent model is reachable only
       // through `kind: "inherit"` — i.e. the call declared no tier, or declared one
       // that no layer assigns and the degradation was recorded.
       model: tier.kind === "resolved" ? tier.model : (ctx as { model?: unknown }).model,
-      ...(tier.kind === "resolved" && tier.thinking !== undefined ? { thinkingLevel: tier.thinking } : {}),
+      ...(tier.kind === "resolved" && tier.thinking !== undefined
+        ? { thinkingLevel: tier.thinking }
+        : tier.kind === "inherit" && liveModel?.thinking !== undefined
+          ? { thinkingLevel: liveModel.thinking }
+          : {}),
       live,
       onLiveExecution: (execution) => {
         liveExecution = execution;
       },
       ...(req.maxToolCalls !== undefined ? { maxToolCalls: req.maxToolCalls } : {}),
-      ...(turnTimeoutMs !== undefined ? { turnTimeoutMs } : {}),
+      ...(childTimeoutMs !== undefined ? { childTimeoutMs } : {}),
       ...(req.timeoutMs !== undefined ? { cliRequestTimeoutMs: req.timeoutMs } : {}),
       ...(evidenceDestinations !== undefined ? { reportsDir: evidenceDestinations.transcriptDir } : {}),
     });
@@ -658,37 +654,37 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
     };
     if (signal.aborted) abortFromRun();
     else signal.addEventListener("abort", abortFromRun, { once: true });
-    // The fuse is PAUSABLE: while the child is blocked on `workflow_ask`, the
-    // operator's thinking time is not the child's run time. `fuseRemainingMs`
-    // counts armed time only; the widened SDK backstop above covers the wait.
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let fuseRemainingMs = req.timeoutMs;
-    let fuseArmedAt: number | undefined;
-    let askWaitDepth = 0;
+    // ONE deadline, and it is WALL CLOCK: a declared `timeoutMs` includes the time a
+    // human spends answering `workflow_ask`.
+    //
+    // The fuse used to pause during that wait while the host backstop could not,
+    // which is why the backstop needed a 24-hour allowance on top and why the
+    // resulting product overflowed Node's timer. Two clocks that disagree about what
+    // time it is cannot both be the authority, and only one of them can be paused
+    // from this process. So the wait counts, the journal records how long it was, and
+    // an author who wants thinking time excluded declares a timeout that allows for
+    // it — or declares none, which is genuinely unbounded.
+    let cancelFuse: (() => void) | undefined;
+    let askWaitStartedAt: number | undefined;
     const fireFuse = (): void => {
       if (abortOwner !== undefined) return;
       abortOwner = "timeout";
       callAbort.abort(new Error(`workflow agent call exceeded its ${String(req.timeoutMs)} ms timeout`));
     };
-    const armFuse = (): void => {
-      if (fuseRemainingMs === undefined) return;
-      fuseArmedAt = Date.now();
-      timer = setTimeout(fireFuse, fuseRemainingMs);
+    // A span longer than Node's maximum delay runs as a chain of representable waits
+    // rather than being clamped to one millisecond or refused by a policy ceiling.
+    if (req.timeoutMs !== undefined) cancelFuse = scheduleLongTimeout(req.timeoutMs, fireFuse, "agent timeoutMs");
+    askWaitStarted = (): void => {
+      askWaitStartedAt ??= Date.now();
     };
-    armFuse();
-    pauseAskFuse = (): void => {
-      askWaitDepth += 1;
-      if (askWaitDepth !== 1 || timer === undefined) return;
-      clearTimeout(timer);
-      timer = undefined;
-      if (fuseRemainingMs !== undefined && fuseArmedAt !== undefined) {
-        fuseRemainingMs = Math.max(0, fuseRemainingMs - (Date.now() - fuseArmedAt));
-      }
-    };
-    resumeAskFuse = (): void => {
-      askWaitDepth = Math.max(0, askWaitDepth - 1);
-      if (askWaitDepth !== 0 || abortOwner !== undefined || timer !== undefined) return;
-      armFuse();
+    askWaitEnded = (): void => {
+      if (askWaitStartedAt === undefined) return;
+      const waitedMs = Date.now() - askWaitStartedAt;
+      askWaitStartedAt = undefined;
+      // The evidence for the rule above: the operator's wait is visible in the run's
+      // diagnostics, so a call that died on its deadline while a human was thinking
+      // says so instead of looking like a slow model.
+      askNotes.push(`workflow_ask: operator wait of ${String(waitedMs)} ms counted against the call deadline`);
     };
     failAskCall = (message: string, cause: WorkflowAskFailureCause): void => {
       if (abortOwner !== undefined) return;
@@ -729,7 +725,7 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
         ...(evidenceDestinations !== undefined ? { resultArtifactsDir: evidenceDestinations.resultArtifactsDir } : {}),
       });
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      cancelFuse?.();
       signal.removeEventListener("abort", abortFromRun);
     }
     const displayName =
@@ -816,7 +812,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       tier.kind === "inherit" && tier.fallback !== undefined && boundary.executedModel !== undefined;
     const result: WorkflowAgentResult = {
       ok: boundary.status === "completed",
-      status: boundary.status as WorkflowAgentResult["status"],
+      // A workflow journal status is a closed four-way set. `storage-failed` is the
+      // boundary's honest third notion (finished, unstored) and it lands here as a
+      // failure — the whole sentence, including the answer's whereabouts, is in
+      // `summary`, which is what the operator reads.
+      status: (boundary.status === "storage-failed" ? "failed" : boundary.status) as WorkflowAgentResult["status"],
       summary: boundary.reason,
       // Carried, never re-derived: the host declared the cause where it was known.
       ...(boundary.failureCause !== undefined ? { failureCause: boundary.failureCause } : {}),
@@ -831,16 +831,11 @@ export function createWorkflowAgentRunner(options: WorkflowAgentBridgeOptions): 
       ...(boundary.childTrace !== undefined ? { childTrace: boundary.childTrace } : {}),
       ...(boundary.resultArtifact?.path !== undefined ? { resultArtifact: boundary.resultArtifact.path } : {}),
       ...(worktreePath !== undefined ? { worktreePath } : {}),
-      // Display prefers a real readback over the request; the sentinel is evidence,
-      // not a selector, so it stays out of the row and only enters `executedModel`.
-      ...(executedModel !== undefined && executedModel !== EXECUTED_MODEL_UNAVAILABLE
-        ? { model: executedModel }
-        : liveModel?.model !== undefined
-          ? { model: liveModel.model }
-          : {}),
+      // The request lives on `agent_start`; result evidence contains only host readback.
+      ...(executedModel !== undefined && executedModel !== EXECUTED_MODEL_UNAVAILABLE ? { model: executedModel } : {}),
       ...(executedModel !== undefined ? { executedModel } : {}),
       ...(degradationConfirmed ? { modelRoleFallback: tier.fallback! } : {}),
-      ...(liveModel?.thinking !== undefined ? { thinking: liveModel.thinking } : {}),
+      ...(boundary.executedThinking !== undefined ? { thinking: boundary.executedThinking } : {}),
       ...(slotKey !== undefined ? { slotKey } : {}),
       ...(round !== undefined ? { round } : {}),
       ...(usage !== undefined ? { usage } : {}),
@@ -865,203 +860,6 @@ function workflowAskContextText(input: {
   return `Workflow ${run} — agent "${input.agent}"${stage} is asking:`;
 }
 
-/**
- * Which model this call runs on, decided before any child exists.
- *
- * Three outcomes, and the difference between them is the whole point of the tier
- * feature:
- *
- *  - `resolved` — a concrete model came out of the registry and reaches the child.
- *  - `inherit`  — nothing was declared, or a declared ROLE has no assignment in the
- *    global config. The child runs on the parent session model and, when a role was named,
- *    `fallback` records that in one sentence. Quiet fallback, loud record.
- *  - `refused`  — a CONCRETE `provider/id` selector did not resolve. A typo, a
- *    provider that is not configured, a model the host does not have. The call ends
- *    here with the selector quoted and zero child sessions.
- *
- * The asymmetry is deliberate and is the owner's decision (OD5): the package ships
- * no role assignments, so refusing an unassigned named profile role would fail on a
- * stock install; but a selector an author typed by hand is an instruction,
- * and silently running something else is exactly what this task exists to stop.
- */
-type WorkflowTier =
-  | {
-      kind: "resolved";
-      /** Where the tier came from — used only to phrase diagnostics. */
-      origin: "call-model" | "call-role" | "frontmatter";
-      selector: string;
-      model: unknown;
-      thinking?: ThinkingLevel;
-      roleResolution: ModelRoleResolution;
-    }
-  | { kind: "inherit"; roleResolution: ModelRoleResolution; fallback?: string }
-  | { kind: "refused"; message: string };
-
-async function resolveWorkflowTier(input: {
-  req: WorkflowAgentRequest;
-  agent: AgentDefinition | undefined;
-  modelRoles: ModelRolesState;
-  resolveModelFn: WorkflowModelResolver;
-}): Promise<WorkflowTier> {
-  const { req, agent, modelRoles, resolveModelFn } = input;
-  // Frontmatter preference is computed either way: it is what the request capsule,
-  // the run-result artifact and the live row have always recorded, and dropping it
-  // on the per-call paths would silently change three evidence surfaces.
-  const frontmatterResolution = resolveAgentModelPreference(modelRoles, agent?.model ?? []);
-
-  if (req.requireModelRole === true && req.modelRole === undefined) {
-    return refusal("requireModelRole: true requires one explicit modelRole on the same agent call");
-  }
-  if (req.requireModelRole === true && req.model !== undefined) {
-    return refusal(
-      "requireModelRole: true cannot be combined with a concrete model; remove model or the strict role flag",
-    );
-  }
-
-  if (req.model !== undefined) {
-    const resolution = await resolveModelFn(req.model);
-    if (!resolution.ok) {
-      return refusal(`Per-call model ${JSON.stringify(req.model)} could not be used: ${resolution.message}`, req.model);
-    }
-    return {
-      kind: "resolved",
-      origin: "call-model",
-      selector: resolution.selector,
-      model: resolution.model,
-      ...(resolution.thinking !== undefined ? { thinking: resolution.thinking } : {}),
-      roleResolution: frontmatterResolution,
-    };
-  }
-
-  if (req.modelRole !== undefined) {
-    // `modelRole` is a NAME IN THE ROLES TABLE and never a provider selector (D4).
-    // A slash means a concrete `provider/id` under the OD1 grammar, so a
-    // slash-bearing `modelRole` is a category error, not an unassigned role — and
-    // treating it as one would degrade it to the session model, i.e. silently run
-    // something other than the model the author spelled out. That is the exact
-    // fail-closed case OD5 keeps loud, so it refuses with the option to use instead.
-    if (req.modelRole.includes("/")) {
-      return refusal(
-        `modelRole ${JSON.stringify(req.modelRole)} is not a role name: a "/" means a concrete ` +
-          `provider/id selector, and modelRole only ever names a role in the model-roles table. ` +
-          `Use \`model: ${JSON.stringify(req.modelRole)}\` to pin a concrete model, or name a bare ` +
-          `role (one of: ${DEFAULT_MODEL_ROLES.join(", ")}).`,
-        req.modelRole,
-      );
-    }
-    // The DECLARED role only. Purpose resolution would answer a question the author
-    // did not ask, and `modelRole: "smol"` would run whatever `agent` holds.
-    const declared = resolveDeclaredModelRole(modelRoles, req.modelRole);
-    if (declared.malformed !== undefined) {
-      // Assigned but unparseable — a config typo, not an unassigned role. Degrading
-      // it would run the parent's model under the requested tier's name and tell the
-      // operator their role was "not assigned in the global config", which their own file
-      // contradicts.
-      return refusal(malformedRoleAssignmentNote(req.modelRole, "modelRole", declared.malformed), req.modelRole);
-    }
-    if (declared.assignment === undefined) {
-      if (req.requireModelRole === true) {
-        return refusal(
-          `modelRole ${JSON.stringify(req.modelRole)} is required by this workflow stage, but the global ` +
-            "model-roles config does not assign it. Assign the role with /model-roles before running this workflow.",
-          req.modelRole,
-        );
-      }
-      return {
-        kind: "inherit",
-        roleResolution: declared,
-        fallback: unassignedRoleNote(req.modelRole, "modelRole", modelRoles),
-      };
-    }
-    const selector = formatAssignment(declared.assignment);
-    const resolution = await resolveModelFn(selector);
-    if (!resolution.ok) {
-      return refusal(
-        `modelRole ${JSON.stringify(req.modelRole)} could not be used: it is assigned ` +
-          `${JSON.stringify(selector)} by the ${declared.source} layer, but that ${resolution.message}`,
-        selector,
-      );
-    }
-    return {
-      kind: "resolved",
-      origin: "call-role",
-      selector: resolution.selector,
-      model: resolution.model,
-      ...(resolution.thinking !== undefined ? { thinking: resolution.thinking } : {}),
-      roleResolution: declared,
-    };
-  }
-
-  if (agent === undefined) return { kind: "inherit", roleResolution: frontmatterResolution };
-
-  const frontmatterSelector = agent.model?.[0];
-  if (frontmatterResolution.malformed !== undefined) {
-    // D3b softens an UNASSIGNED frontmatter role so a stock install still works. It
-    // does not soften a broken roles file: no foreign operator has one, and the only
-    // way to reach here is for this machine's config to name a selector it cannot parse.
-    return refusal(
-      malformedRoleAssignmentNote(
-        frontmatterSelector ?? frontmatterResolution.role,
-        `agent "${agent.name}" frontmatter model`,
-        frontmatterResolution.malformed,
-      ),
-      frontmatterSelector,
-    );
-  }
-  if (frontmatterResolution.assignment === undefined) {
-    return {
-      kind: "inherit",
-      roleResolution: frontmatterResolution,
-      ...(frontmatterSelector !== undefined
-        ? { fallback: unassignedAgentTierNote(agent.name, frontmatterSelector, frontmatterResolution, modelRoles) }
-        : {}),
-    };
-  }
-  const selector = formatAssignment(frontmatterResolution.assignment);
-  const resolution = await resolveModelFn(selector);
-  if (!resolution.ok) {
-    return refusal(
-      `Agent "${agent.name}" frontmatter model ${JSON.stringify(frontmatterSelector ?? selector)} could not be used: ` +
-        `it resolves to ${JSON.stringify(selector)} (${frontmatterResolution.source} layer), ` +
-        `but that ${resolution.message}`,
-      frontmatterSelector ?? selector,
-    );
-  }
-  return {
-    kind: "resolved",
-    origin: "frontmatter",
-    selector: resolution.selector,
-    model: resolution.model,
-    ...(resolution.thinking !== undefined ? { thinking: resolution.thinking } : {}),
-    roleResolution: frontmatterResolution,
-  };
-}
-
-function refusal(message: string, selector?: string): WorkflowTier {
-  return { kind: "refused", message: `${message}${legacyRoleNamespaceHint(selector)}` };
-}
-
-/**
- * The one predictable way this refusal fires on an upgrade.
- *
- * Before tiers, the former bundled profiles wrote their tier as `pi/<role>`, and nothing read
- * it — `pi` was never a provider. An agent's FRONTMATTER in that namespace is now
- * repaired in `resolveAgentModelPreference`, because that spelling is the package's
- * own history and refusing it makes a stale catalog unusable. Everything else still
- * fails closed and reaches here: a per-call `model` / `modelRole` written today, a
- * roles-table entry the operator assigned by hand, or `pi/<not-a-role>`, where
- * "provider pi has no model X" alone tells them nothing about what to edit.
- */
-function legacyRoleNamespaceHint(selector: string | undefined): string {
-  if (selector === undefined || !selector.startsWith("pi/")) return "";
-  const role = selector.slice("pi/".length);
-  return (
-    ` "pi/<role>" was the pre-tier role namespace and a slash now means a real provider: name the role ` +
-    `where a role is accepted (\`modelRole: ${JSON.stringify(role)}\`, or an agent's frontmatter ` +
-    `\`model: ${role}\`), or write a real provider/id here.`
-  );
-}
-
 /** Increment and return the round for a slot row id (first call → 1). */
 function nextRound(counter: Map<string, number>, rowId: string): number {
   const round = (counter.get(rowId) ?? 0) + 1;
@@ -1069,10 +867,17 @@ function nextRound(counter: Map<string, number>, rowId: string): number {
   return round;
 }
 
-/** Project the exact execution's accumulated child tokens, or omit when its slot was replaced. */
+/**
+ * Project the exact execution's accumulated child tokens, or omit when its slot was
+ * replaced.
+ *
+ * No `costTotal`. The host gives this bridge a token count and no price, and the
+ * previous hardcoded `0` stated the one thing nobody knows: that the run cost
+ * nothing. An absent field says "unknown" and every reader prints it that way.
+ */
 function usageFromExecution(execution: AgentLiveExecutionHandle): WorkflowUsage | undefined {
   const row = agentLiveStore.rowForExecution(execution);
   if (row?.tokenCount === undefined) return undefined;
   const { input, output } = row.tokenCount;
-  return { input, output, totalTokens: input + output, costTotal: 0 };
+  return { input, output, totalTokens: input + output };
 }
