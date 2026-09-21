@@ -4,6 +4,29 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-21
+
+### Changed
+
+- `task/plan` now grows one complete workspace `workflow.mjs` through at most six
+  accepted source slices. The owner re-cuts the remaining graph queue after each
+  slice. Independent mechanical and design checks gate acceptance, with one
+  cumulative `fix` per slice and explicit failure evidence when work remains.
+- The checked `task/plan` result is the exact workspace file exposed through
+  `primaryFile` with its path, size, and digest. Consumers of the previous primary
+  artifact or `outputs/workflow.mjs` must use that file reference instead.
+- Workflow authoring and launch skills preserve the user's default model and
+  effort unless the user or project requests a routing override.
+
+### Fixed
+
+- `task/plan` no longer accepts verifier prose as workflow source. Source-check,
+  workflow, and Fusion errors retain their failure flag and diagnostics; CLI
+  children no longer inherit an implicit five-minute process deadline.
+- Mechanical and design source fixes use the same `fix` choice, stage names, and
+  independent recheck evidence. The one-fix allowance and existing failure result
+  remain intact.
+
 ## [0.8.0] - 2026-09-20
 
 ### Changed
