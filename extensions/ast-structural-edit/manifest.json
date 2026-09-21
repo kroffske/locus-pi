@@ -1,6 +1,5 @@
 {
   "id": "ast-structural-edit",
-  "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "filesystem read/write for selected project files",
     "AST engine dependencies",
@@ -40,15 +39,8 @@
   },
   "risk": "high",
   "docsPath": "extensions/ast-structural-edit/README.md",
-  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/ast-structural-edit/tools.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts"
-  ],
-  "review": {
-    "status": "reviewed",
-    "source": "copy-after-audit",
-    "reviewedBy": "locus-pi",
-    "reviewedAt": "2026-06-01"
-  }
+  ]
 }

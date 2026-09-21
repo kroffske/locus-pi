@@ -14,48 +14,36 @@
         "ps"
       ],
       "hooks": ["session_start", "session_shutdown", "before_agent_start", "input"],
-      "risk": "high",
-      "ownership": "locus-specific"
+      "risk": "high"
     },
-    {
-      "id": "ask-user-question",
-      "tools": ["ask"],
-      "commands": [],
-      "hooks": [],
-      "risk": "medium",
-      "ownership": "compat-wrapper"
-    },
+    { "id": "ask-user-question", "tools": ["ask"], "commands": [], "hooks": [], "risk": "medium" },
     {
       "id": "ast-structural-edit",
       "tools": ["ast_grep", "ast_edit", "resolve"],
       "commands": [],
       "hooks": [],
-      "risk": "high",
-      "ownership": "compat-wrapper"
+      "risk": "high"
     },
     {
       "id": "model",
       "tools": [],
       "commands": ["model-roles", "effort"],
       "hooks": ["session_start", "input"],
-      "risk": "medium",
-      "ownership": "compat-wrapper"
+      "risk": "medium"
     },
     {
       "id": "status-line",
       "tools": [],
       "commands": [],
       "hooks": ["session_start", "session_before_compact", "session_compact", "session_shutdown"],
-      "risk": "low",
-      "ownership": "locus-specific"
+      "risk": "low"
     },
     {
       "id": "workflows",
       "tools": ["workflow", "workflow_check_source", "fusion"],
       "commands": ["workflows", "workflow-stop", "fusion"],
       "hooks": ["session_start", "session_shutdown", "input", "turn_end", "agent_settled", "tool_result"],
-      "risk": "critical",
-      "ownership": "locus-specific"
+      "risk": "critical"
     }
   ],
   "workflows": [

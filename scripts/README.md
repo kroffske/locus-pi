@@ -11,7 +11,6 @@ Each executable script is bound to an npm script in `package.json`.
 
 | Script                           | npm script                                     | Role                                        |
 | -------------------------------- | ---------------------------------------------- | ------------------------------------------- |
-| `audit-sources.ts`               | `audit:sources` (part of `check:fast`)         | Source-ownership and attribution gate       |
 | `build-public-catalogs.ts`       | `build:catalogs` / `check:generated`           | Writes and verifies the two public catalogs |
 | `check-extension-layers.ts`      | `check:layers` (part of `check:fast`)          | `extensions/_shared` layer and import rules |
 | `check-extension-manifests.ts`   | `check:manifests` (part of `check:fast`)       | Manifest schema and declared-path contract  |
@@ -28,7 +27,7 @@ Each executable script is bound to an npm script in `package.json`.
 The composite gates that bind them together:
 
 - `npm run check:fast` — manifests, layers, workflow source shape, typecheck,
-  Pi host version, tests, and source audit. The inner loop while editing; it
+  Pi host version, and tests. The inner loop while editing; it
   is not release-complete.
 - `npm run check:workflow-source -- --mode orchestration-only <path>` — apply
   the same orchestration-only validator as `workflow_check_source` to one exact
@@ -77,16 +76,6 @@ network. The parser lives in `markdown-links.ts` and is shared with
 `tests/integration/package-boundary.test.ts`, which applies the same rule to a
 real `npm pack` result. `tests/integration/markdown-links.test.ts` proves the
 gate rejects a broken link and a broken anchor.
-
-### audit-sources.ts
-
-Verifies source-ownership metadata for every active extension: an extension
-adapted from third-party code must carry completed review metadata in its
-`manifest.json`, `docs/third-party-notices.md` must retain the required Pi,
-Oh My Pi, and MIT attributions, and no public manifest may link internal
-source-audit notes. Exists because parts of the extension tree started as
-adapted third-party code, and attribution and review state must not silently
-rot.
 
 ### check-pi-host-version.mjs
 

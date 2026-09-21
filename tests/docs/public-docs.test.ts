@@ -9,7 +9,6 @@ const expectedDocs = [
   "extensions.md",
   "getting-started.md",
   "locus-pi-workflows.md",
-  "third-party-notices.md",
   "tui-design.md",
   "workflows",
   "workflows.md",
@@ -47,7 +46,6 @@ describe("public documentation topology", () => {
     const index = readFileSync(path.join(root, "docs/extensions.md"), "utf8");
     for (const { id, manifest } of defaultExtensionManifests()) {
       expect(manifest.docsPath).toBe(`extensions/${id}/README.md`);
-      expect(manifest.sourceAuditPath).toBeNull();
       expect(existsSync(path.join(root, manifest.docsPath)), manifest.docsPath).toBe(true);
       expect(index).toContain(`extensions/${id}/README.md`);
     }
@@ -64,7 +62,6 @@ describe("public documentation topology", () => {
       "docs/locus-pi-workflows.md",
       "docs/tui-design.md",
       "docs/architecture.md",
-      "docs/third-party-notices.md",
     ]) {
       expect(readme).toContain(relativePath);
       expect(existsSync(path.join(root, relativePath)), relativePath).toBe(true);

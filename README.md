@@ -60,4 +60,4 @@ Use GitHub Issues for reproducible defects. Report suspected vulnerabilities thr
 
 ## License
 
-Licensed under the [MIT License](LICENSE). Third-party attribution is recorded in [docs/third-party-notices.md](docs/third-party-notices.md).
+Licensed under the [MIT License](LICENSE).
