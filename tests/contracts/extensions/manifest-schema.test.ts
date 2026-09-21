@@ -15,7 +15,6 @@ afterEach(() => {
 function validManifest(): Record<string, unknown> {
   return {
     id: "one",
-    ownershipStatus: "locus-specific",
     runtimeRequirements: ["Pi command registration"],
     stateUsed: ["nothing persistent"],
     provides: { tools: ["one_tool"], commands: ["one run"], hooks: [] },
@@ -30,14 +29,7 @@ function validManifest(): Record<string, unknown> {
     },
     risk: "low",
     docsPath: "extensions/one/README.md",
-    sourceAuditPath: null,
     tests: ["tests/one.test.ts"],
-    review: {
-      status: "reviewed",
-      source: "write-from-scratch",
-      reviewedBy: "locus-pi",
-      reviewedAt: "2026-08-19",
-    },
   };
 }
 
@@ -93,24 +85,9 @@ describe("extension manifest contract", () => {
 
   it("rejects a field the schema does not declare inside a governed object", () => {
     const manifest = validManifest();
-    expect(messages({ ...manifest, review: { ...(manifest.review as object), tier: "core-owned" } })).toEqual([
-      "extensions/one/manifest.json: review.tier: is not declared by schemas/extension-manifest.schema.json",
-    ]);
-  });
-
-  it("rejects an enum value no shipped manifest uses", () => {
-    expect(messages({ ...validManifest(), ownershipStatus: "locus-owned" })).toEqual([
-      'extensions/one/manifest.json: ownershipStatus: must be one of "locus-specific", "compat-wrapper", received "locus-owned"',
-    ]);
-  });
-
-  it("rejects a review source outside the enum", () => {
-    const manifest = validManifest();
-    expect(
-      messages({ ...manifest, review: { ...(manifest.review as object), source: "local-implementation" } }),
-    ).toEqual([
-      'extensions/one/manifest.json: review.source: must be one of "write-from-scratch", "copy-after-audit", received "local-implementation"',
-    ]);
+    expect(messages({ ...manifest, uiLifecycle: { ...(manifest.uiLifecycle as object), tier: "core-owned" } })).toEqual(
+      ["extensions/one/manifest.json: uiLifecycle.tier: is not declared by schemas/extension-manifest.schema.json"],
+    );
   });
 
   it("rejects a missing required field", () => {

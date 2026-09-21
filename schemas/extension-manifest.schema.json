@@ -5,28 +5,12 @@
   "description": "The declared public contract of one extension. scripts/check-extension-manifests.ts validates every manifest referenced by package.json#pi.extensions against this file, so a field added here without a consumer is a defect. Each property description names the consumer that reads it.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "id",
-    "ownershipStatus",
-    "runtimeRequirements",
-    "stateUsed",
-    "provides",
-    "permissions",
-    "risk",
-    "docsPath",
-    "sourceAuditPath",
-    "tests",
-    "review"
-  ],
+  "required": ["id", "runtimeRequirements", "stateUsed", "provides", "permissions", "risk", "docsPath", "tests"],
   "properties": {
     "id": {
-      "description": "Extension identity; must equal the directory name. Read by extensions/agents/catalog/catalog.ts, scripts/audit-sources.ts and scripts/check-extension-manifests.ts.",
+      "description": "Extension identity; must equal the directory name. Read by extensions/agents/catalog/catalog.ts and scripts/check-extension-manifests.ts.",
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
-    },
-    "ownershipStatus": {
-      "description": "Who owns the implementation. Read by scripts/audit-sources.ts, which demands completed review metadata from adapted extensions.",
-      "enum": ["locus-specific", "compat-wrapper"]
     },
     "runtimeRequirements": {
       "description": "Host APIs and lifecycle events the extension needs. Reviewer and documentation contract; nothing executes it. Read by tests/extensions/workflows/fusion/fusion-tool.test.ts and documented in docs/extensions.md.",
@@ -91,33 +75,11 @@
       "description": "Co-located manual. Read by tests/contracts/docs/extension-reference.test.ts and tests/docs/public-docs.test.ts; scripts/check-extension-manifests.ts requires the file to exist and to be packaged through package.json#files.",
       "type": "string"
     },
-    "sourceAuditPath": {
-      "description": "Link to an internal source-audit note. scripts/audit-sources.ts requires null on every published manifest, so a fork that keeps such notes has a place to declare them without shipping them.",
-      "type": ["string", "null"]
-    },
     "tests": {
       "description": "The evidence that the implementation matches this contract. scripts/check-extension-manifests.ts and tests/contracts/docs/extension-reference.test.ts require every path to exist.",
       "type": "array",
       "items": { "type": "string" },
       "minItems": 1
-    },
-    "review": {
-      "description": "Review metadata. Read by scripts/audit-sources.ts, which requires a named reviewer and date on every adapted extension.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["status", "source", "reviewedBy", "reviewedAt"],
-      "properties": {
-        "status": {
-          "description": "The only status a published manifest may carry; unreviewed work does not enter package.json#pi.extensions.",
-          "enum": ["reviewed"]
-        },
-        "source": {
-          "description": "How the implementation was obtained. scripts/audit-sources.ts treats copy-after-audit as adapted.",
-          "enum": ["write-from-scratch", "copy-after-audit"]
-        },
-        "reviewedBy": { "type": ["string", "null"] },
-        "reviewedAt": { "type": ["string", "null"] }
-      }
     }
   },
   "$defs": {

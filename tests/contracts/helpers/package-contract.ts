@@ -17,7 +17,6 @@ export interface PackageJson {
 export interface ExtensionManifest {
   id: string;
   agent: { name: string; description: string };
-  ownershipStatus: string;
   runtimeRequirements: string[];
   stateUsed: string[];
   provides: { tools: string[]; commands: string[]; hooks: string[]; shortcuts?: string[] };
@@ -35,9 +34,7 @@ export interface ExtensionManifest {
   };
   risk: string;
   docsPath: string;
-  sourceAuditPath: string | null;
   tests: string[];
-  review: { status: string; source: string; reviewedBy: string | null; reviewedAt: string | null };
 }
 
 /**
@@ -52,7 +49,6 @@ export interface PublicCatalogs {
     commands: string[];
     hooks: string[];
     risk: string;
-    ownership: string;
   }>;
   workflows: Array<{ name: string; namespace: string }>;
 }

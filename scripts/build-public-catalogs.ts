@@ -65,8 +65,7 @@ const NUMBER_WORDS = [
 ];
 
 /**
- * One activated extension, projected from its manifest. `ownership` is the manifest
- * `ownershipStatus`.
+ * One activated extension, projected from its manifest.
  */
 export interface ExtensionCatalogEntry {
   id: string;
@@ -74,7 +73,6 @@ export interface ExtensionCatalogEntry {
   commands: string[];
   hooks: string[];
   risk: string;
-  ownership: string;
 }
 
 /** One runnable packaged workflow. `namespace` is the owning `<name>/` directory. */
@@ -221,7 +219,6 @@ export function publicCatalogs(
     commands: stringArrayField(entry, "provides", "commands"),
     hooks: stringArrayField(entry, "provides", "hooks"),
     risk: stringField(entry, "risk"),
-    ownership: stringField(entry, "ownershipStatus"),
   }));
 
   // Discovery already yields a stable order: namespaces sorted, each namespace's root before its

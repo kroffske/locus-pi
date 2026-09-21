@@ -1,6 +1,5 @@
 {
   "id": "workflows",
-  "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Default-loaded through package.json#pi.extensions",
     "saved workflow JavaScript is reviewed trusted input executed by Node's main-context default loader; static node: imports are available under default self-contained-static identity, while local/package/dynamic/source-anchored module behavior requires literal meta.identityCoverage entry-only; either mode can retain host-process filesystem, subprocess, network, and other capabilities, so identity policy, approval metadata, the intended dsl-only authoring convention, and worktrees are not a sandbox",
@@ -143,7 +142,6 @@
   },
   "risk": "critical",
   "docsPath": "extensions/workflows/README.md",
-  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/workflows/authoring/workflow-authoring-contract.test.ts",
     "tests/extensions/workflows/tool/workflow-source-check-tool.test.ts",
@@ -194,11 +192,5 @@
     "tests/extensions/workflows/run/workflow-result-text.test.ts",
     "tests/extensions/workflows/runtime/workflow-fusion.test.ts",
     "tests/extensions/workflows/fusion/fusion-tool.test.ts"
-  ],
-  "review": {
-    "status": "reviewed",
-    "source": "write-from-scratch",
-    "reviewedBy": "locus-pi",
-    "reviewedAt": "2026-07-10"
-  }
+  ]
 }

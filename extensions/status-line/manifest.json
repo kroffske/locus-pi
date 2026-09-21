@@ -1,6 +1,5 @@
 {
   "id": "status-line",
-  "ownershipStatus": "locus-specific",
   "runtimeRequirements": [
     "Pi custom footer API (minimum host floor 0.83.0)",
     "Pi footer data provider for Git branch",
@@ -26,15 +25,8 @@
   },
   "risk": "low",
   "docsPath": "extensions/status-line/README.md",
-  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/status-line/status-line.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts"
-  ],
-  "review": {
-    "status": "reviewed",
-    "source": "write-from-scratch",
-    "reviewedBy": "locus-pi",
-    "reviewedAt": "2026-08-05"
-  }
+  ]
 }

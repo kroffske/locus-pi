@@ -48,7 +48,7 @@ The other extensions do not directly import another feature directory.
 - `runtimeRequirements` and `stateUsed` — detailed execution and persistence contracts;
 - `uiLifecycle` — per-command and per-tool UI and persistence taxonomy, for extensions that expose a surface;
 - `docsPath` — co-located extension manual;
-- `ownershipStatus`, `sourceAuditPath`, `tests`, and `review` — evidence ownership and review metadata.
+- `tests` — paths to the implementation evidence.
 
 A manifest declares no versioning: the npm package version covers that. `package.json#pi.extensions` decides what Pi loads and registers.
 
