@@ -3,8 +3,11 @@ import path from "node:path";
 import ts from "typescript";
 
 export interface PackageJson {
+  name: string;
   files: string[];
   license: string;
+  homepage: string;
+  bugs: { url: string };
   pi: { extensions: string[] };
   repository: { url: string };
 }

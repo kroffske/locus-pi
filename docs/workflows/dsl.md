@@ -3,9 +3,6 @@ title: Workflow DSL and saved children
 type: guide
 status: active
 updated: "2026-09-13T00:12:23Z"
-source_commit: "fcf1745e9b11"
-update_event: "user_request"
-context: "changes=XL files=33"
 description: "Organize the installed workflow contract by reader task."
 ---
 

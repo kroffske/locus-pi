@@ -39,8 +39,9 @@ The composite gates that bind them together:
   deterministic, offline, and read-only, and exactly what CI runs. Everything
   CI adds after it needs the network (`npm audit`) or the runner environment
   (`pi --version`, the pack candidate).
-- `npm run check:push` — `check` plus a dry-run pack. The tracked `pre-push`
-  hook runs this.
+- `npm run check:push` — `check`, the topology size ratchet (`check:topology`),
+  and a dry-run pack. The tracked `pre-push` hook runs this. The topology check
+  reports a skip when the local Locus CLI is unavailable.
 
 ## CI gates
 
@@ -91,10 +92,9 @@ test evidence.
 
 Enforces branch and release policy on pull requests, reading the `GITHUB_*`
 environment CI provides. Pull requests into `dev` must come from a task
-branch and must update `CHANGELOG.md` when they touch release-relevant paths;
-pull requests into `main` must be the release pull request from `dev`, bump
-the package version, and carry a dated changelog heading for it. No other
-target branch is accepted.
+branch; they do not require a `CHANGELOG.md` entry. Pull requests into `main`
+must come from `dev`, bump the package version, and carry a dated changelog
+heading. No other target branch is accepted.
 
 ### check-release-metadata.ts
 

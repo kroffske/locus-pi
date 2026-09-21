@@ -3,9 +3,6 @@ title: Author a workflow module
 type: guide
 status: active
 updated: "2026-09-13T00:12:22Z"
-source_commit: "fcf1745e9b11"
-update_event: "user_request"
-context: "changes=XL files=33"
 description: "Organize the installed workflow contract by reader task."
 ---
 
@@ -127,7 +124,7 @@ A workflow with several stages, agents, branches, parallel groups, or persisted
 handoffs keeps a visual map beside its source: exactly one hand-authored
 `<name>-pipeline.svg`. It is edited directly. There is no generator, no
 rendering dependency, and no exported preview to keep in sync;
-[`extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg`](https://github.com/kroffske/locus-pi/blob/main/extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg)
+[`extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg`](../../extensions/workflows/examples/post-code-review/post-code-review-pipeline.svg)
 is the remaining Package reference shape.
 
 This replaced a generated trio — an `@kroffske/excalidraw-diagrams` generator,

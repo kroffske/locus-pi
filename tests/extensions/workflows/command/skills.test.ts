@@ -19,6 +19,8 @@ import {
 } from "../../../../extensions/workflows/command/skills.js";
 
 const roots: string[] = [];
+const packageName = (JSON.parse(readFileSync(path.join(process.cwd(), "package.json"), "utf8")) as { name: string })
+  .name;
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -27,7 +29,7 @@ afterEach(() => {
 function fixture(): { root: string; packageRoot: string; projectRoot: string; userHome: string } {
   const root = mkdtempSync(path.join(tmpdir(), "workflow-skill-hosts-"));
   roots.push(root);
-  const packageRoot = path.join(root, "package");
+  const packageRoot = path.join(root, "node_modules", ...packageName.split("/"));
   const projectRoot = path.join(root, "project");
   const userHome = path.join(root, "home");
   mkdirSync(projectRoot, { recursive: true });
@@ -106,6 +108,16 @@ describe("workflow skill host command", () => {
       "utf8",
     );
 
+    const status = operateWorkflowSkillHosts({
+      action: "status",
+      host: "codex",
+      scope: "project",
+      projectRoot: f.projectRoot,
+      packageRoot: f.packageRoot,
+      userHome: f.userHome,
+    });
+    expect(status.rows).toContainEqual(expect.objectContaining({ skill, state: "stale", changed: "none" }));
+
     const result = operateWorkflowSkillHosts({
       action: "sync",
       host: "codex",
@@ -121,6 +133,10 @@ describe("workflow skill host command", () => {
     );
     expect(path.resolve(hostRoot, readlinkSync(path.join(hostRoot, skill)))).toBe(
       path.join(f.packageRoot, "skills", skill),
+    );
+    expect(packageName).toBe("@locus-forge/locus-pi");
+    expect(JSON.parse(readFileSync(path.join(hostRoot, WORKFLOW_SKILL_STATE_FILE), "utf8")).owner).toBe(
+      "@kroffske/locus-pi",
     );
     expect(lstatSync(path.join(hostRoot, "locus-pi-workflows"), { throwIfNoEntry: false })).toBeUndefined();
   });

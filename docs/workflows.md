@@ -3,9 +3,6 @@ title: Workflow guide
 type: guide
 status: active
 updated: "2026-09-03T14:45:28Z"
-source_commit: "4e0ee253fa0b"
-update_event: "sync"
-context: "changes=L files=24 task=T-194"
 description: "Explains the shared workflow folder, workspace links, and history lookup without migration."
 owner: locus-pi maintainers
 tags: [workflows, guide]

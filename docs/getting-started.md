@@ -3,9 +3,6 @@ title: Getting started
 type: guide
 status: active
 updated: 2026-08-19T22:43:07Z
-source_commit: aeb217fe8dab
-update_event: cleanup
-context: changes=S files=4
 description: Guide installation and first runtime checks.
 owner: locus-pi maintainers
 tags: [installation, getting-started]
@@ -13,10 +10,17 @@ tags: [installation, getting-started]
 
 # Getting started
 
-## Install the published package
+## Install and try the published package
+
+If you already have `npm:@kroffske/locus-pi` in Pi settings, replace that
+source with `npm:@locus-forge/locus-pi` in the same scope, then run
+`pi update npm:@locus-forge/locus-pi`. Do not keep both entries. Leave other
+package settings intact.
+
+For a new installation:
 
 ```bash
-pi install npm:@kroffske/locus-pi
+pi install npm:@locus-forge/locus-pi
 pi list
 ```
 
@@ -31,9 +35,12 @@ Start a new Pi session in a trusted project:
 
 `live-smoke` is the smallest runtime check: it starts two child-agent jobs that list the current project directory.
 
+The package also ships workflow skills. Pi loads them by default. To expose the
+same skills to Codex or Claude Code, follow the [managed skill-link guide](../skills/README.md#install-for-codex-and-claude-code).
+
 ## Load only selected extensions
 
-Pi installs the package once and can filter which entrypoints it loads. Use `pi config` for an interactive global or project-local selection, or store an explicit package filter in `~/.pi/agent/settings.json` or `.pi/settings.json`.
+Pi installs the package once and can filter which entrypoints it loads. Use `pi config` for an interactive global or project-local selection, or edit the existing locus-pi entry in `~/.pi/agent/settings.json` or `.pi/settings.json`. Replace that entry instead of adding a second copy; keep all other package entries.
 
 For example, this profile loads only the workflow extension and disables the bundled skills:
 
@@ -41,13 +48,17 @@ For example, this profile loads only the workflow extension and disables the bun
 {
   "packages": [
     {
-      "source": "npm:@kroffske/locus-pi",
+      "source": "npm:@locus-forge/locus-pi",
       "extensions": ["extensions/workflows/index.ts"],
       "skills": []
     }
   ]
 }
 ```
+
+The JSON block shows one `packages` array for clarity. If your settings already
+contain other packages, change only the locus-pi object inside that array.
+`skills: []` disables package skills; omitting `skills` leaves them enabled.
 
 Filtering is a loading boundary, not an installation boundary: the npm tarball and production dependencies are still installed, and an enabled extension may import helper modules owned by another feature directory without registering that feature's entrypoint.
 
@@ -61,7 +72,7 @@ Example: keep the Locus agent launcher and use workflows from another package:
 {
   "packages": [
     {
-      "source": "npm:@kroffske/locus-pi",
+      "source": "npm:@locus-forge/locus-pi",
       "extensions": ["extensions/agents/index.ts"],
       "skills": []
     },
@@ -70,23 +81,28 @@ Example: keep the Locus agent launcher and use workflows from another package:
 }
 ```
 
-## Registration scopes
+## Update, scopes, and removal
+
+To update the npm installation, run `pi update npm:@locus-forge/locus-pi` and start
+a fresh Pi session. The filter stays in your settings.
 
 The same package identity can be configured globally and for a project. Use `pi list` and `pi config` to inspect the effective source and filters. Remove only the unwanted scope:
 
 ```bash
-pi remove npm:@kroffske/locus-pi
-pi remove npm:@kroffske/locus-pi -l
+pi remove npm:@locus-forge/locus-pi
+pi remove npm:@locus-forge/locus-pi -l
 ```
 
 For a source checkout, run `pi remove .` or `pi remove . -l` from the registered checkout root. Remove the registration before moving or deleting the directory.
+
+Removing a registration does not delete Pi runtime history.
 
 ## Install from a Git checkout
 
 Use a checkout only for development or pre-release validation. Review it before registration because Pi loads the extension source directly.
 
 ```bash
-git clone https://github.com/kroffske/locus-pi.git
+git clone https://github.com/locus-forge/locus-pi.git
 cd locus-pi
 npm ci --ignore-scripts
 pi install .
@@ -104,25 +120,6 @@ npm ci --ignore-scripts
 ```
 
 Start a fresh Pi session after updating so the host reloads the source.
-
-## Uninstall
-
-Published package:
-
-```bash
-pi remove npm:@kroffske/locus-pi
-pi list
-```
-
-Source checkout:
-
-```bash
-cd /absolute/path/to/locus-pi
-pi remove .
-pi list
-```
-
-Removing a registration does not delete Pi runtime history.
 
 ## Common failures
 
