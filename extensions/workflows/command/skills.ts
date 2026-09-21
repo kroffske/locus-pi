@@ -34,6 +34,8 @@ const LEGACY_WORKFLOW_SKILL_NAMES = [
   "locus-pi-workflow-implement-task",
 ] as const;
 export const WORKFLOW_SKILL_STATE_FILE = ".locus-pi-workflow-skills.v1.json";
+// Stable v1 provenance marker; existing installations retain it across npm package renames.
+const WORKFLOW_SKILL_STATE_OWNER = "@kroffske/locus-pi";
 const WORKFLOW_SKILL_STATE_SCHEMA = "locus-pi.workflow-skills.v1";
 
 export type WorkflowSkillHost = "codex" | "claude";
@@ -389,7 +391,7 @@ function readManagedState(hostRoot: string): { names: Set<string>; text?: string
   const allowed = new Set<string>([...WORKFLOW_SKILL_NAMES, ...LEGACY_WORKFLOW_SKILL_NAMES]);
   if (
     record?.schema !== WORKFLOW_SKILL_STATE_SCHEMA ||
-    record.owner !== "@kroffske/locus-pi" ||
+    record.owner !== WORKFLOW_SKILL_STATE_OWNER ||
     !Array.isArray(record.links) ||
     record.links.some((name) => typeof name !== "string" || !allowed.has(name))
   ) {
@@ -406,7 +408,7 @@ function writeManagedNames(hostRoot: string, names: Set<string>): void {
   }
   mkdirSync(hostRoot, { recursive: true });
   const text = `${JSON.stringify(
-    { schema: WORKFLOW_SKILL_STATE_SCHEMA, owner: "@kroffske/locus-pi", links: [...names].sort() },
+    { schema: WORKFLOW_SKILL_STATE_SCHEMA, owner: WORKFLOW_SKILL_STATE_OWNER, links: [...names].sort() },
     null,
     2,
   )}\n`;

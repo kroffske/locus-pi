@@ -1,63 +1,39 @@
 # locus-pi
 
-`locus-pi` is a Pi extension package for agentic software-development workflows. It installs curated extensions, workflows, and workflow skills. Named agent profiles remain owned by the user's project or home catalog.
+`locus-pi` adds agent tools, workflow execution, model controls, and status views to [Pi](https://github.com/earendil-works/pi). The package includes six extensions, curated workflows, and three workflow skills. Named agent profiles stay in your project or home catalog.
 
 Requires Node.js `>=22.19.0`, Pi `>=0.83.0`, and trusted project and workflow sources.
-
-For workflow authoring, API contracts, budgets and recovery, start with the
-[workflow documentation](docs/workflows/index.md), included in the npm installation.
 
 ## Install
 
 ```bash
-pi install npm:@kroffske/locus-pi
+pi install npm:@locus-forge/locus-pi
 ```
 
-Start a fresh Pi session, then inspect the installed workflows:
+Start a new Pi session and try `/workflows list`, then `/workflows run live-smoke`.
 
-```text
-/workflows list
+To load only Workflow and no package skills, replace the existing locus-pi entry in `~/.pi/agent/settings.json` or `.pi/settings.json`. Keep your other package entries:
+
+```json
+{
+  "packages": [
+    {
+      "source": "npm:@locus-forge/locus-pi",
+      "extensions": ["extensions/workflows/index.ts"],
+      "skills": []
+    }
+  ]
+}
 ```
 
-Pi loads the bundled skills automatically. To also install them for Codex and Claude Code, run inside Pi:
+The example shows the `packages` array; edit only its locus-pi entry in existing settings. The filter limits what Pi loads; it does not reduce the installed npm package. See [Getting started](docs/getting-started.md) for updates, removal, and first-run help.
 
-```text
-/workflows skills sync --host all --scope user
-```
+## Guides
 
-This creates managed links to the installed package. See [skill installation](skills/README.md#install-for-codex-and-claude-code) for host and project scope options.
+- [Extensions catalog](docs/extensions.md)
+- [Create workflows](docs/locus-pi-workflows.md) · [Run and inspect workflows](docs/workflows.md)
+- [Workflow reference by topic](docs/workflows/index.md) · [External-agent skill links](skills/README.md)
 
-Run the smallest live check:
-
-```text
-/workflows run live-smoke
-```
-
-Remove the package with `pi remove npm:@kroffske/locus-pi`.
-
-## Documentation
-
-- [Getting started](docs/getting-started.md)
-- [Environment variables](docs/environment-variables.md)
-- [Extensions](docs/extensions.md)
-- [Create workflows and choose a style](docs/locus-pi-workflows.md)
-- [Run and inspect workflows](docs/workflows.md)
-- [TUI visual language](docs/tui-design.md)
-- [Architecture](docs/architecture.md)
-
-## Trust
-
-Extensions and workflow scripts run inside the trusted Pi and Node.js host. They are not sandboxed. Review local workflow sources before running them.
-
-## Development
-
-```bash
-npm ci --ignore-scripts
-npm run check
-```
-
-Use GitHub Issues for reproducible defects. Report suspected vulnerabilities through GitHub private vulnerability reporting, never through a public issue.
-
-## License
+Extensions and workflow scripts run with the trusted Pi and Node.js host, without a sandbox. Review local workflow sources before running them. Report vulnerabilities through GitHub private vulnerability reporting; use Issues for ordinary defects.
 
 Licensed under the [MIT License](LICENSE).

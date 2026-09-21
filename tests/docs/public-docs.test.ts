@@ -55,13 +55,11 @@ describe("public documentation topology", () => {
     const readme = readFileSync(path.join(root, "README.md"), "utf8");
     for (const relativePath of [
       "docs/getting-started.md",
-      "docs/environment-variables.md",
       "docs/extensions.md",
       "docs/workflows.md",
       "docs/workflows/index.md",
       "docs/locus-pi-workflows.md",
-      "docs/tui-design.md",
-      "docs/architecture.md",
+      "skills/README.md",
     ]) {
       expect(readme).toContain(relativePath);
       expect(existsSync(path.join(root, relativePath)), relativePath).toBe(true);

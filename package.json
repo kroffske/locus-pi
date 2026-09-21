@@ -1,16 +1,16 @@
 {
-  "name": "@kroffske/locus-pi",
+  "name": "@locus-forge/locus-pi",
   "version": "0.9.0",
   "type": "module",
-  "description": "Audited Locus Pi extension package for agentic development tools.",
+  "description": "Pi extension package for agentic software-development workflows.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kroffske/locus-pi.git"
+    "url": "git+https://github.com/locus-forge/locus-pi.git"
   },
-  "homepage": "https://github.com/kroffske/locus-pi#readme",
+  "homepage": "https://github.com/locus-forge/locus-pi#readme",
   "bugs": {
-    "url": "https://github.com/kroffske/locus-pi/issues"
+    "url": "https://github.com/locus-forge/locus-pi/issues"
   },
   "keywords": [
     "locus-pi",
