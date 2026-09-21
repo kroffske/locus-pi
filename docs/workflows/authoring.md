@@ -42,19 +42,23 @@ The group-only Package `task` namespace offers an editable two-stage handoff.
 `task/draft` publishes a complete `draft.md` with the graph pattern, agents,
 handoffs, review bounds, concurrency, failure exits, and primary output. Copy or
 edit that full text, then pass it as semantic input to `task/plan`. That workflow
-designs, reviews, builds, checks, and publishes one concrete `workflow.mjs`.
-Its verifier writes workspace source and returns diagnostic evidence. An explicit
-decision can route to one correction stage and independent recheck; exhaustion
-returns failure. Runtime reads the confined regular file and checks Node syntax
-plus orchestration-only shape, then retains exactly those bytes, not verifier
-prose, as `result.name === "workflow.mjs"` and `outputs/workflow.mjs`. Failed
-validation publishes no accepted primary source. Use that retained file for the
-existing read-and-launch path; its execution snapshot binds the launched bytes.
-Neither package stage itself runs the generated source. For create-and-run, the
-calling agent hands this checked artifact to the run skill and reports authoring,
-execution and product verification separately. `task/plan` requires the complete accepted
-draft: missing or blank semantic input fails before any child starts and publishes
-no workflow source.
+designs and reviews a node-and-edge ledger, creates a minimal runnable workspace
+`workflow.mjs`, and grows it through at most six complete graph-node slices. An
+owner re-cuts the source-free remaining queue after each accepted slice. Independent
+mechanical and design gates share one cumulative correction per slice and preserve
+named diagnostics on failure; an empty queue still requires final whole-file gates.
+The detailed contract and terminal reasons live in the
+[task authoring manual](../../extensions/workflows/examples/task/README.md).
+
+After those gates, `publishPrimaryFile("workflow.mjs")` returns `primaryFile` with
+the validated workspace-relative path, absolute path, byte count, and digest. It
+does not create `outputs/workflow.mjs`; use `primaryFile.absolutePath` for the
+existing reviewed file-target launch path, whose execution snapshot binds the
+launched bytes. Neither package stage itself runs generated source. For
+create-and-run, the calling agent hands this checked workspace file to the run skill
+and reports authoring, execution, and product verification separately. `task/plan`
+requires the complete accepted draft: missing or blank semantic input fails before
+any child starts and publishes no workflow source.
 
 New standard source omits `maxToolCalls` and `timeoutMs`: both are unbounded unless
 the author or operator explicitly supplies a fuse. Launch-mode defaults apply only

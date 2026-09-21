@@ -41,14 +41,18 @@ now()                         // Recorded wall clock (ms); replayed on --resume
 random()                      // Recorded randomness in [0,1); replayed on --resume
 ```
 
-`publishPrimaryArtifact(name, { workflowSource: "workflow.mjs" })` is the narrow
-checked-source publication form used by `task/plan`. The host reads a confined,
-non-empty, non-symlink UTF-8 workspace file (up to 512 KiB), checks Node syntax
-without import and orchestration-only shape, and publishes those exact bytes
-through the existing retained artifact store. It returns the ordinary artifact
-reference and output path, not a mutable workspace reference. Invalid source
-throws before primary publication and remains in the workspace for repair.
-Ordinary text callers and `publishPrimaryFile()` keep their existing behavior.
+`task/plan` performs its mechanical and design gates, then calls
+`publishPrimaryFile("workflow.mjs")`. The host validates the confined regular,
+non-symlink, non-empty workspace file and returns `primaryFile` with its relative
+path, absolute path, byte count, and SHA-256 digest. It neither copies the file into
+run `outputs/` nor parses it at publication time; the validated workspace path is
+the create-to-run handoff. See the [task authoring contract](../../extensions/workflows/examples/task/README.md).
+
+`publishPrimaryArtifact(name, { workflowSource: "workflow.mjs" })` remains the
+compatibility checked-source artifact form. It reads a confined UTF-8 workspace
+file up to 512 KiB, checks Node syntax and orchestration-only shape, and retains
+those exact bytes through the artifact store. That API returns an artifact
+reference and output path; it is not the current `task/plan` publication path.
 Static validation does not prove semantic correctness or successful execution.
 
 `fusion()` requires `mode: "tool-free" | "agent"`; every member and the judge
