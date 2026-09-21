@@ -16,11 +16,14 @@ sequence in the same turn:
    design. A `runnable root` design includes
    `.locus-pi/workflows/<name>/<name>.workflow.mjs`; a `group-only` design omits it
    and builds only its direct children. Never invent a root.
-4. Validate source identity, module load, and standard source shape with the
-   packaged tools, then read the design against the built source yourself: walk
-   its node and edge list and confirm each one appears. No tool checks that
-   correspondence and no home-made checker script should be written for it. Do
-   not run the workflow unless the user separately asks to run it.
+4. Validate source identity, Node syntax without import, and orchestration-only
+   source shape with the packaged tools. Read the design against the built source:
+   walk its node and edge list and confirm each one appears. No tool checks that
+   correspondence; do not write a home-made checker for it.
+5. For create-only, return checked source and the launch command without execution.
+   For an authorized create-and-run request, hand the checked target to the run
+   skill and continue to terminal evidence. The same request can authorize both;
+   do not invent another approval, or bypass the host's trust requirements.
 
 The design remains the readable source of truth and must exist before JavaScript;
 continuous authoring removes only the mandatory human pause between them. Stop
@@ -118,9 +121,14 @@ namespace has no root source and never receives a fake one. It then checks:
   `<name>/<child>` and its filename is `<child>.workflow.mjs`;
 - `meta.profile` is `"standard"`;
 - source identity policy passes;
-- the module loads and exports `meta` plus a default function;
+- `node --check <exact-path>` passes; static inspection confirms `meta` and a default function;
+- no unchecked module is imported or executed as a smoke test;
 - source exposes the reviewed nodes, edges, handoffs, bounds, and failure exits,
   confirmed by reading the design's node and edge list against the source;
+- refusal branches return an explicit failure object, not failure-looking prose;
+- correction receives actionable review findings, not merely a routing choice;
+- the primary output contains its declared data; a report is not renamed as a
+  product file such as JSON, HTML, or source code;
 - no design-absent node or standard-profile bad smell appeared.
 - the exact built file passes the Pi-native `workflow_check_source` tool with
   `mode: "orchestration-only"` for every built
@@ -136,13 +144,32 @@ Read checker diagnostics as `path:line:column [CODE] message`. Any error fails
 Build. Warning-only output remains a successful check, but Build must report the
 warning and repair declaration drift when it concerns generated source.
 
-An unavailable tool, failed checker result, failed module import, or
-design/source mismatch means Build failed. Repair and rerun; never return a
-successful Build claim after a skipped or failed check.
+An unavailable tool, failed checker result, syntax error, or design/source
+mismatch means Build failed. Preserve the failed source and diagnostics before
+correction. Choose and record a semantic correction bound in the design; an
+agent prompt alone is not a runtime-enforced retry count. In an authored graph,
+use explicit `choice` routing and a bounded correction/recheck edge. On exhaustion,
+return `{ ok: false, status: "failed" }` with the latest source and evidence; do
+not publish it as accepted or silently start a fresh run.
 
-Build does not run. The caller runs it separately and evaluates the primary
-artifact against live repository evidence. A successful Build returns the exact
-copyable launch command `/workflows run <name>` (or the qualified child ref).
+The packaged `task/plan` creates a minimal runnable workspace `workflow.mjs`, then
+grows it through at most six complete graph-node slices. An owner re-cuts the
+source-free remaining queue after each accepted slice. Independent mechanical and
+design gates share one cumulative correction per slice; final whole-file gates run
+after the queue is empty. The exact routes and terminal reasons live in the
+[task authoring manual](../../../extensions/workflows/examples/task/README.md).
+
+`publishPrimaryFile("workflow.mjs")` returns `primaryFile` with the validated
+workspace-relative path, absolute path, byte count, and digest. It does not copy the
+file into run `outputs/`. The validated `primaryFile.absolutePath` remains the
+read-and-launch handoff; verifier prose is not source. Host publication validation
+is not semantic review or live proof.
+
+A successful Build returns `/workflows run <name>` (or the qualified child ref).
+Create-only stops there. Create-and-run continues through
+[locus-pi-workflow-run](../../locus-pi-workflow-run/SKILL.md) with existing scoped
+authorization and evaluates the actual terminal artifact. Keep specification
+approval and external-effect boundaries intact.
 
 ## Pattern-specific design decisions
 

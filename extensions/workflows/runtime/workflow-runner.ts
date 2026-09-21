@@ -87,6 +87,8 @@ import {
   type WorkflowPrimaryFileReference,
   type WorkflowRootLease,
 } from "./workflow-output.js";
+import { readWorkflowPrimaryFile } from "./workflow-workspace.js";
+import { checkWorkflowSourceText } from "../tool/workflow-source-check-tool.js";
 import { createWorkflowResourceLoader, type WorkflowResourceLoader } from "./workflow-resources.js";
 import { createWorkflowWorkspaceManager, type WorkflowWorkspaceManager } from "./workflow-worktree.js";
 import {
@@ -888,6 +890,19 @@ export async function runWorkflowScript(opts: RunWorkflowScriptOptions): Promise
     journal,
     projectRoot,
     outputDir: stableOutput!.relativePath,
+    readCheckedWorkflowSource: (relativePath) => {
+      const { content } = readWorkflowPrimaryFile(stableOutput!, relativePath);
+      const text = content.toString("utf8");
+      if (!Buffer.from(text, "utf8").equals(content)) throw new Error("workflow source must be valid UTF-8");
+      const errors = checkWorkflowSourceText(text, "orchestration-only").filter((item) => item.severity === "error");
+      if (errors.length > 0)
+        throw new Error(
+          `${relativePath}: source publication failed:\n${errors
+            .map((item) => `${item.line}:${item.column} [${item.code}] ${item.message}`)
+            .join("\n")}`,
+        );
+      return text;
+    },
     publishPrimaryFile: (relativePath) => {
       primaryFile = referenceWorkflowPrimaryFile(stableOutput!, relativePath);
       return primaryFile;

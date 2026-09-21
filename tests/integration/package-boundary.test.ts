@@ -490,9 +490,9 @@ describe("npm public package boundary", () => {
     expect(packedPaths.has(planPath)).toBe(true);
     expect(draft).toContain("Workflow direction:");
     expect(draft).toContain("Reflection/review:");
-    expect(plan).toContain('publishPrimaryArtifact("workflow.mjs"');
-    expect(plan).toContain('mode: "orchestration-only"');
-    expect(plan).not.toContain("implement-plan.workflow.mjs");
+    expect(plan).toContain('publishPrimaryFile("workflow.mjs")');
+    expect(plan).toContain('reason: "queue_conflict"');
+    expect(plan).not.toContain('publishPrimaryArtifact("workflow.mjs"');
     expect(packedPaths.has("skills/locus-pi-workflow-implement-task/SKILL.md")).toBe(false);
   });
 
@@ -753,7 +753,7 @@ describe("npm public package boundary", () => {
       const probeScript = `
         const { registerWorkflowSourceCheckTool } = await import(${JSON.stringify(toolUrl)});
         let tool;
-        registerWorkflowSourceCheckTool({ registerTool(value) { tool = value; } });
+        registerWorkflowSourceCheckTool({ registerTool(value) { tool = value; }, on() {} });
         if (!tool) throw new Error("workflow_check_source was not registered");
         const ctx = {
           cwd: ${JSON.stringify(consumerRoot)},

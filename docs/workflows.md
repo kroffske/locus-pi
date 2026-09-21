@@ -28,20 +28,20 @@ To create or revise a workflow, start with [Locus Pi workflows: authoring and st
 
 The registry ships four curated Package workflow namespaces with twelve runnable names.
 
-| Workflow                      | Namespace          | Purpose                                                                                   |
-| ----------------------------- | ------------------ | ----------------------------------------------------------------------------------------- |
-| `live-smoke`                  | `live-smoke`       | Checks that the Pi host can spawn full-tool workflow agents and collect their reports.    |
-| `post-code-review`            | `post-code-review` | Run modular code-shape review lanes and publish the code-shape decision.                  |
-| `post-code-review/boundaries` | `post-code-review` | Audit ownership and architecture boundaries, then publish review-boundaries.md.           |
-| `post-code-review/contracts`  | `post-code-review` | Audit API and internal contracts for one post-code review scope.                          |
-| `post-code-review/necessity`  | `post-code-review` | Challenge behavioral and code-shape fixes for necessity, ownership, and complexity.       |
-| `post-code-review/scope`      | `post-code-review` | Resolve a review target into an exact evidence boundary and write review-scope.md.        |
-| `post-code-review/simplicity` | `post-code-review` | Audit a frozen review scope for delete-first contraction and publish simplicity findings. |
-| `post-code-review/style`      | `post-code-review` | Audit comments and project-specific code style for one post-code review scope.            |
-| `post-code-review/synthesis`  | `post-code-review` | Verify review evidence and publish the final code-shape decision.                         |
-| `stage-loop`                  | `stage-loop`       | Implements one task stage, gates it, fixes it up to three times, then commits.            |
-| `task/draft`                  | `task`             | Turn a raw request into an editable workflow brief with explicit orchestration choices.   |
-| `task/plan`                   | `task`             | Turn an accepted workflow brief directly into a checked workflow.mjs.                     |
+| Workflow                      | Namespace          | Purpose                                                                                    |
+| ----------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
+| `live-smoke`                  | `live-smoke`       | Checks that the Pi host can spawn full-tool workflow agents and collect their reports.     |
+| `post-code-review`            | `post-code-review` | Run modular code-shape review lanes and publish the code-shape decision.                   |
+| `post-code-review/boundaries` | `post-code-review` | Audit ownership and architecture boundaries, then publish review-boundaries.md.            |
+| `post-code-review/contracts`  | `post-code-review` | Audit API and internal contracts for one post-code review scope.                           |
+| `post-code-review/necessity`  | `post-code-review` | Challenge behavioral and code-shape fixes for necessity, ownership, and complexity.        |
+| `post-code-review/scope`      | `post-code-review` | Resolve a review target into an exact evidence boundary and write review-scope.md.         |
+| `post-code-review/simplicity` | `post-code-review` | Audit a frozen review scope for delete-first contraction and publish simplicity findings.  |
+| `post-code-review/style`      | `post-code-review` | Audit comments and project-specific code style for one post-code review scope.             |
+| `post-code-review/synthesis`  | `post-code-review` | Verify review evidence and publish the final code-shape decision.                          |
+| `stage-loop`                  | `stage-loop`       | Implements one task stage, gates it, fixes it up to three times, then commits.             |
+| `task/draft`                  | `task`             | Turn a raw request into an editable workflow brief with explicit orchestration choices.    |
+| `task/plan`                   | `task`             | Turn an accepted workflow brief into a checked workflow.mjs through bounded source slices. |
 
 <!-- locus:workflows:end -->
 

@@ -1,19 +1,19 @@
 ---
 name: locus-pi-workflow-create
-description: Create or revise an adaptive slice-first locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Generated source contains prompts and agent/DSL edges, not file-reading logic. Never run the workflow.
+description: Create or revise an adaptive slice-first locus-pi `.workflow.mjs` agent graph through Design, review, Build, and source validation. Generated source contains prompts and agent/DSL edges, not file-reading logic. For create-and-run, hand checked source to locus-pi-workflow-run under the existing execution authorization.
 ---
 
 # Create a locus-pi workflow
 
 Resolve this `SKILL.md` to its physical file before following relative links; the installed [workflow manual](../../docs/workflows/index.md) is relative to that file, never the caller cwd (see [discovery](../README.md#find-the-installed-workflow-documentation)).
 
-This skill owns authoring only. Do not use merely to run an existing workflow; use the `locus-pi-workflow-run` skill for launch, stopped-run recovery and monitoring. Build does not run. No package-provided catalog agent is required.
+This skill owns authoring and the checked-source handoff. Do not use merely to run an existing workflow; use the `locus-pi-workflow-run` skill for launch, stopped-run recovery and monitoring. Create-only ends with checked source and a launch command. Create-and-run continues through that run skill under the request's existing scoped authorization, without asking for the same approval again. Report authoring and execution outcomes separately. No package-provided catalog agent is required.
 
 ## Product goal and repair requests
 
-Build useful graphs of LLM agents. Do not optimize for deterministic re-execution of the whole JavaScript program. A deliberate graph may contain hundreds or thousands of small calls; count alone is not a defect and is not a reason to redesign it or invent a smaller cap. Do not assign model, effort or budget choices the user did not request. A role name does not establish its provider or billing route. If subscription transport is required, verify each role's provider, adapter and authentication mode before accepting the design; do not substitute a paid API route.
+Build useful graphs of LLM agents. Do not optimize for deterministic re-execution of the whole JavaScript program. A deliberate graph may contain hundreds or thousands of small calls; count alone is not a defect and is not a reason to redesign it or invent a smaller cap. Do not assign model, effort or budget choices the user did not request. Use the user-configured default model and effort; omit model and role selectors unless the user or project explicitly requests an override. Never prescribe a model brand or tier for a stage. A role name does not establish its provider or billing route. If subscription transport is required, verify each role's provider, adapter and authentication mode before accepting the design; do not substitute a paid API route.
 
-When a workflow fails, open `.locus-pi/logs/errors.jsonl`, follow its exact evidence paths, and fix the owning layer; see [error diagnostics and jq examples](../../docs/workflows/error-diagnostics.md). When the request is to fix a stopped workflow, read [Repair + Continue](references/repair-and-continue.md) first. Repair the same source and preserve the unaffected completed prefix, including literal labels, prompts, order and workspace assumptions. Do not rebuild the graph from scratch merely because execution stopped. Validate the exact repaired source, then hand the result to the run skill; authoring still does not launch it.
+When a workflow fails, open `.locus-pi/logs/errors.jsonl`, follow its exact evidence paths, and fix the owning layer; see [error diagnostics and jq examples](../../docs/workflows/error-diagnostics.md). When the request is to fix a stopped workflow, read [Repair + Continue](references/repair-and-continue.md) first. Repair the same source and preserve the unaffected completed prefix, including literal labels, prompts, order and workspace assumptions. Do not rebuild the graph from scratch merely because execution stopped. Validate the exact repaired source, then hand the result to the run skill. Continue when repair-and-continue was requested; a repair-only request stops at checked source.
 
 ## Establish the requested deliverable
 
@@ -89,7 +89,7 @@ the displayed rows; distinct labels alone do not prove readable titles.
 
 Every callsite needs its own literal `label`. A dynamic `title` is display text, not identity. Same-session output clarification is not a semantic round; semantic continuation creates a fresh worker. Recovery is a separate runtime capability.
 
-Run `workflow_check_source` with `mode: "orchestration-only"` on every exact built source, plus the design/source and module-load checks. When that Pi-native tool is unavailable and a `locus-pi` source checkout is present, use its supported equivalent from that checkout: `npm run check:workflow-source -- --mode orchestration-only <exact-path>`. Both routes call the same workflows-owned validator and neither imports or executes the target. If neither route is available, or the selected validator fails, Build fails: never report a successful Build after skipping the gate. Return the exact copyable launch command `/workflows run <name>` without executing it unless execution was separately requested.
+Run `workflow_check_source` with `mode: "orchestration-only"` on every exact built source, plus `node --check <exact-path>` and the design/source checks. Never import unchecked source as a preliminary smoke test. When that Pi-native tool is unavailable and a `locus-pi` source checkout is present, use its supported equivalent from that checkout: `npm run check:workflow-source -- --mode orchestration-only <exact-path>`. Both routes call the same workflows-owned validator and neither imports or executes the target. If neither route is available, or the selected validator fails, Build fails: never report a successful Build after skipping the gate. Return the exact copyable launch command `/workflows run <name>`. For create-only, explicitly state execution did not start. For an authorized create-and-run request, continue now through the run skill and report its terminal status, source/run references, diagnostics and verified deliverable. A static-valid source that fails at runtime is not a successful create-and-run result.
 
 ## Trust and further references
 

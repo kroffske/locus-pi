@@ -317,6 +317,14 @@ export function referenceWorkflowPrimaryFile(
   output: WorkflowOutputDirectory,
   relativeFile: string,
 ): WorkflowPrimaryFileReference {
+  return readWorkflowPrimaryFile(output, relativeFile).reference;
+}
+
+/** Read once from the proven descriptor; callers check and retain these exact bytes. */
+export function readWorkflowPrimaryFile(
+  output: WorkflowOutputDirectory,
+  relativeFile: string,
+): { reference: WorkflowPrimaryFileReference; content: Buffer } {
   const normalized = assertRelativeOutputPath(relativeFile, "primary file");
   const absolutePath = path.resolve(output.absolutePath, ...normalized.split("/"));
   if (!isWorkflowPathWithinRoot(output.absolutePath, absolutePath)) {
@@ -330,11 +338,15 @@ export function referenceWorkflowPrimaryFile(
     if (!stat.isFile()) throw new Error(`workflow primary file is not a regular file: ${normalized}`);
     if (stat.size < 1) throw new Error(`workflow primary file is empty: ${normalized}`);
     const bytes = readFileSync(fd);
+    assertOpenedPrimaryFileIdentity(output, absolutePath, stat);
     return {
-      relativePath: normalized,
-      absolutePath,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      bytes: bytes.byteLength,
+      content: bytes,
+      reference: {
+        relativePath: normalized,
+        absolutePath,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        bytes: bytes.byteLength,
+      },
     };
   } finally {
     closeSync(fd);

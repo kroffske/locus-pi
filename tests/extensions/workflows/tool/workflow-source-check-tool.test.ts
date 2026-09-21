@@ -43,6 +43,7 @@ describe("workflow_check_source", () => {
     expect(result.details).toEqual({
       owner: "workflows",
       path: ".locus-pi/workflows/sample.workflow.mjs",
+      sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       errorCount: 0,
       warningCount: 0,
       diagnostics: [],
@@ -75,6 +76,18 @@ describe("workflow_check_source", () => {
       ".locus-pi/workflows/sample.workflow.mjs:1:1 [WF_IMPORT] standard profile imports no node: modules",
     );
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it("reports Node syntax failure as a diagnostic without executing source", async () => {
+    const root = temporaryRoot();
+    writeFileSync(path.join(root, "invalid.workflow.mjs"), standardSource('return await agent("Work");'));
+    const harness = createHarness(root);
+    workflows(harness.pi);
+    const result = await runTool(harness, "workflow_check_source", { path: "invalid.workflow.mjs" });
+    expect(result.isError).toBe(true);
+    expect(result.details?.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "WF_SOURCE_PARSE", severity: "error" })]),
+    );
   });
 
   it("machine-enforces the orchestration-only workflow-create subset", async () => {
@@ -242,6 +255,7 @@ describe("workflow_check_source", () => {
       owner: "workflows",
       path: ".locus-pi/workflows/sample.workflow.mjs",
       errorCount: 0,
+      sha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
       warningCount: 1,
       diagnostics: [
         {

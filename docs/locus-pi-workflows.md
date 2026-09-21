@@ -57,6 +57,31 @@ stops repeated re-cutting from running forever. A correction is followed by a
 fresh check. Failed or missing required verification cannot become a successful
 result by dropping a report.
 
+### Build generated source in complete slices
+
+`task/plan` applies the same pattern to source authoring so a weaker model never
+has to produce the whole workflow module in one answer. It first records a reviewed
+node-and-edge ledger, then creates a minimal runnable `workflow.mjs` in the workflow
+workspace. An owner repeatedly reads that actual file, returns a source-free queue
+of remaining complete graph nodes or branches, and re-cuts the queue after each
+accepted slice.
+
+Each seed, slice, and correction leaves the whole module Node-parseable and valid
+under `workflow_check_source` in orchestration-only mode. Source bytes stay in the
+workspace: model answers carry only reports, paths, and source-free requirement
+briefs. An independent queue assessment preserves outstanding identities and fails
+closed on an irreconcilable transition. Mechanical failures always use the slice's
+single correction before an independent recheck; design conformance is reviewed on
+a separate route. The workflow accepts at most six slices and returns the full
+remaining queue when that allowance is exhausted.
+
+An empty queue alone is not success. Final whole-file mechanical and design gates
+must pass before the host publishes the exact file through
+`publishPrimaryFile("workflow.mjs")`. Failures retain the current file and named
+diagnostics without publishing a primary artifact. Replay reuses answers but not
+file edits, so Repair + Continue requires the original workspace to remain intact;
+fresh suffix checks must reject a cleaned or drifted workspace.
+
 Use a **fixed graph** for known, unchanging work or ask for it explicitly.
 Choose **procedural briefs** only when an exact sequence is required by a tool or
 an observed failure. The default **outcome-led brief** names the role, result,

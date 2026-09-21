@@ -2,11 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { staticWorkflowMeta } from "../extensions/workflows/catalog/workflow-meta.js";
-import {
-  orchestrationOnlyWorkflowSourceShapeDiagnostics,
-  standardWorkflowSourceShapeDiagnostics,
-  type WorkflowSourceDiagnostic,
-} from "../extensions/workflows/tool/workflow-source-shape.js";
+import type { WorkflowSourceDiagnostic } from "../extensions/workflows/tool/workflow-source-shape.js";
+import { checkWorkflowSourceText } from "../extensions/workflows/tool/workflow-source-check-tool.js";
 import { packagedWorkflowNames, packagedWorkflowPath } from "../extensions/workflows/runtime/workflow-discovery.js";
 
 interface SourceShapeTarget {
@@ -65,10 +62,7 @@ for (const target of targets) {
   }
 
   checked += 1;
-  const diagnostics =
-    mode === "orchestration-only"
-      ? orchestrationOnlyWorkflowSourceShapeDiagnostics(source)
-      : standardWorkflowSourceShapeDiagnostics(source);
+  const diagnostics = checkWorkflowSourceText(source, mode);
   const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning");
   const shapeLabel = mode === "orchestration-only" ? "orchestration-only workflow source" : "standard source";

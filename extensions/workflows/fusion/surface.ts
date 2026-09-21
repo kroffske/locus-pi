@@ -9,7 +9,14 @@ import type {
   ExtensionContext,
   ToolUpdate,
 } from "../../_shared/host/pi-api.js";
-import { errorResult, getCommandText, getProjectRoot, setTextWidget, textResult } from "../../_shared/host/pi-api.js";
+import {
+  errorResult,
+  getCommandText,
+  getProjectRoot,
+  registerToolWithErrorResults,
+  setTextWidget,
+  textResult,
+} from "../../_shared/host/pi-api.js";
 import { validateParams } from "../../_shared/host/validation.js";
 import { applyWorkflowJournalLineToAgentLiveStore } from "../runtime/workflow-live.js";
 import { installWorkflowProgress } from "../operator/progress-widget.js";
@@ -67,7 +74,7 @@ export interface FusionSurfaceDependencies {
 
 export function registerFusionSurface(pi: ExtensionAPI, dependencies: FusionSurfaceDependencies = {}): void {
   const runFusion = dependencies.runFusion ?? runDirectFusion;
-  pi.registerTool({
+  registerToolWithErrorResults(pi, {
     name: FUSION_TOOL_NAME,
     description:
       "Ask the project-configured panel of independent LLMs one standalone question, then return the separately configured judge model's synthesized answer. Fusion does not inherit ambient chat history; pass only explicit relevant context. The tool is opt-in and is unavailable until `/fusion` configures and enables it.",

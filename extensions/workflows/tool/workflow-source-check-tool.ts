@@ -1,10 +1,12 @@
 /** Pi-native boundary for the standard workflow source-shape validator. */
 
 import { readFileSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { Type } from "@sinclair/typebox";
 import type { ExtensionAPI } from "../../_shared/host/pi-api.js";
-import { errorResult, getProjectRoot, textResult } from "../../_shared/host/pi-api.js";
+import { errorResult, getProjectRoot, registerToolWithErrorResults, textResult } from "../../_shared/host/pi-api.js";
 import { errorMessage } from "../../_shared/host/error-text.js";
 import { safeToolText } from "../../_shared/host/safe-output.js";
 import { validateParams } from "../../_shared/host/validation.js";
@@ -33,7 +35,7 @@ const WorkflowSourceCheckParams = Type.Object(
 const MAX_WORKFLOW_SOURCE_BYTES = 512 * 1024;
 
 export function registerWorkflowSourceCheckTool(pi: ExtensionAPI): void {
-  pi.registerTool({
+  registerToolWithErrorResults(pi, {
     name: "workflow_check_source",
     label: "workflow source check",
     description:
@@ -61,16 +63,20 @@ export function registerWorkflowSourceCheckTool(pi: ExtensionAPI): void {
         const displayPath = path.relative(projectRoot, sourcePath).split(path.sep).join("/");
         const mode = valid.value.mode ?? "compatibility";
         const source = readFileSync(sourcePath, "utf8");
-        const diagnostics =
-          mode === "orchestration-only"
-            ? orchestrationOnlyWorkflowSourceShapeDiagnostics(source)
-            : standardWorkflowSourceShapeDiagnostics(source);
+        const diagnostics = checkWorkflowSourceText(source, mode);
         const shapeLabel =
           mode === "orchestration-only" ? "orchestration-only workflow source" : "standard workflow source";
         const errorDiagnostics = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
         const errorCount = new Set(errorDiagnostics.map((diagnostic) => diagnostic.message)).size;
         const warningCount = diagnostics.length - errorDiagnostics.length;
-        const details = { owner: "workflows", path: displayPath, errorCount, warningCount, diagnostics };
+        const details = {
+          owner: "workflows",
+          path: displayPath,
+          errorCount,
+          warningCount,
+          diagnostics,
+          sha256: createHash("sha256").update(source).digest("hex"),
+        };
         if (errorDiagnostics.length > 0) {
           const output = safeToolText(
             `${displayPath}: ${shapeLabel} shape failed:
@@ -99,6 +105,36 @@ ${diagnostics.map((diagnostic) => formatWorkflowSourceDiagnostic(displayPath, di
       }
     },
   });
+}
+
+/** Check these bytes without importing them; publication uses this same host gate. */
+export function checkWorkflowSourceText(
+  source: string,
+  mode: "compatibility" | "orchestration-only",
+): WorkflowSourceDiagnostic[] {
+  if (Buffer.byteLength(source) > MAX_WORKFLOW_SOURCE_BYTES) {
+    throw new Error(`source exceeds the ${MAX_WORKFLOW_SOURCE_BYTES}-byte validation limit`);
+  }
+  const diagnostics =
+    mode === "orchestration-only"
+      ? orchestrationOnlyWorkflowSourceShapeDiagnostics(source)
+      : standardWorkflowSourceShapeDiagnostics(source);
+  const syntax = spawnSync(process.execPath, ["--input-type=module", "--check"], {
+    input: source,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+  if (syntax.status !== 0)
+    diagnostics.push({
+      code: "WF_SOURCE_PARSE",
+      severity: "error",
+      line: 1,
+      column: 1,
+      endLine: 1,
+      endColumn: 1,
+      message: `Node syntax check failed: ${syntax.error?.message ?? syntax.stderr ?? syntax.signal}`,
+    });
+  return diagnostics;
 }
 
 function formatWorkflowSourceDiagnostic(displayPath: string, diagnostic: WorkflowSourceDiagnostic): string {

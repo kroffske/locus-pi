@@ -525,6 +525,27 @@ export interface ExtensionAPI {
 
 export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
 
+/** Pi ignores a returned isError; its tool_result hook is the lossless error boundary. */
+export function registerToolWithErrorResults(pi: ExtensionAPI, tool: ToolDefinition): void {
+  const failedCalls = new Set<string>();
+  pi.on("session_shutdown", () => failedCalls.clear());
+  pi.on("tool_result", (event) => {
+    if (event.toolName === tool.name && typeof event.toolCallId === "string" && failedCalls.delete(event.toolCallId)) {
+      return { isError: true };
+    }
+    return undefined;
+  });
+  pi.registerTool({
+    ...tool,
+    async execute(...args) {
+      failedCalls.delete(args[0]);
+      const result = await tool.execute(...args);
+      if (result.isError === true) failedCalls.add(args[0]);
+      return result;
+    },
+  });
+}
+
 export function textResult(text: string, details?: Record<string, unknown>): ToolResult {
   return details === undefined ? { content: [{ type: "text", text }] } : { content: [{ type: "text", text }], details };
 }

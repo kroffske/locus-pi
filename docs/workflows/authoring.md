@@ -24,8 +24,10 @@ author reviews and revises that design, then creates exactly its declared direct
 `.workflow.mjs` entries in the same turn. The design explicitly declares either
 a `runnable root`, which includes the same-named root, or a `group-only`
 namespace, which omits the root and contains only direct children. Build checks
-every logical ref, filename, module load, and source shape but does not run the
-workflow; it never invents a root.
+every logical ref, filename, Node syntax and source shape without importing
+unchecked source; it never invents a root. Create-only ends with checked source
+and a launch command. An authorized create-and-run request continues through
+`locus-pi-workflow-run` without repeat approval and reports the actual run outcome.
 
 The author stops after design only when the user explicitly asks for `design
 only`, `pause after design`, `do not build`, or equivalent wording. Build-only
@@ -40,10 +42,23 @@ The group-only Package `task` namespace offers an editable two-stage handoff.
 `task/draft` publishes a complete `draft.md` with the graph pattern, agents,
 handoffs, review bounds, concurrency, failure exits, and primary output. Copy or
 edit that full text, then pass it as semantic input to `task/plan`. That workflow
-designs, reviews, builds, checks, and publishes one concrete `workflow.mjs`.
-Neither stage runs the generated source. `task/plan` requires the complete accepted
-draft: missing or blank semantic input fails before any child starts and publishes
-no workflow source.
+designs and reviews a node-and-edge ledger, creates a minimal runnable workspace
+`workflow.mjs`, and grows it through at most six complete graph-node slices. An
+owner re-cuts the source-free remaining queue after each accepted slice. Independent
+mechanical and design gates share one cumulative correction per slice and preserve
+named diagnostics on failure; an empty queue still requires final whole-file gates.
+The detailed contract and terminal reasons live in the
+[task authoring manual](../../extensions/workflows/examples/task/README.md).
+
+After those gates, `publishPrimaryFile("workflow.mjs")` returns `primaryFile` with
+the validated workspace-relative path, absolute path, byte count, and digest. It
+does not create `outputs/workflow.mjs`; use `primaryFile.absolutePath` for the
+existing reviewed file-target launch path, whose execution snapshot binds the
+launched bytes. Neither package stage itself runs generated source. For
+create-and-run, the calling agent hands this checked workspace file to the run skill
+and reports authoring, execution, and product verification separately. `task/plan`
+requires the complete accepted draft: missing or blank semantic input fails before
+any child starts and publishes no workflow source.
 
 New standard source omits `maxToolCalls` and `timeoutMs`: both are unbounded unless
 the author or operator explicitly supplies a fuse. Launch-mode defaults apply only
@@ -191,8 +206,9 @@ Run the same check for every declared direct child. The tool comes from the
 installed workflows extension and resolves the workflow path inside the
 current project. The omitted or explicit `compatibility` mode keeps the broader
 standard grammar for existing reviewed scripts; workflow-create Build uses the
-strict mode above. Build is not successful until the checker passes, the module imports, and
-the source still matches its reviewed design. Diagnostic text uses
+strict mode above. Build is not successful until the checker and Node syntax
+validation pass, source identity is assessed, and the source matches its reviewed
+design. Do not import or execute unchecked source as a preliminary smoke test. Diagnostic text uses
 `path:line:column [CODE] message`; structured tool details include the same
 stable code, `error`/`warning` severity, one-based source span, and optional
 related spans. Errors fail the tool. Warning-only results remain successful so
@@ -413,6 +429,8 @@ it, then writes source in the same
 turn unless the user explicitly asks to pause after design. `Build design:
 .locus-pi/workflows/<name>/<name>.design.md` and `Build approved design:
 .locus-pi/workflows/<name>/<name>.design.md` remain build-only compatibility requests. The
-agent confirms identity and module load and never runs the workflow. The helper
+agent confirms identity, syntax and source shape. Create-only does not launch;
+create-and-run hands the checked target to the run skill under existing authority.
+The helper
 is a packaged skill; the package surface remains
 `./extensions/workflows/index.ts`.

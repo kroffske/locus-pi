@@ -67,6 +67,24 @@ describe("standard bounded carry and author-owned records; requires native ast-g
       ),
     ).toEqual([]);
   });
+  it("treats one repeated bounded callsite as replay-safe and distinct duplicate callsites as unsafe", () => {
+    const repeated = wrap(
+      'let queue = []; for (let slice = 0; slice <= 6; slice += 1) { queue = await dsl.agent(input, { label: "source-slice", handoffs: {} }); if (queue.length === 0) break; } return queue;',
+    );
+    const duplicated = wrap(
+      'const first = await dsl.agent(input, { label: "source-slice" }); const second = await dsl.agent(first, { label: "source-slice" }); return second;',
+    );
+
+    expect(errors(repeated)).toEqual([]);
+    expect(errors(duplicated)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "WF_AGENT_LABEL_DUPLICATE",
+          message: expect.stringContaining('label "source-slice" is already used'),
+        }),
+      ]),
+    );
+  });
   it("allows named author-owned record properties and flat destructuring", () => {
     const declarations =
       'const FIELDS = [{ key: "id", question: "Exact ID?" }, { key: "schedule", question: "Schedule?" }];';
