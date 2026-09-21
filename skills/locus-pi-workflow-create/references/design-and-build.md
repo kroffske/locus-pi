@@ -152,13 +152,18 @@ use explicit `choice` routing and a bounded correction/recheck edge. On exhausti
 return `{ ok: false, status: "failed" }` with the latest source and evidence; do
 not publish it as accepted or silently start a fresh run.
 
-The packaged `task/plan` has one explicit semantic correction stage followed by
-independent recheck. Its verifier writes workspace `workflow.mjs` and returns
-check evidence, not the publication payload. Runtime reads that regular confined
-file, checks Node syntax and orchestration-only shape, and retains those same
-bytes as the primary artifact named `workflow.mjs`. Its `outputs/workflow.mjs`
-remains the read-and-launch path; mutable workspace text and verifier prose are
-not substitutes. Host publication validation is not semantic review or live proof.
+The packaged `task/plan` creates a minimal runnable workspace `workflow.mjs`, then
+grows it through at most six complete graph-node slices. An owner re-cuts the
+source-free remaining queue after each accepted slice. Independent mechanical and
+design gates share one cumulative correction per slice; final whole-file gates run
+after the queue is empty. The exact routes and terminal reasons live in the
+[task authoring manual](../../../extensions/workflows/examples/task/README.md).
+
+`publishPrimaryFile("workflow.mjs")` returns `primaryFile` with the validated
+workspace-relative path, absolute path, byte count, and digest. It does not copy the
+file into run `outputs/`. The validated `primaryFile.absolutePath` remains the
+read-and-launch handoff; verifier prose is not source. Host publication validation
+is not semantic review or live proof.
 
 A successful Build returns `/workflows run <name>` (or the qualified child ref).
 Create-only stops there. Create-and-run continues through

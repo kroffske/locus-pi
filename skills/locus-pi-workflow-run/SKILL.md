@@ -57,10 +57,13 @@ Tool availability wins; do not guess from the host product name. Require one
 exact saved workflow name or project-relative `.workflow.mjs` path. A request to
 create or redesign a workflow starts with `locus-pi-workflow-create`. When the
 same request authorizes create-and-run, accept its checked-source handoff and
-continue here without repeat approval. For `task/plan`, read its retained
-`outputs/workflow.mjs` primary artifact (`result.name === "workflow.mjs"`), not
-verifier prose or a later workspace edit. Use the existing file target launch;
-the runtime snapshots that file. Do not invent a source-bytes launch target.
+continue here without repeat approval. For `task/plan`, read
+`primaryFile.absolutePath` from its completed run evidence. That host-validated
+reference names the authoritative workspace `workflow.mjs` and includes the
+relative path, byte count, and digest; `publishPrimaryFile` does not create
+`outputs/workflow.mjs` or an artifact result with `result.name`. Use the existing
+file-target launch so the runtime snapshots those bytes. Do not substitute verifier
+prose, a guessed output path, or a source-bytes launch target.
 
 ## Native Pi path
 
