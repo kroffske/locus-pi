@@ -173,13 +173,13 @@ describe("Package workflow: task/plan", () => {
     for (const call of calls) expect(call.options.label).toMatch(/^workflow-/u);
   });
 
-  it("routes every mechanical failure through the one correction before semantic review", async () => {
+  it("routes every mechanical failure through one fix before semantic review", async () => {
     const fixtureRun = fixture({
       "workflow-source-check": ["workflow-source-check.md: failed"],
-      "workflow-source-check-route": ["repair"],
-      "workflow-source-correct": ["workflow-source-correction.md"],
-      "workflow-source-correction-check": ["workflow-source-correction-check.md: passed"],
-      "workflow-source-correction-route": ["passed"],
+      "workflow-source-check-route": ["fix"],
+      "workflow-source-fix": ["workflow-source-fix.md"],
+      "workflow-source-fix-check": ["workflow-source-fix-check.md: passed"],
+      "workflow-source-fix-route": ["passed"],
     });
 
     await expect(fixtureRun.run()).resolves.toMatchObject({ relativePath: "workflow.mjs" });
@@ -187,26 +187,29 @@ describe("Package workflow: task/plan", () => {
       expect.arrayContaining([
         "workflow-source-check",
         "workflow-source-check-route",
-        "workflow-source-correct",
-        "workflow-source-correction-check",
-        "workflow-source-correction-route",
+        "workflow-source-fix",
+        "workflow-source-fix-check",
+        "workflow-source-fix-route",
         "workflow-source-review",
       ]),
     );
     const reviewPrompt = fixtureRun.calls.find((call) => call.options.label === "workflow-source-review")?.prompt;
     expect(reviewPrompt).toContain(
-      "Read the exact current mechanical evidence from workspace workflow-source-correction-check.md",
+      "Read the exact current mechanical evidence from workspace workflow-source-fix-check.md",
     );
     expect(reviewPrompt).not.toContain("workflow-source-check.md: failed");
+    expect(
+      fixtureRun.calls.find((call) => call.options.label === "workflow-source-check-route")?.options.choice,
+    ).toEqual(["passed", "fix"]);
   });
 
-  it("does not grant a second correction when mechanical repair consumed the slice allowance", async () => {
+  it("does not grant a second fix when the mechanical path consumed the slice allowance", async () => {
     const fixtureRun = fixture({
-      "workflow-source-check-route": ["repair"],
-      "workflow-source-correct": ["workflow-source-correction.md"],
-      "workflow-source-correction-check": ["workflow-source-correction-check.md: passed"],
-      "workflow-source-correction-route": ["passed"],
-      "workflow-source-review-route": ["repair"],
+      "workflow-source-check-route": ["fix"],
+      "workflow-source-fix": ["workflow-source-fix.md"],
+      "workflow-source-fix-check": ["workflow-source-fix-check.md: passed"],
+      "workflow-source-fix-route": ["passed"],
+      "workflow-source-review-route": ["fix"],
     });
 
     await expect(fixtureRun.run()).resolves.toMatchObject({
@@ -216,16 +219,16 @@ describe("Package workflow: task/plan", () => {
       source: "workflow.mjs",
       diagnostics: "workflow-source-design-review.md: accepted",
     });
-    expect(fixtureRun.calls.some((call) => call.options.label === "workflow-source-design-correct")).toBe(false);
+    expect(fixtureRun.calls.some((call) => call.options.label === "workflow-source-design-fix")).toBe(false);
     expect(fixtureRun.publishPrimaryFile).not.toHaveBeenCalled();
   });
 
-  it("independently rechecks a semantic correction before accepting the slice", async () => {
+  it("independently rechecks a semantic fix before accepting the slice", async () => {
     const fixtureRun = fixture({
-      "workflow-source-review-route": ["repair"],
-      "workflow-source-design-correct": ["workflow-source-design-correction.md"],
-      "workflow-source-design-correction-check": ["workflow-source-design-correction-check.md: passed"],
-      "workflow-source-design-correction-route": ["passed"],
+      "workflow-source-review-route": ["fix"],
+      "workflow-source-design-fix": ["workflow-source-design-fix.md"],
+      "workflow-source-design-fix-check": ["workflow-source-design-fix-check.md: passed"],
+      "workflow-source-design-fix-route": ["passed"],
       "workflow-source-design-recheck": ["workflow-source-design-recheck.md: accepted"],
       "workflow-source-design-recheck-route": ["accept"],
     });
@@ -233,13 +236,69 @@ describe("Package workflow: task/plan", () => {
     await expect(fixtureRun.run()).resolves.toMatchObject({ relativePath: "workflow.mjs" });
     expect(fixtureRun.calls.map((call) => call.options.label)).toEqual(
       expect.arrayContaining([
-        "workflow-source-design-correct",
-        "workflow-source-design-correction-check",
-        "workflow-source-design-correction-route",
+        "workflow-source-design-fix",
+        "workflow-source-design-fix-check",
+        "workflow-source-design-fix-route",
         "workflow-source-design-recheck",
         "workflow-source-design-recheck-route",
       ]),
     );
+    expect(
+      fixtureRun.calls.find((call) => call.options.label === "workflow-source-review-route")?.options.choice,
+    ).toEqual(["accept", "fix", "failed"]);
+  });
+
+  it.each([
+    {
+      name: "mechanical fix recheck",
+      overrides: {
+        "workflow-source-check-route": ["fix"],
+        "workflow-source-fix": ["workflow-source-fix.md"],
+        "workflow-source-fix-check": ["mechanical fix failed"],
+        "workflow-source-fix-route": ["failed"],
+      },
+      reason: "slice_repair_failed",
+      diagnostics: "mechanical fix failed",
+      lastLabel: "workflow-source-fix-route",
+    },
+    {
+      name: "design fix mechanical recheck",
+      overrides: {
+        "workflow-source-review-route": ["fix"],
+        "workflow-source-design-fix": ["workflow-source-design-fix.md"],
+        "workflow-source-design-fix-check": ["design fix check failed"],
+        "workflow-source-design-fix-route": ["failed"],
+      },
+      reason: "slice_repair_failed",
+      diagnostics: "design fix check failed",
+      lastLabel: "workflow-source-design-fix-route",
+    },
+    {
+      name: "design fix semantic recheck",
+      overrides: {
+        "workflow-source-review-route": ["fix"],
+        "workflow-source-design-fix": ["workflow-source-design-fix.md"],
+        "workflow-source-design-fix-check": ["workflow-source-design-fix-check.md: passed"],
+        "workflow-source-design-fix-route": ["passed"],
+        "workflow-source-design-recheck": ["design still mismatched"],
+        "workflow-source-design-recheck-route": ["failed"],
+      },
+      reason: "design_mismatch",
+      diagnostics: "design still mismatched",
+      lastLabel: "workflow-source-design-recheck-route",
+    },
+  ])("stops without publication after a failed $name", async ({ overrides, reason, diagnostics, lastLabel }) => {
+    const fixtureRun = fixture(overrides);
+
+    await expect(fixtureRun.run()).resolves.toMatchObject({
+      ok: false,
+      status: "failed",
+      stage: "verify",
+      reason,
+      diagnostics,
+    });
+    expect(fixtureRun.calls.at(-1)?.options.label).toBe(lastLabel);
+    expect(fixtureRun.publishPrimaryFile).not.toHaveBeenCalled();
   });
 
   it.each([

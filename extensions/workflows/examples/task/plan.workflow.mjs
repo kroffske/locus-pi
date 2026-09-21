@@ -191,57 +191,57 @@ export default async function runWorkflow(dsl, input = "") {
       { label: "workflow-source-check", result: "report", title: `Mechanically check source slice ${accepted + 1}` },
     );
     const mechanicalRoute = await dsl.agent(
-      `Translate the mechanical check without rejudging it. Choose passed only when every named check passed. Choose repair for every failed check.\n\n${mechanical}`,
+      `Translate the mechanical check without rejudging it. Choose passed only when every named check passed. Choose fix for every failed check.\n\n${mechanical}`,
       {
         label: "workflow-source-check-route",
         title: "Route the mechanical source check",
-        choice: ["passed", "repair"],
+        choice: ["passed", "fix"],
       },
     );
-    if (mechanicalRoute === "repair") {
-      const correction = await dsl.agent(
-        `Use workflow-source-check.md to repair exactly the failed mechanical contract in workspace workflow.mjs. Preserve accepted graph nodes outside this slice. This consumes the slice's one correction allowance. Write workflow-source-correction.md with the edited path and outcome. Return only the report and paths, never source bytes. The independent checker owns node --check and workflow_check_source evidence.\n\n${SOURCE_CONTRACT}\n\nReviewed design:\n${reviewedDesign}\n\nFailed check:\n${mechanical}`,
-        { label: "workflow-source-correct", result: "report", title: `Repair source slice ${accepted + 1}` },
+    if (mechanicalRoute === "fix") {
+      const fixReport = await dsl.agent(
+        `Use workflow-source-check.md to fix exactly the failed mechanical contract in workspace workflow.mjs. Preserve accepted graph nodes outside this slice. This consumes the slice's one fix allowance. Write workflow-source-fix.md with the edited path and outcome. Return only the report and paths, never source bytes. The independent checker owns node --check and workflow_check_source evidence.\n\n${SOURCE_CONTRACT}\n\nReviewed design:\n${reviewedDesign}\n\nFailed check:\n${mechanical}`,
+        { label: "workflow-source-fix", result: "report", title: `Fix source slice ${accepted + 1}` },
       );
-      const correctionCheck = await dsl.agent(
-        `Independently recheck the exact corrected workspace workflow.mjs with node --check and workflow_check_source orchestration-only. Do not edit or execute source. Write workflow-source-correction-check.md with exact diagnostics. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nCorrection evidence:\n${correction}`,
+      const fixCheck = await dsl.agent(
+        `Independently recheck the exact fixed workspace workflow.mjs with node --check and workflow_check_source orchestration-only. Do not edit or execute source. Write workflow-source-fix-check.md with exact diagnostics. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nFix evidence:\n${fixReport}`,
         {
-          label: "workflow-source-correction-check",
+          label: "workflow-source-fix-check",
           result: "report",
-          title: `Recheck repaired source slice ${accepted + 1}`,
+          title: `Recheck fixed source slice ${accepted + 1}`,
         },
       );
-      const correctionRoute = await dsl.agent(
-        `Translate the correction recheck without rejudging it. Choose passed only when every named check passed; otherwise choose failed.\n\n${correctionCheck}`,
+      const fixRoute = await dsl.agent(
+        `Translate the fix recheck without rejudging it. Choose passed only when every named check passed; otherwise choose failed.\n\n${fixCheck}`,
         {
-          label: "workflow-source-correction-route",
-          title: "Route the corrected mechanical source check",
+          label: "workflow-source-fix-route",
+          title: "Route the fixed mechanical source check",
           choice: ["passed", "failed"],
         },
       );
-      if (correctionRoute !== "passed")
+      if (fixRoute !== "passed")
         return {
           ok: false,
           status: "failed",
           stage: "verify",
           reason: "slice_repair_failed",
           source: "workflow.mjs",
-          diagnostics: correctionCheck,
+          diagnostics: fixCheck,
         };
     }
     const currentMechanicalReport =
-      mechanicalRoute === "repair" ? "workflow-source-correction-check.md" : "workflow-source-check.md";
+      mechanicalRoute === "fix" ? "workflow-source-fix-check.md" : "workflow-source-check.md";
 
     const designReview = await dsl.agent(
-      `Independently inspect the entire current workspace workflow.mjs and this slice against the reviewed design. Read the exact current mechanical evidence from workspace ${currentMechanicalReport}. Check that the accepted identity is implemented, existing nodes remain correct, every handoff is visible, and the module stays runnable. Do not edit or execute source. Write workflow-source-design-review.md with criterion evidence and exact repair guidance. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nSlice:\n${slice}\n\nReviewed design:\n${reviewedDesign}`,
+      `Independently inspect the entire current workspace workflow.mjs and this slice against the reviewed design. Read the exact current mechanical evidence from workspace ${currentMechanicalReport}. Check that the accepted identity is implemented, existing nodes remain correct, every handoff is visible, and the module stays runnable. Do not edit or execute source. Write workflow-source-design-review.md with criterion evidence and exact fix guidance. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nSlice:\n${slice}\n\nReviewed design:\n${reviewedDesign}`,
       { label: "workflow-source-review", result: "report", title: `Review source slice ${accepted + 1}` },
     );
     const designRoute = await dsl.agent(
-      `Translate the design review without rejudging it. Choose accept only when the slice and whole file conform. Choose repair for a correctable in-scope mismatch. Choose failed for a scope conflict or design mismatch that cannot be corrected within the accepted graph.\n\n${designReview}`,
+      `Translate the design review without rejudging it. Choose accept only when the slice and whole file conform. Choose fix for a correctable in-scope mismatch. Choose failed for a scope conflict or design mismatch that cannot be corrected within the accepted graph.\n\n${designReview}`,
       {
         label: "workflow-source-review-route",
         title: "Route source design review",
-        choice: ["accept", "repair", "failed"],
+        choice: ["accept", "fix", "failed"],
       },
     );
     if (designRoute === "failed")
@@ -253,8 +253,8 @@ export default async function runWorkflow(dsl, input = "") {
         source: "workflow.mjs",
         diagnostics: designReview,
       };
-    if (designRoute === "repair") {
-      if (mechanicalRoute === "repair")
+    if (designRoute === "fix") {
+      if (mechanicalRoute === "fix")
         return {
           ok: false,
           status: "failed",
@@ -263,52 +263,52 @@ export default async function runWorkflow(dsl, input = "") {
           source: "workflow.mjs",
           diagnostics: designReview,
         };
-      const designCorrection = await dsl.agent(
-        `Use workflow-source-design-review.md to repair exactly the in-scope design mismatch in workspace workflow.mjs. Preserve accepted nodes outside this slice. This consumes the slice's one correction allowance. Write workflow-source-design-correction.md with the edited path and outcome. Return only the report and paths, never source bytes. The independent checker owns node --check and workflow_check_source evidence.\n\n${SOURCE_CONTRACT}\n\nReviewed design:\n${reviewedDesign}\n\nDesign findings:\n${designReview}`,
+      const designFix = await dsl.agent(
+        `Use workflow-source-design-review.md to fix exactly the in-scope design mismatch in workspace workflow.mjs. Preserve accepted nodes outside this slice. This consumes the slice's one fix allowance. Write workflow-source-design-fix.md with the edited path and outcome. Return only the report and paths, never source bytes. The independent checker owns node --check and workflow_check_source evidence.\n\n${SOURCE_CONTRACT}\n\nReviewed design:\n${reviewedDesign}\n\nDesign findings:\n${designReview}`,
         {
-          label: "workflow-source-design-correct",
+          label: "workflow-source-design-fix",
           result: "report",
-          title: `Correct source design slice ${accepted + 1}`,
+          title: `Fix source design slice ${accepted + 1}`,
         },
       );
-      const designCorrectionCheck = await dsl.agent(
-        `Independently run node --check and workflow_check_source orchestration-only on the corrected workspace workflow.mjs. Do not edit or execute source. Write workflow-source-design-correction-check.md with exact diagnostics. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nCorrection evidence:\n${designCorrection}`,
+      const designFixCheck = await dsl.agent(
+        `Independently run node --check and workflow_check_source orchestration-only on the fixed workspace workflow.mjs. Do not edit or execute source. Write workflow-source-design-fix-check.md with exact diagnostics. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nFix evidence:\n${designFix}`,
         {
-          label: "workflow-source-design-correction-check",
+          label: "workflow-source-design-fix-check",
           result: "report",
-          title: `Mechanically recheck design correction ${accepted + 1}`,
+          title: `Mechanically recheck design fix ${accepted + 1}`,
         },
       );
-      const designCorrectionRoute = await dsl.agent(
-        `Translate the corrected mechanical check without rejudging it. Choose passed only when every named check passed; otherwise choose failed.\n\n${designCorrectionCheck}`,
+      const designFixRoute = await dsl.agent(
+        `Translate the fixed mechanical check without rejudging it. Choose passed only when every named check passed; otherwise choose failed.\n\n${designFixCheck}`,
         {
-          label: "workflow-source-design-correction-route",
-          title: "Route the design correction mechanical check",
+          label: "workflow-source-design-fix-route",
+          title: "Route the design fix mechanical check",
           choice: ["passed", "failed"],
         },
       );
-      if (designCorrectionRoute !== "passed")
+      if (designFixRoute !== "passed")
         return {
           ok: false,
           status: "failed",
           stage: "verify",
           reason: "slice_repair_failed",
           source: "workflow.mjs",
-          diagnostics: designCorrectionCheck,
+          diagnostics: designFixCheck,
         };
       const designRecheck = await dsl.agent(
-        `Independently recheck the corrected whole workspace workflow.mjs against the reviewed design and this slice. Do not edit or execute source. Write workflow-source-design-recheck.md with criterion evidence. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nSlice:\n${slice}\n\nReviewed design:\n${reviewedDesign}\n\nCorrection evidence:\n${designCorrection}`,
+        `Independently recheck the fixed whole workspace workflow.mjs against the reviewed design and this slice. Do not edit or execute source. Write workflow-source-design-recheck.md with criterion evidence. Return the report and paths, never source bytes.\n\n${SOURCE_CONTRACT}\n\nSlice:\n${slice}\n\nReviewed design:\n${reviewedDesign}\n\nFix evidence:\n${designFix}`,
         {
           label: "workflow-source-design-recheck",
           result: "report",
-          title: `Recheck corrected source design ${accepted + 1}`,
+          title: `Recheck fixed source design ${accepted + 1}`,
         },
       );
       const designRecheckRoute = await dsl.agent(
         `Translate the independent design recheck without rejudging it. Choose accept only for complete conformance; otherwise choose failed.\n\n${designRecheck}`,
         {
           label: "workflow-source-design-recheck-route",
-          title: "Route corrected source design",
+          title: "Route fixed source design",
           choice: ["accept", "failed"],
         },
       );
