@@ -20,7 +20,7 @@ queue assessment preserves unmet identities and fails with `queue_conflict` when
 the transition cannot be reconciled.
 
 Mechanical checks and design review are separate. Any failed mechanical check
-always enters the correction path. Each slice has one cumulative correction,
+always enters the fix path. Each slice has one cumulative fix,
 followed by an independent mechanical and, when needed, design recheck. Six slices
 may be accepted; a seventh pass can prove completion or return the unconsumed
 queue, but cannot implement more work. Named terminal reasons are `seed_failed`,
@@ -36,8 +36,8 @@ path, size, and digest. It does not copy the file into run `outputs/`. The packa
 stage never executes generated source.
 
 Design and design review return complete prose without writing source. Seed, slice,
-correction, and check agents work against the one workspace file. Semantic review
-checks explicit failure returns, actionable findings reaching correction, and
+fix, and check agents work against the one workspace file. Semantic review
+checks explicit failure returns, actionable findings reaching the fix stage, and
 agreement between primary output names and content; static syntax/shape checks alone
 do not establish those properties. The workflow forwards opaque values whole and
 branches only on runtime-owned choices. Simple fixed tasks retain their requested
