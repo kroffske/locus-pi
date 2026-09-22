@@ -11,7 +11,6 @@ Each executable script is bound to an npm script in `package.json`.
 
 | Script                           | npm script                                     | Role                                        |
 | -------------------------------- | ---------------------------------------------- | ------------------------------------------- |
-| `audit-sources.ts`               | `audit:sources` (part of `check:fast`)         | Source-ownership and attribution gate       |
 | `build-public-catalogs.ts`       | `build:catalogs` / `check:generated`           | Writes and verifies the two public catalogs |
 | `check-extension-layers.ts`      | `check:layers` (part of `check:fast`)          | `extensions/_shared` layer and import rules |
 | `check-extension-manifests.ts`   | `check:manifests` (part of `check:fast`)       | Manifest schema and declared-path contract  |
@@ -28,7 +27,7 @@ Each executable script is bound to an npm script in `package.json`.
 The composite gates that bind them together:
 
 - `npm run check:fast` — manifests, layers, workflow source shape, typecheck,
-  Pi host version, tests, and source audit. The inner loop while editing; it
+  Pi host version, and tests. The inner loop while editing; it
   is not release-complete.
 - `npm run check:workflow-source -- --mode orchestration-only <path>` — apply
   the same orchestration-only validator as `workflow_check_source` to one exact
@@ -40,8 +39,9 @@ The composite gates that bind them together:
   deterministic, offline, and read-only, and exactly what CI runs. Everything
   CI adds after it needs the network (`npm audit`) or the runner environment
   (`pi --version`, the pack candidate).
-- `npm run check:push` — `check` plus a dry-run pack. The tracked `pre-push`
-  hook runs this.
+- `npm run check:push` — `check`, the topology size ratchet (`check:topology`),
+  and a dry-run pack. The tracked `pre-push` hook runs this. The topology check
+  reports a skip when the local Locus CLI is unavailable.
 
 ## CI gates
 
@@ -78,16 +78,6 @@ network. The parser lives in `markdown-links.ts` and is shared with
 real `npm pack` result. `tests/integration/markdown-links.test.ts` proves the
 gate rejects a broken link and a broken anchor.
 
-### audit-sources.ts
-
-Verifies source-ownership metadata for every active extension: an extension
-adapted from third-party code must carry completed review metadata in its
-`manifest.json`, `docs/third-party-notices.md` must retain the required Pi,
-Oh My Pi, and MIT attributions, and no public manifest may link internal
-source-audit notes. Exists because parts of the extension tree started as
-adapted third-party code, and attribution and review state must not silently
-rot.
-
 ### check-pi-host-version.mjs
 
 Verifies the Pi development baseline is coherent: the four
@@ -102,10 +92,9 @@ test evidence.
 
 Enforces branch and release policy on pull requests, reading the `GITHUB_*`
 environment CI provides. Pull requests into `dev` must come from a task
-branch and must update `CHANGELOG.md` when they touch release-relevant paths;
-pull requests into `main` must be the release pull request from `dev`, bump
-the package version, and carry a dated changelog heading for it. No other
-target branch is accepted.
+branch; they do not require a `CHANGELOG.md` entry. Pull requests into `main`
+must come from `dev`, bump the package version, and carry a dated changelog
+heading. No other target branch is accepted.
 
 ### check-release-metadata.ts
 

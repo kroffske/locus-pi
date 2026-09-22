@@ -51,7 +51,7 @@ recovery path.
    interactive session the user can inspect. Use the JSON path below only when
    non-interactive execution is explicitly requested.
 4. Otherwise stop with the missing prerequisite and the install command:
-   `pi install npm:@kroffske/locus-pi`.
+   `pi install npm:@locus-forge/locus-pi`.
 
 Tool availability wins; do not guess from the host product name. Require one
 exact saved workflow name or project-relative `.workflow.mjs` path. A request to

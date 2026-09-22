@@ -44,20 +44,9 @@ model roles, Markdown handoffs, and the failure boundary on one canvas.
 
 ## Install
 
-The tree is part of the `@kroffske/locus-pi` package boundary. From this
-checkout, register the local package once; do not copy files out of task
-artifacts or into every project:
-
-```bash
-cd /path/to/locus-pi
-pi install .
-```
-
-After the release containing this tree is published, install it from npm:
-
-```bash
-pi install npm:@kroffske/locus-pi
-```
+The tree ships with the locus-pi package. Follow [Getting started](../../../../docs/getting-started.md)
+to install the published package or register a source checkout. Register it once;
+do not copy workflow files into every project.
 
 After installation, start Pi in the project to review and confirm the Package
 entries:

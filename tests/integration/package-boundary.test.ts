@@ -19,6 +19,7 @@ import { verifyInstalledWorkflowDocs } from "../docs/helpers/installed-workflow-
 import { deadMarkdownLinks } from "../../scripts/markdown-links.js";
 
 interface PackageJson {
+  name: string;
   files: string[];
   bin?: Record<string, string>;
   pi: { extensions: string[]; skills: string[] };
@@ -350,18 +351,7 @@ describe("npm public package boundary", () => {
     ]);
     // Directory-owned means the dotfiles inside a listed directory ship with it:
     // `skills/.ignore` rides along under `skills/` and is counted here.
-    // Adaptive authoring replaces the omnibus manual with focused references and
-    // adds a public authoring guide, two runnable source examples and style cards.
-    // Error diagnostics add one shared writer and one shared diagnostic reference.
-    // T-218 owner extractions (one packed module each, behavior unchanged):
-    //   W2 source literals · W3 artifact format · W6 workspace + workspace state
-    //   W4 journal event format · W16 progress-render + agent-observer
-    //   W15 source diagnostics/bindings/provenance/value-rules · W7 execution state + groups
-    //   W5 run snapshot reader · W12 saved child · W8 agent contract/call/attempt · W9 agent output
-    //   W13 resume + admission · W10 fusion · W14 finalization · W11 agent model
-    // Seventeen topical workflow pages replace the old monolith with bookmark pointers.
-    // The public environment-variable reference documents optional local features.
-    expect(dryRun.files).toHaveLength(259);
+    expect(dryRun.files).toHaveLength(258);
   });
 
   it("ships every prompt resource a curated workflow renders", () => {
@@ -742,8 +732,7 @@ describe("npm public package boundary", () => {
         path.join(
           consumerRoot,
           "node_modules",
-          "@kroffske",
-          "locus-pi",
+          ...pkg.name.split("/"),
           "extensions",
           "workflows",
           "tool",

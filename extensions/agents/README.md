@@ -119,11 +119,11 @@ result instead of triggering a turn for each update.
 The companion adapter test starts a controlled CLI process through the real
 runner. It checks streamed text, tool activity, deduplication, ignored counters,
 final-result replacement, one runner invocation, and no parent `fetch` calls.
-The [Pi runtime contract test](https://github.com/kroffske/locus-pi/blob/codex/claude-readable-progress/tests/shared/agent-runtime/agent-progress-runtime.test.ts)
-uses the installed Pi loop with controlled provider output. Several progress
+`tests/shared/agent-runtime/agent-progress-runtime.test.ts` uses the installed
+Pi loop with controlled provider output. Several progress
 updates produce one selected-provider invocation and one turn; reported nested
 tools never become Pi tool execution events. The
-[retention regression test](https://github.com/kroffske/locus-pi/blob/codex/claude-readable-progress/tests/shared/agent-runtime/agent-live-transcript.test.ts)
+`tests/shared/agent-runtime/agent-live-transcript.test.ts`
 first failed on the previous implementation because the latest status was lost.
 
 A live smoke check also ran Claude Code 2.1.257 through the companion provider

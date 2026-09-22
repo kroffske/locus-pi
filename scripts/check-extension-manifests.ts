@@ -19,8 +19,7 @@
  *
  * Every manifest field and the consumer that reads it:
  *
- *   id                  scripts/audit-sources.ts, this checker
- *   ownershipStatus     scripts/audit-sources.ts (adapted extensions need review metadata)
+ *   id                  this checker
  *   runtimeRequirements tests/extensions/workflows/fusion/fusion-tool.test.ts, docs/extensions.md
  *   stateUsed           tests/extensions/workflows/fusion/fusion-tool.test.ts, docs/extensions.md
  *   provides            tests/contracts/extensions/runtime-registration.test.ts,
@@ -32,9 +31,7 @@
  *   risk                tests/contracts/docs/extension-reference.test.ts
  *   docsPath            tests/contracts/docs/extension-reference.test.ts,
  *                       tests/docs/public-docs.test.ts, this checker
- *   sourceAuditPath     scripts/audit-sources.ts (must be null on a published manifest)
  *   tests               tests/contracts/docs/extension-reference.test.ts, this checker
- *   review              scripts/audit-sources.ts
  */
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";

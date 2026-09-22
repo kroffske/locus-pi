@@ -24,13 +24,11 @@ describe("extension reference contract", () => {
         commands: manifest.provides.commands,
         hooks: manifest.provides.hooks,
         risk: manifest.risk,
-        ownership: manifest.ownershipStatus,
       })),
     );
 
     for (const { manifestPath, manifest } of manifests) {
       expect(existsSync(path.join(root, manifest.docsPath)), manifest.docsPath).toBe(true);
-      expect(manifest.sourceAuditPath).toBeNull();
       for (const testPath of manifest.tests)
         expect(existsSync(path.join(root, testPath)), `missing test from ${manifestPath}: ${testPath}`).toBe(true);
     }

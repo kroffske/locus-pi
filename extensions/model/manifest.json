@@ -1,6 +1,5 @@
 {
   "id": "model",
-  "ownershipStatus": "compat-wrapper",
   "runtimeRequirements": [
     "Pi setModel/getThinkingLevel/setThinkingLevel APIs",
     "Pi model registry with reasoning/thinkingLevelMap capability metadata",
@@ -61,18 +60,11 @@
   },
   "risk": "medium",
   "docsPath": "extensions/model/README.md",
-  "sourceAuditPath": null,
   "tests": [
     "tests/extensions/model/model.test.ts",
     "tests/extensions/model/model-persistence.test.ts",
     "tests/extensions/model/model-allowlist.test.ts",
     "tests/contracts/extensions/runtime-registration.test.ts",
     "tests/shared/operator/operator-interaction-slot.test.ts"
-  ],
-  "review": {
-    "status": "reviewed",
-    "source": "copy-after-audit",
-    "reviewedBy": "locus-pi",
-    "reviewedAt": "2026-07-10"
-  }
+  ]
 }

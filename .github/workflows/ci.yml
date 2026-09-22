@@ -72,7 +72,7 @@ jobs:
         run: npm run check:pull-request
 
       # The one deterministic gate: formatting, manifests, layers, workflow
-      # source shape, types, Pi host coherence, tests, source audit, published
+      # source shape, types, Pi host coherence, tests, published
       # links, repository inventory, and release metadata. Anything CI runs
       # beyond this step needs the network or the runner environment, which is
       # exactly why it is not inside `check`.

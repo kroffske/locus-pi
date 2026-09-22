@@ -12,8 +12,7 @@
 
 - [ ] Focused tests cover changed behavior.
 - [ ] `npm run check:push` passes locally, or the omitted checks are explained below.
-- [ ] Public manuals, manifests, ownership records, and source-audit notes remain aligned.
-- [ ] `CHANGELOG.md` is updated for user-visible changes.
+- [ ] Public manuals, extension manifests, and generated catalogs match the change.
 - [ ] No credentials, private runtime state, generated research, or absolute workstation paths are included.
 
 ## Release-only checks

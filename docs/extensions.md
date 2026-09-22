@@ -3,9 +3,6 @@ title: Extension reference
 type: overview
 status: active
 updated: 2026-08-19T22:43:06Z
-source_commit: aeb217fe8dab
-update_event: cleanup
-context: changes=S files=4
 description: Reference the shipped extension surface.
 owner: locus-pi maintainers
 tags: [extensions, reference]
@@ -48,7 +45,7 @@ The other extensions do not directly import another feature directory.
 - `runtimeRequirements` and `stateUsed` — detailed execution and persistence contracts;
 - `uiLifecycle` — per-command and per-tool UI and persistence taxonomy, for extensions that expose a surface;
 - `docsPath` — co-located extension manual;
-- `ownershipStatus`, `sourceAuditPath`, `tests`, and `review` — evidence ownership and review metadata.
+- `tests` — paths to the implementation evidence.
 
 A manifest declares no versioning: the npm package version covers that. `package.json#pi.extensions` decides what Pi loads and registers.
 

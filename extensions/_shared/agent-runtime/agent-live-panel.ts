@@ -720,12 +720,8 @@ function stripInlineMarkdown(value: string): string {
 
 // ── Tool-activity action sub-line (REQ-004, T-196) ───────────────────────────
 //
-// adapted from @oh-my-pi/pi-coding-agent (MIT, Can Boluk)
-//
-// Ports the *logic* (not the panel): OMP's `extractToolArgsPreview` priority-key
-// order (`task/executor.ts:421`) and the `renderAgentProgress` sub-line composition
-// (`task/render.ts:632-645`). The sub-line is a short activity *signal*, not a raw
-// command echo — the raw command / output tail live in drill (spec "Action line").
+// The sub-line is a short activity signal, not a raw command echo. Drill retains
+// the raw command and output tail.
 
 /** Tree hook + indent for the sub-line, per "### Agent row anatomy". */
 const TOOL_ACTIVITY_HOOK = "└";
@@ -734,9 +730,9 @@ const TOOL_ACTIVITY_INDENT = "   ";
 const TOOL_ACTIVITY_SEP = " · ";
 /** Max columns for the extracted gist (REQ-004: the final gist is at most 24 columns). */
 const TOOL_GIST_MAX_COLS = 24;
-/** Tool elapsed shows only once past this — OMP's 5s quiets fast-call noise (V3). */
+/** Tool elapsed appears only after this threshold, to avoid fast-call noise. */
 const TOOL_ELAPSED_THRESHOLD_MS = 5000;
-/** OMP `extractToolArgsPreview` priority-key order (`task/executor.ts:421`). */
+/** Priority order for extracting a concise tool-argument gist. */
 const TOOL_ARG_PRIORITY_KEYS = ["command", "file_path", "path", "pattern", "query", "url", "task", "prompt"] as const;
 
 /**

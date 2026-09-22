@@ -3,9 +3,6 @@ title: TUI visual language
 type: guide
 status: active
 updated: "2026-09-01T19:37:49Z"
-source_commit: "a1eb26cddfc8"
-update_event: user_request
-context: "changes=L files=11 task=T-191"
 description: Define the shared TUI selection palette, geometry, fallback, and ownership.
 owner: locus-pi maintainers
 tags: [tui, design, selection]

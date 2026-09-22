@@ -1,16 +1,16 @@
 {
   "name": "@kroffske/locus-pi",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "type": "module",
-  "description": "Audited Locus Pi extension package for agentic development tools.",
+  "description": "Legacy Locus Pi package. Development has moved to https://github.com/locus-forge/locus-pi; this package is no longer maintained.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kroffske/locus-pi.git"
   },
-  "homepage": "https://github.com/kroffske/locus-pi#readme",
+  "homepage": "https://github.com/locus-forge/locus-pi#readme",
   "bugs": {
-    "url": "https://github.com/kroffske/locus-pi/issues"
+    "url": "https://github.com/locus-forge/locus-pi/issues"
   },
   "keywords": [
     "locus-pi",
@@ -41,7 +41,7 @@
   "scripts": {
     "build:catalogs": "tsx scripts/build-public-catalogs.ts",
     "check": "npm run format:check && npm run check:links && npm run check:generated && npm run check:fast && npm run check:repository && npm run check:release",
-    "check:fast": "npm run check:manifests && npm run check:layers && npm run check:workflow-source && npm run typecheck && npm run check:pi-host && npm test && npm run audit:sources",
+    "check:fast": "npm run check:manifests && npm run check:layers && npm run check:workflow-source && npm run typecheck && npm run check:pi-host && npm test",
     "check:generated": "tsx scripts/build-public-catalogs.ts --check",
     "check:layers": "tsx scripts/check-extension-layers.ts",
     "check:links": "tsx scripts/check-markdown-links.ts",
@@ -60,7 +60,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pack:dry": "npm pack --dry-run --ignore-scripts",
-    "audit:sources": "node --import tsx scripts/audit-sources.ts",
     "check:pi-host": "node scripts/check-pi-host-version.mjs",
     "test:host-loading": "vitest run tests/contracts/host/selective-package-loading.test.ts",
     "sync:pi-host": "node scripts/sync-pi-host-version.mjs"

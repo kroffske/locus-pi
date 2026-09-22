@@ -1,3 +1,13 @@
+---
+title: Environment variables
+type: guide
+status: active
+updated: 2026-09-22T15:44:00Z
+description: Reference for the legacy package's operator environment controls.
+owner: locus-pi maintainers
+tags: [configuration, environment]
+---
+
 # Environment variables
 
 `locus-pi` keeps operator environment controls narrow. Set these before starting
