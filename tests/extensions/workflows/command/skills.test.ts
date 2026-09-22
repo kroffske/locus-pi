@@ -95,7 +95,7 @@ describe("workflow skill host command", () => {
     const hostRoot = path.join(f.projectRoot, ".agents", "skills");
     mkdirSync(hostRoot, { recursive: true });
     const skill = WORKFLOW_SKILL_NAMES[0];
-    const staleRoot = path.join(f.root, "node_modules", "@kroffske", "locus-pi", "skills");
+    const staleRoot = path.join(f.root, "previous", "node_modules", "@kroffske", "locus-pi", "skills");
     symlinkSync(path.join(staleRoot, skill), path.join(hostRoot, skill), "dir");
     symlinkSync(path.join(staleRoot, "locus-pi-workflows"), path.join(hostRoot, "locus-pi-workflows"), "dir");
     writeFileSync(
@@ -134,7 +134,7 @@ describe("workflow skill host command", () => {
     expect(path.resolve(hostRoot, readlinkSync(path.join(hostRoot, skill)))).toBe(
       path.join(f.packageRoot, "skills", skill),
     );
-    expect(packageName).toBe("@locus-forge/locus-pi");
+    expect(packageName).toBe("@kroffske/locus-pi");
     expect(JSON.parse(readFileSync(path.join(hostRoot, WORKFLOW_SKILL_STATE_FILE), "utf8")).owner).toBe(
       "@kroffske/locus-pi",
     );

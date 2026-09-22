@@ -2,25 +2,27 @@
 title: Getting started
 type: guide
 status: active
-updated: 2026-08-19T22:43:07Z
-description: Guide installation and first runtime checks.
+updated: 2026-09-22T15:43:18Z
+description: Historical installation guide for the retired package; current development lives in LocusForge.
 owner: locus-pi maintainers
 tags: [installation, getting-started]
 ---
 
 # Getting started
 
-## Install and try the published package
+This guide describes the retired `@kroffske/locus-pi` package. Development and
+current installation instructions live in the
+[LocusForge repository](https://github.com/locus-forge/locus-pi). No further
+updates are planned for this legacy package. Updating it does not migrate your
+Pi settings to LocusForge; replace the source in the same scope when migrating,
+preserve extension and skill filters, and do not load both packages together.
 
-If you already have `npm:@kroffske/locus-pi` in Pi settings, replace that
-source with `npm:@locus-forge/locus-pi` in the same scope, then run
-`pi update npm:@locus-forge/locus-pi`. Do not keep both entries. Leave other
-package settings intact.
+## Install the legacy package
 
 For a new installation:
 
 ```bash
-pi install npm:@locus-forge/locus-pi
+pi install npm:@kroffske/locus-pi
 pi list
 ```
 
@@ -48,7 +50,7 @@ For example, this profile loads only the workflow extension and disables the bun
 {
   "packages": [
     {
-      "source": "npm:@locus-forge/locus-pi",
+      "source": "npm:@kroffske/locus-pi",
       "extensions": ["extensions/workflows/index.ts"],
       "skills": []
     }
@@ -72,7 +74,7 @@ Example: keep the Locus agent launcher and use workflows from another package:
 {
   "packages": [
     {
-      "source": "npm:@locus-forge/locus-pi",
+      "source": "npm:@kroffske/locus-pi",
       "extensions": ["extensions/agents/index.ts"],
       "skills": []
     },
@@ -83,14 +85,14 @@ Example: keep the Locus agent launcher and use workflows from another package:
 
 ## Update, scopes, and removal
 
-To update the npm installation, run `pi update npm:@locus-forge/locus-pi` and start
+To update the npm installation, run `pi update npm:@kroffske/locus-pi` and start
 a fresh Pi session. The filter stays in your settings.
 
 The same package identity can be configured globally and for a project. Use `pi list` and `pi config` to inspect the effective source and filters. Remove only the unwanted scope:
 
 ```bash
-pi remove npm:@locus-forge/locus-pi
-pi remove npm:@locus-forge/locus-pi -l
+pi remove npm:@kroffske/locus-pi
+pi remove npm:@kroffske/locus-pi -l
 ```
 
 For a source checkout, run `pi remove .` or `pi remove . -l` from the registered checkout root. Remove the registration before moving or deleting the directory.
