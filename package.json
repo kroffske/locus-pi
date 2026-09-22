@@ -1,12 +1,12 @@
 {
-  "name": "@locus-forge/locus-pi",
-  "version": "0.9.0",
+  "name": "@kroffske/locus-pi",
+  "version": "0.9.1",
   "type": "module",
-  "description": "Pi extension package for agentic software-development workflows.",
+  "description": "Legacy Locus Pi package. Development has moved to https://github.com/locus-forge/locus-pi; this package is no longer maintained.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/locus-forge/locus-pi.git"
+    "url": "git+https://github.com/kroffske/locus-pi.git"
   },
   "homepage": "https://github.com/locus-forge/locus-pi#readme",
   "bugs": {

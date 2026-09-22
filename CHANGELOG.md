@@ -4,6 +4,20 @@ User-visible changes to the public package.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-09-22
+
+### Changed
+
+- Retire `@kroffske/locus-pi` from active maintenance and direct users to
+  [LocusForge](https://github.com/locus-forge/locus-pi). No further updates are
+  planned for the legacy package or repository.
+- Restore the legacy npm identity for this handoff release so its README and
+  description update the existing package. Keep the source repository link on
+  the legacy repository; direct the homepage and issue tracker to LocusForge.
+- Preserve the legacy runtime and installation reference. Migration remains an
+  explicit change to the user's Pi package source, with extension and skill
+  filters retained and no duplicate package loading.
+
 ## [0.9.0] - 2026-09-21
 
 ### Changed

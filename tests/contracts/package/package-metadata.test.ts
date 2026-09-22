@@ -11,15 +11,15 @@ describe("package metadata contract", () => {
     expect(pkg.files.some((file) => file.startsWith("extensions/beta/"))).toBe(false);
   });
 
-  it("binds the MIT package to the clean repository identity", () => {
+  it("keeps the legacy npm identity and directs support to LocusForge", () => {
     const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8")) as {
       name: string;
       packages: { "": { name: string } };
     };
 
-    expect(pkg.name).toBe("@locus-forge/locus-pi");
+    expect(pkg.name).toBe("@kroffske/locus-pi");
     expect(pkg.license).toBe("MIT");
-    expect(pkg.repository.url).toBe("git+https://github.com/locus-forge/locus-pi.git");
+    expect(pkg.repository.url).toBe("git+https://github.com/kroffske/locus-pi.git");
     expect(pkg.homepage).toBe("https://github.com/locus-forge/locus-pi#readme");
     expect(pkg.bugs.url).toBe("https://github.com/locus-forge/locus-pi/issues");
     expect(lock.name).toBe(pkg.name);

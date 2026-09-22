@@ -1,39 +1,36 @@
-# locus-pi
+# locus-pi — moved to LocusForge
 
-`locus-pi` adds agent tools, workflow execution, model controls, and status views to [Pi](https://github.com/earendil-works/pi). The package includes six extensions, curated workflows, and three workflow skills. Named agent profiles stay in your project or home catalog.
+> **Development has moved to [LocusForge](https://github.com/locus-forge/locus-pi).**
+> This repository and the `@kroffske/locus-pi` npm package are retired from active
+> maintenance. No further updates are planned here.
 
-Requires Node.js `>=22.19.0`, Pi `>=0.83.0`, and trusted project and workflow sources.
+Use the [LocusForge repository](https://github.com/locus-forge/locus-pi) for current
+source, installation instructions, documentation, and issues. Its npm package
+name is `@locus-forge/locus-pi`; follow the new repository's instructions for
+availability before changing your installation.
 
-## Install
+Updating `@kroffske/locus-pi` does **not** switch an existing Pi installation to
+LocusForge. When migrating, replace the old package entry in the same global or
+project scope and preserve your extension and skill filters. Do not load both
+packages in one Pi session.
 
-```bash
-pi install npm:@locus-forge/locus-pi
-```
+## Legacy package
 
-Start a new Pi session and try `/workflows list`, then `/workflows run live-smoke`.
+This final handoff release preserves the legacy extensions and workflows. The
+README and npm metadata point readers to LocusForge; the package does not install
+or redirect to the successor automatically.
 
-To load only Workflow and no package skills, replace the existing locus-pi entry in `~/.pi/agent/settings.json` or `.pi/settings.json`. Keep your other package entries:
+The legacy runtime requires Node.js `>=22.19.0`, Pi `>=0.83.0`, and trusted project
+and workflow sources. Extensions and workflows execute with the Pi and Node.js
+host, without a sandbox.
 
-```json
-{
-  "packages": [
-    {
-      "source": "npm:@locus-forge/locus-pi",
-      "extensions": ["extensions/workflows/index.ts"],
-      "skills": []
-    }
-  ]
-}
-```
+## Historical documentation
 
-The example shows the `packages` array; edit only its locus-pi entry in existing settings. The filter limits what Pi loads; it does not reduce the installed npm package. See [Getting started](docs/getting-started.md) for updates, removal, and first-run help.
+These guides describe the legacy package and are retained for existing users:
 
-## Guides
-
+- [Getting started](docs/getting-started.md)
 - [Extensions catalog](docs/extensions.md)
 - [Create workflows](docs/locus-pi-workflows.md) · [Run and inspect workflows](docs/workflows.md)
 - [Workflow reference by topic](docs/workflows/index.md) · [External-agent skill links](skills/README.md)
-
-Extensions and workflow scripts run with the trusted Pi and Node.js host, without a sandbox. Review local workflow sources before running them. Report vulnerabilities through GitHub private vulnerability reporting; use Issues for ordinary defects.
 
 Licensed under the [MIT License](LICENSE).
